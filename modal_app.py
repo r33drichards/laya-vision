@@ -8,6 +8,7 @@
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
+    modal run modal_app.py::prepare_synth [--sources websight,screenqa]  # typed questions from existing datasets -> /data/vqa/synth_<source>
 
 Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
@@ -619,6 +620,43 @@ def prepare_doom_basic(n_train: int = 20000, n_val: int = 2000, eps: float = 0.3
     open(os.path.join(final_dir, "_READY"), "w").close()
     data_vol.commit()
     return meta
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Synthetic typed-question datasets from existing labelled image sets (laya.synth)
+# ---------------------------------------------------------------------------------------------------------
+
+
+@app.function(image=image, cpu=4, memory=16384, timeout=6 * 60 * 60, volumes={"/data": data_vol, "/cache/hf": hf_vol})
+def prepare_synth_source(source: str, n_train: int = 20000, n_val: int = 1000, seed: int = 0, max_side: int = 1024,
+                         val_frac: float = 0.05):
+    """Write /data/vqa/synth_<source>/ from the Hub (one source; see ``prepare_synth``)."""
+    from laya.synth import prepare
+
+    meta = prepare("/data/vqa", source, n_train, n_val, seed, max_side, val_frac)
+    data_vol.commit()
+    return {k: meta[k] for k in ("source", "train", "val", "dropped", "seconds")}
+
+
+@app.local_entrypoint()
+def prepare_synth(sources: str = "", n_train: int = 20000, n_val: int = 1000, seed: int = 0, max_side: int = 1024,
+                  val_frac: float = 0.05):
+    """modal run modal_app.py::prepare_synth [--sources websight,screenqa,...] -- typed questions from existing datasets.
+
+    Each source becomes its own prepared dataset ``synth_<source>`` (so ``finetune_long --datasets`` can mix,
+    cap and evaluate them separately), built in parallel. Default: every source in ``laya.synth.SOURCES``.
+    Images are resized to ``max_side`` on their longest side. Sources without an official val split are
+    hash-split by image with ``val_frac`` going to val.
+    """
+    from laya.synth import SOURCES
+
+    names = [s for s in sources.split(",") if s] or list(SOURCES)
+    unknown = [n for n in names if n not in SOURCES]
+    if unknown:
+        raise SystemExit("unknown sources %s; known: %s" % (unknown, list(SOURCES)))
+    args = [(n, n_train, n_val, seed, max_side, val_frac) for n in names]
+    for meta in prepare_synth_source.starmap(args, return_exceptions=True):
+        print(json.dumps(meta, indent=1, default=repr))
 
 
 @app.function(image=doom_image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})

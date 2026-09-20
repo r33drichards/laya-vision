@@ -56,6 +56,8 @@ modal run modal_app.py::evaluate --run-name all3-3ep/best                       
 
 The training data is written to `laya-datasets:/data/vqa/<name>/{train,val}.jsonl` by the data-prep job on the [`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment) branch.
 
+`modal run modal_app.py::prepare_synth` builds more training sets in the same layout by turning existing labelled datasets (web and mobile screenshots, VQAv2, VizWiz, AVA, NLVR2) into typed questions; see [docs/synthetic-data.md](docs/synthetic-data.md).
+
 ## Playing games
 
 Laya Vision can also act as a game policy: the screen is the image and the options are the game's buttons. `examples/atari_live.py` and `examples/vizdoom_live.py` let you watch it play in a local window.
