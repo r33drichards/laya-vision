@@ -62,6 +62,21 @@ Laya Vision can also act as a game policy: the screen is the image and the optio
 
 The released checkpoint doesn't know any games; in ViZDoom `basic` it only ever shoots. Trained for 7 minutes on 20,000 frames auto-labelled by a scripted expert, it plays `basic` at expert level: mean reward +75.4 and 100% kills over 50 unseen episodes, against the expert's +75.8. See [docs/game-training.md](docs/game-training.md) for the pipeline, results and training-data ideas.
 
+## Solving CAPTCHAs
+
+[Open CaptchaWorld](https://arxiv.org/abs/2505.24878) benchmarks browser agents on interactive CAPTCHAs. This model can't click or drag, so `laya/captcha.py` re-expresses 13 of its 20 types as typed decisions — 300 puzzles, 3,121 decisions — graded offline against the benchmark's own ground truth.
+
+```bash
+python examples/captcha_eval.py --data /path/to/OpenCaptchaWorld/captcha_data
+```
+
+The released checkpoint scores **18.3% pass@1 against a 11.3% chance baseline**, but that average hides a sharp split:
+
+- **One image, one question: it works.** `Select_Animal` ("pick a fox" over a 2x3 grid) is **96.7%, AUC 0.992** — the training distribution, since a single cropped cell plus a yes/no question is a VQAv2 question.
+- **Two images to compare: completely blind.** Every reference-and-candidate type sits at AUC 0.43–0.54 while answering "yes" to ~100% of candidates. A-OKVQA, ScienceQA and VQAv2 are all single-image QA, so this capability was never trained.
+
+A shuffled-image control (`--control shuffle`) confirms the split: the three types with signal lose it (macro-AUC 0.590 → 0.513), while the comparison types don't move, because they were never using the images. See [docs/captcha-benchmark.md](docs/captcha-benchmark.md) for the full table, the six coordinate-click types that are out of scope, and what closing the gap would take.
+
 ## What didn't work
 
 The branch [`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment) tried to keep Laya's ModernBERT encoder and feed it SigLIP2 image patches through a learned projector. It kept text-only answers bit-identical, but in 5 training runs it never learned to use the image. Every run collapsed to uniform predictions, and accuracy with shuffled images matched accuracy with the real ones. Details are in that branch's `laya/vision_train.py` and commit history.
