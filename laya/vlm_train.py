@@ -1,8 +1,8 @@
 """Training sketch for the SmolVLM-backed decision model (``laya.vlm``).
 
-Fine-tunes on multiple-choice VQA with the same objective as the text model's notebooks: a soft
-cross-entropy term plus a proper-scoring-rule policy-gradient term over noisy logits (``proper_reward``).
-Options are shuffled per example so the causal backbone cannot learn a position prior.
+Fine-tunes on multiple-choice VQA with the RLCD objective: a policy gradient on strictly proper scoring
+rules (``proper_reward``) over noisy logits, and no cross-entropy term. Options are shuffled per example so
+the causal backbone cannot learn a position prior.
 
 Data sources (adapters take one HF ``datasets`` row each):
   * A-OKVQA (``HuggingFaceM4/A-OKVQA``)      -> ``choice``
@@ -137,8 +137,33 @@ def make_item(
 # ---------------------------------------------------------------------------------------------------------
 
 
-def vlm_loss(logits, target, qtype, mask, sigma: float = 0.3, group_size: int = 4, w_ce: float = 1.0):
-    """Proper-scoring-rule policy gradient over noisy logits + soft cross-entropy (as in the text notebooks)."""
+SIGMA_START, SIGMA_END = 1.0, 0.3  # exploration noise, wide early and narrow late
+
+
+def sigma_at(progress: float, sigma: float = SIGMA_START, sigma_end: float = SIGMA_END) -> float:
+    """Exploration noise at ``progress`` in [0, 1]: linear decay from ``sigma`` to ``sigma_end``, clamped.
+
+    Wide noise early samples far enough across the simplex to find the reward's shape; narrow noise late makes
+    the same estimator a fine-grained local one.
+    """
+    return sigma + (sigma_end - sigma) * min(1.0, max(0.0, progress))
+
+
+def vlm_loss(logits, target, qtype, mask, sigma: float = SIGMA_START, group_size: int = 8, w_ce: float = 0.0,
+             w_sph: float = 0.5, w_rps: float = 1.0):
+    """RLCD: a policy gradient on strictly proper scoring rules, with no cross-entropy term.
+
+    ``group_size`` noisy copies of the logits are drawn (Gaussian, scale ``sigma``, projected to zero mean
+    across the valid options), each is scored by ``proper_reward`` (log score + ``w_sph`` x spherical, minus
+    the ranked probability score on ordinal questions), and the Gaussian policy mean -- the model's logits --
+    is pushed toward the copies that beat the group's own baseline. The gradient is therefore never computed
+    from the reward, only estimated from it, which is what lets the reward be a scoring rule rather than a
+    differentiable loss.
+
+    Defaults are the RLCD design: ``w_sph=0.5``, ``group_size=8``, and ``sigma`` annealed 1.0 -> 0.3 by the
+    caller (``sigma_at``). ``w_ce`` > 0 adds a soft cross-entropy term on top; it is off by default so the
+    objective stays a proper scoring rule end to end. Returns ``(loss, mean reward)``.
+    """
     logits = logits.float()
     k = mask.sum(-1, keepdim=True).float()
     eps = torch.randn((group_size,) + logits.shape, device=logits.device) * sigma * mask
@@ -146,13 +171,14 @@ def vlm_loss(logits, target, qtype, mask, sigma: float = 0.3, group_size: int = 
     z = logits.detach().unsqueeze(0) + eps
     q = torch.softmax(z.masked_fill(~mask, -1e4), -1)
     with torch.no_grad():
-        r = proper_reward(q, target.unsqueeze(0), qtype, mask, w_sph=0.75, w_rps=1.0)
+        r = proper_reward(q, target.unsqueeze(0), qtype, mask, w_sph=w_sph, w_rps=w_rps)
         adv = r - r.mean(0, keepdim=True)
         adv = adv / (adv.std() + 1e-6)
     logp = -(((z - logits.unsqueeze(0)) ** 2) * mask).sum(-1) / (2 * sigma**2)
-    loss_rl = -(adv * logp).mean()
-    loss_ce = -(target * torch.log_softmax(logits.masked_fill(~mask, -1e4), -1)).sum(-1).mean()
-    return loss_rl + w_ce * loss_ce, r.mean()
+    loss = -(adv * logp).mean()
+    if w_ce:
+        loss = loss - w_ce * (target * torch.log_softmax(logits.masked_fill(~mask, -1e4), -1)).sum(-1).mean()
+    return loss, r.mean()
 
 
 def _to(b: Dict, device, dtype) -> Dict:
@@ -230,7 +256,11 @@ def train(
     n_last: int = 4,
     lr_head: float = 1e-4,
     lr_backbone: float = 2e-5,
-    sigma: float = 0.3,
+    sigma: float = SIGMA_START,
+    sigma_end: float = SIGMA_END,
+    group_size: int = 8,
+    w_sph: float = 0.5,
+    w_ce: float = 0.0,
     device: Optional[str] = None,
     seed: int = 0,
     log_every: int = 1,
@@ -247,6 +277,14 @@ def train(
     bf16 autocast on CUDA. Returns per-step losses; ``stats`` (if given) receives samples per dataset, steps/s
     and the fraction of training time spent waiting on the data loader (both excluding eval time).
     The LR follows linear warmup then cosine decay to 10%, on whichever of step or wall-clock progress is further.
+
+    Objective (``vlm_loss``): RLCD, a policy gradient on proper scoring rules. ``sigma`` decays to ``sigma_end``
+    over the same progress measure as the LR, ``group_size`` sets how many noisy copies are scored per step and
+    ``w_sph`` the spherical term. ``w_ce`` > 0 re-adds soft cross-entropy and defaults to off.
+
+    The log line carries ``conf``, the mean probability of the model's own top option. A proper scoring rule is
+    maximised at the target, so ``conf`` should settle near the targets' own mean top probability; if it climbs
+    toward 1.0 while accuracy does not, the run is over-sharpening and calibration is being spent.
     """
     device = torch.device(device or next(model.parameters()).device)
     torch.manual_seed(seed)
@@ -290,7 +328,8 @@ def train(
         b = _to(batch, device, dtype)
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
             logits, act = _forward(model, b)
-        loss, reward = vlm_loss(logits, b["target"], b["qtype"], b["marker_mask"], sigma=sigma)
+        loss, reward = vlm_loss(logits, b["target"], b["qtype"], b["marker_mask"], sigma=sigma_at(progress, sigma, sigma_end),
+                                group_size=group_size, w_ce=w_ce, w_sph=w_sph)
         loss = loss + 0.0 * act.float().sum()
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -299,8 +338,12 @@ def train(
         losses.append(loss.item())
         if log_every and step % log_every == 0:
             recent = losses[-log_every:]
-            print("step %d | %.1f min | loss %.4f (avg %.4f) | reward %.3f | lr %.2e | data wait %.0f%%"
-                  % (step, (time.time() - t0) / 60, losses[-1], sum(recent) / len(recent), reward.item(), groups[0]["lr"],
+            with torch.no_grad():
+                conf = torch.softmax(logits.float().masked_fill(~b["marker_mask"], -1e4), -1).max(-1).values.mean()
+            print("step %d | %.1f min | loss %.4f (avg %.4f) | reward %.3f | sigma %.2f | conf %.3f | lr %.2e | "
+                  "data wait %.0f%%"
+                  % (step, (time.time() - t0) / 60, losses[-1], sum(recent) / len(recent), reward.item(),
+                     sigma_at(progress, sigma, sigma_end), conf.item(), groups[0]["lr"],
                      100 * wait / max(1e-6, time.time() - t0)), flush=True)
         step += 1
         if eval_fn is not None and eval_every and step % eval_every == 0:
@@ -507,6 +550,11 @@ def main(argv: Optional[Iterable[str]] = None):
     ap.add_argument("--batch-size", type=int, default=2)
     ap.add_argument("--freeze", choices=["head", "last_n", "full"], default="head")
     ap.add_argument("--n-last", type=int, default=4)
+    ap.add_argument("--sigma", type=float, default=SIGMA_START, help="exploration noise at the start of training")
+    ap.add_argument("--sigma-end", type=float, default=SIGMA_END, help="exploration noise at the end")
+    ap.add_argument("--group-size", type=int, default=8, help="noisy logit copies scored per step")
+    ap.add_argument("--w-sph", type=float, default=0.5, help="weight of the spherical score in the reward")
+    ap.add_argument("--w-ce", type=float, default=0.0, help="weight of the soft cross-entropy add-on (0 = pure RLCD)")
     ap.add_argument("--device", default=None)
     ap.add_argument("--out", default=None)
     args = ap.parse_args(argv)
@@ -519,7 +567,8 @@ def main(argv: Optional[Iterable[str]] = None):
         ap.error("no training data: pass --synthetic and/or --dataset")
     losses = train(
         agent.model, agent.processor, examples, steps=args.steps, batch_size=args.batch_size,
-        freeze=args.freeze, n_last=args.n_last, device=str(agent.device),
+        freeze=args.freeze, n_last=args.n_last, device=str(agent.device), sigma=args.sigma,
+        sigma_end=args.sigma_end, group_size=args.group_size, w_sph=args.w_sph, w_ce=args.w_ce,
     )
     print("final loss %.4f (finite=%s)" % (losses[-1], math.isfinite(losses[-1])))
     if args.out:

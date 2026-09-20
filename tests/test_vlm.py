@@ -1,4 +1,5 @@
 """Tests for the experimental SmolVLM-backed decision model. Downloads HuggingFaceTB/SmolVLM-256M-Instruct (~0.5 GB)."""
+import inspect
 import json
 import math
 import random
@@ -8,9 +9,10 @@ import pytest
 import torch
 from PIL import Image
 
-from laya.common import render_options
+from laya.common import QTYPES, proper_reward, render_options
 from laya.vlm import OPTION_BULLET, OPTION_END, VLMAgent, build_vlm_inputs, split_state
-from laya.vlm_train import collect_logits, fit_temperatures_from, load_jsonl_examples, metrics_from, synthetic_examples, train
+from laya.vlm_train import (collect_logits, fit_temperatures_from, load_jsonl_examples, metrics_from,
+                            sigma_at, synthetic_examples, train, vlm_loss)
 
 DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
@@ -181,3 +183,83 @@ def test_jsonl_dataset_and_eval(agent, tmp_path):
     m = metrics_from(records, fit_temperatures_from(records))
     assert m["all"]["n"] == m["toyvqa"]["n"] == len(examples)
     assert 0.0 <= m["all"]["acc"] <= 1.0 and 0.0 <= m["all"]["ece"] <= 1.0 and math.isfinite(m["all"]["nll"])
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Objective: RLCD (policy gradient on proper scoring rules), no cross-entropy
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _loss_batch(n=8, k=4, seed=0):
+    g = torch.Generator().manual_seed(seed)
+    mask = torch.ones(n, k, dtype=torch.bool)
+    target = torch.softmax(torch.randn(n, k, generator=g), -1)
+    qtype = torch.full((n,), QTYPES["choice"])
+    return torch.randn(n, k, generator=g), target, qtype, mask
+
+
+def _grad(logits, target, qtype, mask, noise_seed=1234, **kw):
+    x = logits.detach().clone().requires_grad_(True)
+    torch.manual_seed(noise_seed)  # the same exploration noise for every call
+    loss, _ = vlm_loss(x, target, qtype, mask, **kw)
+    loss.backward()
+    return x.grad.clone()
+
+
+def test_objective_defaults_match_the_rlcd_design():
+    """Pure policy gradient: no cross-entropy, spherical weight 0.5, group of 8, sigma starting at 1.0."""
+    d = inspect.signature(vlm_loss).parameters
+    assert d["w_ce"].default == 0.0
+    assert d["w_sph"].default == 0.5
+    assert d["group_size"].default == 8
+    assert d["sigma"].default == 1.0
+
+
+def test_default_objective_carries_no_cross_entropy_gradient():
+    """w_ce is a pure add-on: turning it up adds exactly the soft-cross-entropy gradient and nothing else,
+    so at the default w_ce=0 none of it is present."""
+    logits, target, qtype, mask = _loss_batch()
+    g0 = _grad(logits, target, qtype, mask)                 # defaults -> RLCD alone
+    g1 = _grad(logits, target, qtype, mask, w_ce=1.0)
+    ce = (torch.softmax(logits, -1) - target) / logits.shape[0]
+    assert torch.allclose(g1 - g0, ce, atol=1e-6)
+    assert not torch.allclose(g0, ce, atol=1e-3)
+
+
+def test_reward_uses_the_canonical_spherical_weight():
+    """vlm_loss must not silently override proper_reward's w_sph; 0.5 is the designed weight."""
+    logits, target, qtype, mask = _loss_batch()
+    torch.manual_seed(7)
+    _, r_default = vlm_loss(logits, target, qtype, mask)
+    torch.manual_seed(7)
+    _, r_explicit = vlm_loss(logits, target, qtype, mask, w_sph=0.5)
+    torch.manual_seed(7)
+    _, r_other = vlm_loss(logits, target, qtype, mask, w_sph=0.75)
+    assert torch.allclose(r_default, r_explicit)
+    assert not torch.allclose(r_default, r_other)
+
+
+def test_sigma_anneals_from_one_to_three_tenths():
+    """Exploration noise decays over training progress and is clamped at both ends."""
+    assert sigma_at(0.0) == pytest.approx(1.0)
+    assert sigma_at(0.5) == pytest.approx(0.65)
+    assert sigma_at(1.0) == pytest.approx(0.3)
+    assert sigma_at(1.7) == pytest.approx(0.3)
+    assert sigma_at(-0.2) == pytest.approx(1.0)
+    assert sigma_at(0.5, sigma=0.4, sigma_end=0.4) == pytest.approx(0.4)
+
+
+def test_policy_gradient_climbs_the_reward():
+    """The estimator must actually be an ascent direction on proper_reward: averaged over draws, a step
+    along -g raises the mean reward."""
+    logits, target, qtype, mask = _loss_batch(n=64, seed=3)
+    g = torch.zeros_like(logits)
+    for s in range(64):
+        g += _grad(logits, target, qtype, mask, noise_seed=s)
+    g /= 64
+
+    def mean_reward(z):
+        q = torch.softmax(z, -1)
+        return float(proper_reward(q, target, qtype, mask, w_sph=0.5, w_rps=1.0).mean())
+
+    assert mean_reward(logits - 0.5 * g / g.norm() * logits.numel() ** 0.5) > mean_reward(logits)

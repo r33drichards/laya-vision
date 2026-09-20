@@ -70,7 +70,7 @@ Scores are on the full validation splits. "Calibrated" uses the per-type tempera
 
 - **Backbone:** SmolVLM-256M-Instruct. The vision tower is frozen, and the language model and decision head are trained, about 150M parameters.
 - **How options are read:** the question and state come first and the options are listed last. Each option is scored from the hidden state at the end of its own line.
-- **Loss:** soft cross-entropy plus a strictly proper scoring rule (log + spherical), with the option order shuffled at random.
+- **Loss:** RLCD \u2014 a policy gradient on strictly proper scoring rules (log + 0.5 \u00d7 spherical, minus the ranked probability score on ordinal questions), with no cross-entropy term. Eight noisy copies of the logits are scored per step and exploration noise decays from 1.0 to 0.3. The option order is shuffled at random.
 - **Data:**
   - A-OKVQA: 17k questions, `choice`
   - ScienceQA image subset: 6k questions, `choice`

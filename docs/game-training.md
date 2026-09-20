@@ -19,7 +19,7 @@ The released checkpoint was trained on photo and diagram questions, not games:
 Run an expert in the emulator and save, for every frame, the full-colour screen and the expert's action. This beats public datasets because:
 
 - The inputs match what the model sees live: same emulator settings, colours and resolution. Most public Atari data is 84×84 grayscale.
-- An expert *policy* gives a probability over actions. Laya's loss (soft cross-entropy plus a proper scoring rule) accepts soft targets, so the model learns "RIGHT 70%, ATTACK 25%" and keeps meaningful confidence.
+- An expert *policy* gives a probability over actions. Laya's reward is a strictly proper scoring rule, which is maximised only by reporting the target distribution itself, so the model learns "RIGHT 70%, ATTACK 25%" and keeps meaningful confidence.
 - You can make as much as you want.
 
 Kinds of expert:

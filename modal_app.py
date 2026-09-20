@@ -141,6 +141,11 @@ def finetune(
     batch_size: int = 16,
     lr_head: float = 1e-4,
     lr_backbone: float = 2e-5,
+    sigma: float = 1.0,
+    sigma_end: float = 0.3,
+    group_size: int = 8,
+    w_sph: float = 0.5,
+    w_ce: float = 0.0,
     train_split: str = "train",
     val_split: str = "val",
     max_train: int = 0,
@@ -184,7 +189,8 @@ def finetune(
         small_val += [ex for ex in val_ex if ex["dataset"] == name][:200]
 
     log = {"run": run_name, "args": dict(datasets=datasets, minutes=minutes, freeze=freeze, n_last=n_last, batch_size=batch_size,
-                                         lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train, max_val=max_val, val_caps=caps),
+                                         lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train, max_val=max_val, val_caps=caps,
+                                         objective=dict(sigma=sigma, sigma_end=sigma_end, group_size=group_size, w_sph=w_sph, w_ce=w_ce)),
            "evals": []}
     base = metrics_from(collect_logits(model, proc, small_val, **ev_kw))
     print("[eval step 0, untrained head] " + format_metrics(base), flush=True)
@@ -199,6 +205,7 @@ def finetune(
         model, proc, train_ex, steps=10**9, batch_size=batch_size, freeze=freeze, n_last=n_last,
         lr_head=lr_head, lr_backbone=lr_backbone, device="cuda", log_every=50, max_minutes=minutes,
         num_workers=num_workers, warmup=100, eval_fn=eval_fn, eval_every=eval_every,
+        sigma=sigma, sigma_end=sigma_end, group_size=group_size, w_sph=w_sph, w_ce=w_ce,
     )
     log["steps"], log["examples_seen"] = len(losses), len(losses) * batch_size
     log["loss_first50"], log["loss_last50"] = sum(losses[:50]) / min(50, len(losses)), sum(losses[-50:]) / min(50, len(losses))
@@ -240,6 +247,11 @@ def finetune_long(
     batch_size: int = 32,
     lr_head: float = 1e-4,
     lr_backbone: float = 2e-5,
+    sigma: float = 1.0,
+    sigma_end: float = 0.3,
+    group_size: int = 8,
+    w_sph: float = 0.5,
+    w_ce: float = 0.0,
     lr_ref_batch: int = 16,
     warmup_frac: float = 0.03,
     evals_per_epoch: float = 2.0,
@@ -304,7 +316,8 @@ def finetune_long(
     ev_kw = dict(batch_size=64, num_workers=num_workers)
     log = {"run": run_name, "args": dict(datasets=datasets, epochs=epochs, max_minutes=max_minutes, batch_size=batch_size,
                                          lr_head=lr_h, lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
-                                         max_passes=max_passes, n_calib=n_calib, train_eval_n=train_eval_n),
+                                         max_passes=max_passes, n_calib=n_calib, train_eval_n=train_eval_n,
+                                         objective=dict(sigma=sigma, sigma_end=sigma_end, group_size=group_size, w_sph=w_sph, w_ce=w_ce)),
            "evals": []}
     best = {"score": -1.0, "step": None, "state": None}
 
@@ -340,6 +353,7 @@ def finetune_long(
         model, proc, train_ex, steps=steps, batch_size=batch_size, freeze="full", lr_head=lr_h, lr_backbone=lr_b,
         device="cuda", log_every=100, max_minutes=max_minutes, num_workers=num_workers, warmup=warmup,
         eval_fn=eval_fn, eval_every=eval_every, max_passes=max_passes or None, stats=stats,
+        sigma=sigma, sigma_end=sigma_end, group_size=group_size, w_sph=w_sph, w_ce=w_ce,
     )
     if not log["evals"] or log["evals"][-1]["step"] != stats["steps"]:
         eval_fn(stats["steps"])
