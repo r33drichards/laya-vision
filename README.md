@@ -56,6 +56,19 @@ modal run modal_app.py::evaluate --run-name all3-3ep/best                       
 
 The training data is written to `laya-datasets:/data/vqa/<name>/{train,val}.jsonl` by the data-prep job on the [`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment) branch.
 
+### Serve on Modal
+
+`modal_serve.py` puts a saved run behind an HTTP API (`laya/serve.py`): one `POST /predict` that takes one or more images as multipart form data, plus `/health`, `/docs` and `/openapi.json`. The checkpoint loads once per container and the container stays warm for five minutes after its last request.
+
+```bash
+modal deploy modal_serve.py                                     # stable URL; LAYA_RUN=modernvbert/mvb-3ep/best to pick a run
+curl -X POST "$URL/predict" -F images=@a.jpg -F images=@b.jpg \
+     -F questions='{"animal": {"type": "choice", "instructions": "What animal is this?", "criteria": ["cat", "dog", "none"]},
+                    "outdoors": {"type": "noul", "instructions": "Taken outdoors?"}}'
+```
+
+Each image is answered on its own (one result per image, in order); `-F joint=true` answers once over all of them as a single multi-image state. Images are decoded one at a time and JPEGs at reduced scale, since the model only sees a 512-pixel tile. `python -m laya.serve --openapi > openapi.json` writes the schema without loading a model, for client generators such as `openapi-python-client` or `openapi-typescript`; `python -m laya.serve --model <dir-or-hub-id>` serves the same API locally with uvicorn (`pip install -e ".[serve]"`).
+
 ## Playing games
 
 Laya Vision can also act as a game policy: the screen is the image and the options are the game's buttons. `examples/atari_live.py` and `examples/vizdoom_live.py` let you watch it play in a local window.
