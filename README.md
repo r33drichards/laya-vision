@@ -85,6 +85,36 @@ modal run modal_app.py::evaluate --run-name modernvbert/mvb-3ep/best
 
 `finetune_long` keeps everything else identical to the SmolVLM run above (data, objective, schedule, evaluation, calibration), which is what makes the two comparable. The ModernVBERT run saves under `/ckpt/modernvbert/`, so it can reuse a run name.
 
+## Post-training on The Cauldron
+
+[The Cauldron](https://huggingface.co/datasets/HuggingFaceM4/the_cauldron) is the 50-subset instruction mixture both SmolVLM and ModernVBERT were aligned on. Laya answers typed questions, so `laya/cauldron.py` keeps only the turns whose answer is a closed choice and maps them onto Laya's types:
+
+| Cauldron format | Subsets | Laya type |
+|---|---|---|
+| `Question: ... Choices: A. ... B. ...` → `Answer: B` | ai2d, iconqa, intergps, scienceqa, tqa, visual7w | `choice` (a ScienceQA lecture becomes the state's context) |
+| `Options: a, b, c, d.` → `Cab.` | aokvqa | `choice` |
+| `... Answer yes or no.` → `Yes.` | figureqa, hateful_memes, nlvr2 (two images), vsr, vqarad, plus the yes/no share of clevr, dvqa, mapqa, ocrvqa, vqav2, chartqa | `noul` |
+| `Which figure should complete the logical sequence?` → `B` | raven | `choice` over the letters A–H |
+
+Numbers, free-form answers, captions and code are skipped. The prep job streams each subset, keeps up to 10,000 usable rows with at most 4 questions each, holds out 5% of rows as `val`, and saves the images as JPEG at 1024 pixels on the long side:
+
+```bash
+modal run modal_app.py::prepare_cauldron                    # all 19 subsets, one container each -> /data/vqa/cauldron_<subset>
+modal run modal_app.py::prepare_cauldron --subsets ai2d,vsr --max-rows 2000
+```
+
+`finetune` and `finetune_long` default to these sets. The sampler draws subsets equally, so cap the passes over the small ones, and score the official A-OKVQA / ScienceQA / VQAv2 val splits alongside the Cauldron holdouts to stay comparable with the table above:
+
+```bash
+modal run --detach modal_app.py::finetune_long --run-name cauldron-3ep --max-passes 4 \
+    --val-datasets aokvqa,scienceqa,vqav2_yesno,cauldron_ai2d,cauldron_aokvqa,cauldron_nlvr2,cauldron_vsr
+modal run --detach modal_app.py::finetune_long --run-name cauldron-3ep --max-passes 4 --backbone ModernVBERT/modernvbert \
+    --val-datasets aokvqa,scienceqa,vqav2_yesno,cauldron_ai2d,cauldron_aokvqa,cauldron_nlvr2,cauldron_vsr
+modal run modal_app.py::evaluate --run-name cauldron-3ep/best    # every prepared val set
+```
+
+The Cauldron is train-only upstream, so its `aokvqa`, `scienceqa` and `vqav2` rows are the official train splits and do not overlap those val splits. The original three sets remain available with `--datasets aokvqa,scienceqa,vqav2_yesno`.
+
 **Status: no trained ModernVBERT checkpoint yet.** ModernVBERT was pretrained and evaluated for document retrieval, and its paper reports no VQA numbers, so whether it reaches the SmolVLM results above is the open question this experiment answers. It needs `transformers >= 5.3` (the Modal jobs and the Space pin 5.17).
 
 ## What didn't work

@@ -354,6 +354,11 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
     n_img = max(it.get("n_images", 0) for it in items)
     if with_pixels and n_img > 0 and any(it.get("raw_images") is not None for it in items):
         ref = next(it["raw_images"] for it in items if it.get("raw_images") is not None)
+        shapes = {tuple(it["raw_images"].shape[1:]) for it in items if it.get("raw_images") is not None}
+        if len(shapes) != 1:
+            raise ValueError("the device-side preprocessing path (preprocess='gpu') stacks raw frames, so they must "
+                             "all be the same size, got %s; photos of mixed sizes need preprocess='processor'"
+                             % sorted(shapes))
         raw = torch.zeros((n, n_img) + tuple(ref.shape[1:]), dtype=torch.uint8)
         imask = torch.zeros((n, n_img), dtype=torch.bool)
         for i, it in enumerate(items):

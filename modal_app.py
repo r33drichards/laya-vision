@@ -6,6 +6,7 @@
     modal run --detach modal_app.py::finetune_long   # ~3-epoch A100 run with per-epoch eval + best checkpoint
     modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep
                                                      # the same run on the bidirectional backbone
+    modal run modal_app.py::prepare_cauldron          # The Cauldron's closed-form subsets -> /data/vqa/cauldron_<subset>
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
@@ -15,6 +16,10 @@ Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
     laya-datasets     -> /data       (read-only; /data/vqa/<name>/{<split>.jsonl, images/, _READY})
     laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/ and /ckpt/modernvbert/)
+
+Data: the fine-tune jobs default to The Cauldron subsets (``CAULDRON_DATASETS``, written by ``prepare_cauldron``);
+the original three VQA sets (``VQA_DATASETS``, official val splits, the README table) stay available with
+``--datasets aokvqa,scienceqa,vqav2_yesno`` and as ``--val-datasets`` for a Cauldron-trained model.
 
 Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
 (``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``--init-from``)
@@ -60,7 +65,12 @@ image = _with_local_code(base_image)
 
 BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 MODERNVBERT = "ModernVBERT/modernvbert"
-DATASETS = ("aokvqa", "scienceqa", "vqav2_yesno")
+VQA_DATASETS = ("aokvqa", "scienceqa", "vqav2_yesno")  # the original post-training sets, official val splits
+CAULDRON_SUBSETS = ("ai2d", "aokvqa", "iconqa", "intergps", "scienceqa", "tqa", "visual7w", "raven",
+                    "figureqa", "hateful_memes", "nlvr2", "vsr", "vqarad",
+                    "clevr", "dvqa", "mapqa", "ocrvqa", "vqav2", "chartqa")  # see laya/cauldron.py
+CAULDRON_DATASETS = tuple("cauldron_" + s for s in CAULDRON_SUBSETS)
+DATASETS = CAULDRON_DATASETS
 CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
 
@@ -128,24 +138,36 @@ def _load_split(name: str, split: str, limit):
     return load_jsonl_examples("/data/vqa", name, split, limit=limit)
 
 
-def _load_data(datasets: str, train_split: str, val_split: str, n_calib: int, max_train: int, max_val: int, caps: dict):
+def _ready(names: str):
+    out = []
+    for name in [d for d in names.split(",") if d]:
+        if os.path.exists("/data/vqa/%s/_READY" % name):
+            out.append(name)
+        else:
+            print("dataset %s not ready (no _READY); skipping" % name)
+    return out
+
+
+def _load_data(datasets: str, train_split: str, val_split: str, n_calib: int, max_train: int, max_val: int, caps: dict,
+               val_datasets: str = ""):
     """(train, calib, val) examples. The LAST ``n_calib`` train records per dataset (file order) are held out of
     training for temperature fitting, as in the SigLIP-projector runs (runs before commit 2651641 held out a seeded
-    random 300 instead)."""
+    random 300 instead). ``val_datasets`` scores different sets than were trained on (default: the same)."""
     data_vol.reload()
     train_ex, calib_ex, val_ex = [], [], []
-    for name in [d for d in datasets.split(",") if d]:
-        if not os.path.exists("/data/vqa/%s/_READY" % name):
-            print("dataset %s not ready (no _READY); skipping" % name)
-            continue
+    for name in _ready(datasets):
         tr = _load_split(name, train_split, max_train + n_calib if max_train else 0)
         calib_ex += tr[-n_calib:]
         train_ex += tr[:-n_calib]
+        print("dataset %s: %d train, %d calib" % (name, len(tr) - n_calib, min(n_calib, len(tr))))
+    for name in _ready(val_datasets or datasets):
         va = _load_split(name, val_split, caps.get(name, max_val) or 0)
         val_ex += va
-        print("dataset %s: %d train, %d calib, %d val" % (name, len(tr) - n_calib, min(n_calib, len(tr)), len(va)))
+        print("dataset %s: %d val" % (name, len(va)))
     if not train_ex:
         raise SystemExit("no training data (datasets not ready)")
+    if not val_ex:
+        raise SystemExit("no validation data (datasets not ready)")
     return train_ex, calib_ex, val_ex
 
 
@@ -176,12 +198,17 @@ def finetune(
     synthetic: bool = False,
     run_name: str = "",
     backbone: str = BACKBONE,
+    val_datasets: str = "",
+    preprocess: str = "processor",
 ):
     """Short fine-tune on the prepared VQA sets; logs loss and held-out accuracy / ECE, saves to
     ``<backbone root>/<run>`` (/ckpt/smolvlm or /ckpt/modernvbert).
 
     ``max_train`` / ``max_val`` = 0 means the whole split; otherwise the first N records in file order.
-    ``val_caps`` overrides the val cap per dataset, e.g. ``"vqav2_yesno=1000"``.
+    ``val_caps`` overrides the val cap per dataset, e.g. ``"vqav2_yesno=1000"``. ``preprocess`` is the image
+    path recorded in the checkpoint: ``"processor"`` (the Hugging Face processor, what the released model
+    used) for photos of mixed sizes; the device-side ``"gpu"`` path stacks raw frames and needs them all the
+    same size, so it is for game frames (``modal_atari_train.py``).
     """
     import torch
 
@@ -199,10 +226,10 @@ def finetune(
         calib_ex = [dict(ex, dataset="synthetic") for ex in synthetic_examples(16, seed=2)]
         val_ex = [dict(ex, dataset="synthetic") for ex in synthetic_examples(32, seed=1)]
     else:
-        train_ex, calib_ex, val_ex = _load_data(datasets, train_split, val_split, n_calib, max_train, max_val, caps)
+        train_ex, calib_ex, val_ex = _load_data(datasets, train_split, val_split, n_calib, max_train, max_val, caps, val_datasets)
 
-    agent = VLMAgent(backbone=backbone, device="cuda")
-    print("backbone %s, readout %s" % (backbone, agent.model.readout))
+    agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess)
+    print("backbone %s, readout %s, preprocess %s" % (backbone, agent.model.readout, agent.prep.backend))
     hf_vol.commit()
     model, proc = agent.model, agent.processor
     ev_kw = dict(batch_size=32, num_workers=num_workers)
@@ -210,7 +237,8 @@ def finetune(
     for name in sorted({ex["dataset"] for ex in val_ex}):
         small_val += [ex for ex in val_ex if ex["dataset"] == name][:200]
 
-    log = {"run": run_name, "args": dict(backbone=backbone, datasets=datasets, minutes=minutes, freeze=freeze, n_last=n_last,
+    log = {"run": run_name, "args": dict(backbone=backbone, datasets=datasets, val_datasets=val_datasets or datasets,
+                                         preprocess=preprocess, minutes=minutes, freeze=freeze, n_last=n_last,
                                          batch_size=batch_size, lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train,
                                          max_val=max_val, val_caps=caps),
            "evals": []}
@@ -278,6 +306,8 @@ def finetune_long(
     run_name: str = "all3-3ep",
     init_from: str = "",
     backbone: str = BACKBONE,
+    val_datasets: str = "",
+    preprocess: str = "processor",
 ):
     """Multi-epoch fine-tune (vision tower frozen) with per-epoch train/val tracking and best-checkpoint keeping.
 
@@ -296,6 +326,10 @@ def finetune_long(
       (bidirectional, ``[MASK]`` readout). The run is saved under that backbone's root, so the two can share
       a ``run_name``. Everything else, data, objective, schedule and evaluation, is identical, which is what
       makes the two comparable.
+    * ``datasets`` defaults to The Cauldron subsets; ``val_datasets`` can score other sets, e.g. the official
+      A-OKVQA / ScienceQA / VQAv2 val splits of the README table, on a Cauldron-trained model. With many
+      subsets of very different sizes, set ``max_passes`` (the sampler draws subsets equally).
+    * ``preprocess``: see ``finetune``.
     """
     import math
 
@@ -308,8 +342,9 @@ def finetune_long(
     t_start = time.time()
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     out_dir = os.path.join(_ckpt_root(backbone), run_name)
-    train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, 0, 0, {})
+    train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, 0, 0, {}, val_datasets)
     names = sorted({ex["dataset"] for ex in train_ex})
+    val_names = sorted({ex["dataset"] for ex in val_ex})
     train_eval = []
     for name in names:
         train_eval += [ex for ex in train_ex if ex["dataset"] == name][:train_eval_n]
@@ -330,13 +365,14 @@ def finetune_long(
         agent = VLMAgent(_ckpt_path(init_from), device="cuda")
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
-        agent = VLMAgent(backbone=backbone, device="cuda")
-    print("backbone %s, readout %s" % (agent.cfg["backbone"], agent.model.readout))
+        agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess)
+    print("backbone %s, readout %s, preprocess %s" % (agent.cfg["backbone"], agent.model.readout, agent.prep.backend))
     init_temps = list(agent.temperature)
     hf_vol.commit()
     model, proc = agent.model, agent.processor
     ev_kw = dict(batch_size=64, num_workers=num_workers)
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
+                                         val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
                                          epochs=epochs, max_minutes=max_minutes, batch_size=batch_size, lr_head=lr_h,
                                          lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
                                          max_passes=max_passes, n_calib=n_calib, train_eval_n=train_eval_n),
@@ -352,14 +388,14 @@ def finetune_long(
         te = time.time()
         val_m = metrics_from(collect_logits(model, proc, val_ex, **ev_kw))
         tr_m = metrics_from(collect_logits(model, proc, train_eval, **ev_kw))
-        score = sum(val_m[n]["acc"] for n in names) / len(names)
+        score = sum(val_m[n]["acc"] for n in val_names) / len(val_names)
         row = {"step": step, "epoch": round(step * batch_size / len(train_ex), 2), "mean_val_acc": score,
                "val": val_m, "train": tr_m}
         log["evals"].append(row)
-        print("[eval step %d, epoch %.2f] mean val acc %.4f | %s" % (step, row["epoch"], score, " | ".join(
-            "%s train %.3f val %.3f (gap %+.3f) ece %.3f nll %.3f" % (n, tr_m[n]["acc"], val_m[n]["acc"],
-                                                                     tr_m[n]["acc"] - val_m[n]["acc"], val_m[n]["ece"], val_m[n]["nll"])
-            for n in names)), flush=True)
+        print("[eval step %d, epoch %.2f] mean val acc %.4f | val: %s | train (seen): %s" % (
+            step, row["epoch"], score,
+            " | ".join("%s %.3f ece %.3f nll %.3f" % (n, val_m[n]["acc"], val_m[n]["ece"], val_m[n]["nll"]) for n in val_names),
+            " | ".join("%s %.3f" % (n, tr_m[n]["acc"]) for n in names)), flush=True)
         agent.save(os.path.join(out_dir, "last"))
         if score > best["score"]:
             best.update(score=score, step=step, state={k: v.detach().cpu().clone() for k, v in model.state_dict().items()})
@@ -436,9 +472,10 @@ def finetune_long(
     timeout=30 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
-def evaluate(run_name: str, datasets: str = ",".join(DATASETS), val_split: str = "val", max_val: int = 0):
+def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS), val_split: str = "val", max_val: int = 0):
     """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
-    raw and with its temperatures."""
+    raw and with its temperatures. Defaults to every prepared set (the official VQA splits and the Cauldron
+    holdouts); sets that are not prepared are skipped."""
     import torch
 
     from laya.vlm import VLMAgent
@@ -447,10 +484,7 @@ def evaluate(run_name: str, datasets: str = ",".join(DATASETS), val_split: str =
     print("GPU:", torch.cuda.get_device_name(0))
     data_vol.reload()
     val_ex = []
-    for name in [d for d in datasets.split(",") if d]:
-        if not os.path.exists("/data/vqa/%s/_READY" % name):
-            print("dataset %s not ready (no _READY); skipping" % name)
-            continue
+    for name in _ready(datasets):
         va = _load_split(name, val_split, max_val or 0)
         print("dataset %s: %d val" % (name, len(va)))
         val_ex += va
@@ -575,6 +609,92 @@ def publish(repo: str = "thaitea/laya-vision-smolvlm-256m", run: str = "all3-3ep
     with open(card) as f:
         text = f.read()
     print(push_to_hub.remote(repo, run, text, metrics_path=metrics, private=private))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The Cauldron: closed-form subsets -> prepared datasets
+# ---------------------------------------------------------------------------------------------------------
+
+
+@app.function(image=image, cpu=4, memory=16384, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int = 4, val_pct: float = 5.0,
+                            max_side: int = 1024, seed: int = 0):
+    """Stream one Cauldron subset and write /data/vqa/cauldron_<subset>/{train,val}.jsonl + images/.
+
+    Rows are taken in stream order until ``max_rows`` *usable* rows (at least one closed-form turn, see
+    ``laya.cauldron``) are written; each keeps at most ``max_texts`` turns. A seeded ``val_pct`` percent of rows
+    go to ``val`` (by row, so an image never sits in both splits). Images are saved as JPEG with the longest side
+    at most ``max_side`` (the model sees 512-pixel tiles). The Cauldron is train-only upstream, so its
+    ``aokvqa`` / ``scienceqa`` / ``vqav2`` rows are the official train splits and do not overlap the official val
+    splits in ``VQA_DATASETS``.
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    from datasets import load_dataset
+
+    from laya.cauldron import cauldron_records
+
+    name = "cauldron_" + subset
+    final_dir = os.path.join("/data/vqa", name)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    rng = random.Random(seed)
+    ds = load_dataset("HuggingFaceM4/the_cauldron", subset, split="train", streaming=True)
+    t0 = time.time()
+    n_rows, n_seen, counts = 0, 0, {"train": Counter(), "val": Counter()}
+    files = {split: open(os.path.join(tmp_dir, split + ".jsonl"), "w") for split in ("train", "val")}
+    for i, row in enumerate(ds):
+        if n_rows >= max_rows:
+            break
+        n_seen += 1
+        n_img = len(row["images"]) if isinstance(row["images"], list) else 1  # parse before decoding any pixels
+        paths = ["images/%s-%d-%d.jpg" % (subset, i, j) for j in range(n_img)]
+        recs = cauldron_records(row["texts"], paths, "%s-%d" % (subset, i), max_texts=max_texts, rng=rng)
+        if not recs:
+            continue
+        split = "val" if rng.random() < val_pct / 100 else "train"
+        images = row["images"] if isinstance(row["images"], list) else [row["images"]]
+        for im, path in zip(images, paths):
+            im = im.convert("RGB")
+            im.thumbnail((max_side, max_side))
+            im.save(os.path.join(tmp_dir, path), quality=90)
+        for rec in recs:
+            files[split].write(json.dumps(rec, ensure_ascii=False) + "\n")
+            counts[split][rec["question"]["type"]] += 1
+        n_rows += 1
+        if n_rows % 1000 == 0:
+            print("%s: %d rows (%d seen) in %.1f min" % (subset, n_rows, n_seen, (time.time() - t0) / 60), flush=True)
+    for f in files.values():
+        f.close()
+    meta = {"source": "HuggingFaceM4/the_cauldron", "subset": subset, "rows": n_rows, "rows_seen": n_seen,
+            "max_rows": max_rows, "max_texts": max_texts, "val_pct": val_pct, "max_side": max_side, "seed": seed,
+            "records": {k: dict(v) for k, v in counts.items()}, "minutes": round((time.time() - t0) / 60, 1)}
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    print("%s: %d usable rows of %d seen, records %s, %.1f min" % (subset, n_rows, n_seen, meta["records"], meta["minutes"]))
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_cauldron(subsets: str = ",".join(CAULDRON_SUBSETS), max_rows: int = 10000, max_texts: int = 4,
+                     val_pct: float = 5.0, max_side: int = 1024):
+    """modal run modal_app.py::prepare_cauldron [--subsets ai2d,aokvqa] -- one container per subset, in parallel."""
+    names = [s for s in subsets.split(",") if s]
+    kw = dict(max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_side=max_side)
+    print("%-16s %8s %8s  %s" % ("subset", "rows", "seen", "records"))
+    for meta in prepare_cauldron_subset.map(names, kwargs=kw, order_outputs=True, return_exceptions=True):
+        if isinstance(meta, Exception):
+            print("FAILED:", repr(meta)[:300])
+            continue
+        print("%-16s %8d %8d  %s" % (meta["subset"], meta["rows"], meta["rows_seen"], meta["records"]))
 
 
 # ---------------------------------------------------------------------------------------------------------

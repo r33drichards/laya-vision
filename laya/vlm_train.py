@@ -436,6 +436,7 @@ def train(
 def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     """``{"id", "image", "state_text", "question": {type, instructions, criteria}, "label"}`` -> training example.
 
+    ``"images"`` (a list of paths) replaces ``"image"`` for a multi-image record, e.g. NLVR2's pairs.
     ``label`` indexes the rendered options (choice: criteria order; score: level; noul: 0=false, 1=true).
     An optional ``"target"`` (a probability per option, same order) replaces the one-hot target, e.g. an expert
     policy's action distribution; ``label`` is still used for accuracy.
@@ -451,6 +452,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     state = {}
     if rec.get("image"):
         state["image"] = os.path.join(root, rec["image"])
+    elif rec.get("images"):
+        state["images"] = [os.path.join(root, p) for p in rec["images"]]
     if rec.get("state_text"):
         state["context"] = rec["state_text"]
     target = _one_hot(label, k)
