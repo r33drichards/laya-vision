@@ -115,7 +115,18 @@ modal run modal_app.py::evaluate --run-name cauldron-3ep/best    # every prepare
 
 The Cauldron is train-only upstream, so its `aokvqa`, `scienceqa` and `vqav2` rows are the official train splits and do not overlap those val splits. The original three sets remain available with `--datasets aokvqa,scienceqa,vqav2_yesno`.
 
-**Status: no trained ModernVBERT checkpoint yet.** ModernVBERT was pretrained and evaluated for document retrieval, and its paper reports no VQA numbers, so whether it reaches the SmolVLM results above is the open question this experiment answers. It needs `transformers >= 5.3` (the Modal jobs and the Space pin 5.17).
+### Result: ModernVBERT on The Cauldron
+
+Run `modernvbert/cauldron-2ep`: 2 epochs over the 19 Cauldron subsets, 4 passes at most over any one of them, 68 minutes on one A100. Full per-subset numbers and the training log are in [docs/modernvbert-cauldron.md](docs/modernvbert-cauldron.md).
+
+| Official val set | ModernVBERT + Cauldron | SmolVLM release (3 epochs on these sets) |
+|---|---|---|
+| A-OKVQA | **65.2%**, ECE 0.064 | 61.8%, ECE 0.123 |
+| ScienceQA | 79.0%, ECE 0.058 | **86.6%**, ECE 0.034 |
+| VQAv2 yes/no | 71.8%, ECE 0.037 | **73.4%**, ECE 0.041 |
+| All 22 val sets (22,886 questions) | 71.8%, ECE 0.022 | |
+
+ModernVBERT was pretrained for document retrieval and its paper reports no VQA numbers; on Laya's typed questions it trains as readily as SmolVLM, beats the released model on A-OKVQA, and trails it on ScienceQA, where the SmolVLM run made 12 passes over the train split against 4 here. It is also the faster of the two at inference (32 ms vs 41 ms per image question in bf16 on an L4). Latest checkpoint: `/ckpt/modernvbert/cauldron-2ep/best` on the `laya-checkpoints` volume, not yet published to the Hub. Needs `transformers >= 5.3` (the Modal jobs and the Space pin 5.17).
 
 ## What didn't work
 
