@@ -54,3 +54,42 @@ Five percent of each subset's rows, held out by row so no image is in both split
 - **The bidirectional readout still shows about 1 point of option-order spread**, from position, not from causal masking; permutation averaging recovers it.
 - **Weak spots are the reasoning sets:** InterGPS 27% (geometry), RAVEN 40% (8-way visual analogies), TQA 51%, CLEVR yes/no 61%. Document and chart reading is strong: DVQA 93%, OCR-VQA 86%, IconQA 82%.
 - Accuracy was still rising at the end of epoch 2 on most sets; a third epoch or `--max-passes 6` is the obvious next run.
+
+## Second run: 3 epochs with the cross-entropy anneal (`cauldron-3ep-anneal`)
+
+Same data and recipe, `--epochs 3 --max-passes 6 --w-ce-schedule anneal`: the soft cross-entropy weight is held for the first 30% of training and decayed to 0 by 80%, so the run ends on the proper scoring rule alone. 94 minutes of training, 19 of evaluation. Best checkpoint at step 21085 of 25304 (2.5 epochs); the final eval at 3 epochs was 0.2 points lower. Temperatures (choice, noul): 3.11, 3.08. Log: `modernvbert-cauldron-3ep-anneal-metrics.json`.
+
+| Set | 2ep acc | 2ep ECE raw → cal. | 3ep-anneal acc | 3ep-anneal ECE raw → cal. |
+|---|---|---|---|---|
+| A-OKVQA (official val) | 65.2% | 0.214 → 0.064 | 65.0% | 0.265 → 0.046 |
+| ScienceQA (official val) | 79.0% | 0.114 → 0.058 | 77.4% | 0.170 → 0.065 |
+| VQAv2 yes/no (official val re-split) | 71.8% | 0.134 → 0.037 | 72.1% | 0.166 → 0.021 |
+| **All 22 val sets** | 71.8% | 0.103 → 0.022 | 72.1% | 0.127 → 0.030 |
+
+A-OKVQA cyclic-shift spread: 1.0 points (2ep) vs 0.6 points (3ep-anneal); with 4 permutations averaged, 66.4% vs 65.6%.
+
+Cauldron holdouts, same columns:
+
+| Subset | 2ep acc | 2ep ECE raw → cal. | 3ep-anneal acc | 3ep-anneal ECE raw → cal. |
+|---|---|---|---|---|
+| ai2d | 67.0% | 0.227 → 0.071 | 66.7% | 0.265 → 0.154 |
+| aokvqa | 65.8% | 0.200 → 0.071 | 63.0% | 0.281 → 0.091 |
+| chartqa | 46.3% | 0.314 → 0.230 | 46.3% | 0.196 → 0.099 |
+| clevr | 60.7% | 0.045 → 0.039 | 60.3% | 0.035 → 0.046 |
+| dvqa | 93.0% | 0.020 → 0.036 | 93.7% | 0.026 → 0.068 |
+| figureqa | 73.0% | 0.049 → 0.036 | 75.1% | 0.082 → 0.048 |
+| hateful_memes | 76.3% | 0.162 → 0.044 | 75.7% | 0.211 → 0.064 |
+| iconqa | 81.8% | 0.083 → 0.068 | 84.5% | 0.080 → 0.108 |
+| intergps | 26.6% | 0.434 → 0.219 | 28.7% | 0.501 → 0.221 |
+| mapqa | 62.8% | 0.024 → 0.026 | 60.8% | 0.035 → 0.030 |
+| nlvr2 | 69.9% | 0.164 → 0.061 | 71.0% | 0.185 → 0.061 |
+| ocrvqa | 85.6% | 0.068 → 0.076 | 85.8% | 0.080 → 0.092 |
+| raven | 39.9% | 0.078 → 0.038 | 43.5% | 0.047 → 0.052 |
+| scienceqa | 82.1% | 0.076 → 0.081 | 84.7% | 0.071 → 0.089 |
+| tqa | 51.1% | 0.329 → 0.105 | 50.0% | 0.386 → 0.144 |
+| visual7w | 75.4% | 0.089 → 0.145 | 76.1% | 0.105 → 0.165 |
+| vqarad | 62.9% | 0.204 → 0.128 | 74.2% | 0.188 → 0.044 |
+| vqav2 | 71.3% | 0.139 → 0.037 | 74.3% | 0.142 → 0.046 |
+| vsr | 65.0% | 0.223 → 0.090 | 62.5% | 0.310 → 0.183 |
+
+**What it says.** The two runs tie on accuracy and on calibrated ECE. The anneal did the opposite of what it was for: as the cross-entropy weight fell, raw ECE rose at every eval (A-OKVQA 0.09 at epoch 1 to 0.27 at 2.5), and the fitted temperatures grew from 2.7 / 2.2 to 3.1 / 3.1. On this backbone the proper-scoring-rule term alone is *more* overconfident than the mixed objective, so keep `w_ce_schedule="const"`. The third epoch bought a point or two on the Cauldron holdouts (IconQA, DVQA, FigureQA) and nothing on the official splits, which had flattened by epoch 2. The next lever is the data mix (more passes over the choice-type subsets, or dropping the yes/no-heavy chart sets that dominate the samples), not the schedule.

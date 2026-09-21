@@ -126,6 +126,8 @@ Run `modernvbert/cauldron-2ep`: 2 epochs over the 19 Cauldron subsets, 4 passes 
 | VQAv2 yes/no | 71.8%, ECE 0.037 | **73.4%**, ECE 0.041 |
 | All 22 val sets (22,886 questions) | 71.8%, ECE 0.022 | |
 
+A second run, 3 epochs with the cross-entropy weight annealed to zero (`cauldron-3ep-anneal`), tied it on accuracy (72.1% over all sets) and calibrated ECE (0.030) while making the raw model more overconfident, so the constant-weight recipe stays the default; details in the same doc.
+
 ModernVBERT was pretrained for document retrieval and its paper reports no VQA numbers; on Laya's typed questions it trains as readily as SmolVLM, beats the released model on A-OKVQA, and trails it on ScienceQA, where the SmolVLM run made 12 passes over the train split against 4 here. It is also the faster of the two at inference (32 ms vs 41 ms per image question in bf16 on an L4). Latest checkpoint: `/ckpt/modernvbert/cauldron-2ep/best` on the `laya-checkpoints` volume, not yet published to the Hub. Needs `transformers >= 5.3` (the Modal jobs and the Space pin 5.17).
 
 ## What didn't work
