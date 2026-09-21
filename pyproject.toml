@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "laya"
 version = "0.2.0.dev0"
-description = "Laya Vision: calibrated typed decisions over images (SmolVLM backbone), a fork of Laya"
+description = "Laya Vision: calibrated typed decisions over images (SmolVLM or ModernVBERT backbone), a fork of Laya"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
