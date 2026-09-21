@@ -20,7 +20,9 @@ Volumes (created out of band; never ``modal deploy`` this app):
     laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/ and /ckpt/modernvbert/)
 
 Data: the fine-tune jobs default to The Cauldron subsets (``CAULDRON_DATASETS``, written by ``prepare_cauldron``);
-the original three VQA sets (``VQA_DATASETS``, official val splits, the README table) stay available with
+two layouts exist on the volume: the capped ``cauldron_<subset>`` sets (10,000 usable rows per subset, 5% val)
+and the uncapped ``cauldronfull_<subset>`` sets (``CAULDRON_FULL_DATASETS``, every usable row, 1% val, written by
+``prepare_cauldron --prefix cauldronfull_ --max-rows 0 --val-pct 1``). The original three VQA sets (``VQA_DATASETS``, official val splits, the README table) stay available with
 ``--datasets aokvqa,scienceqa,vqav2_yesno`` and as ``--val-datasets`` for a Cauldron-trained model.
 
 Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
@@ -72,6 +74,7 @@ CAULDRON_SUBSETS = ("ai2d", "aokvqa", "iconqa", "intergps", "scienceqa", "tqa", 
                     "figureqa", "hateful_memes", "nlvr2", "vsr", "vqarad",
                     "clevr", "dvqa", "mapqa", "ocrvqa", "vqav2", "chartqa")  # see laya/cauldron.py
 CAULDRON_DATASETS = tuple("cauldron_" + s for s in CAULDRON_SUBSETS)
+CAULDRON_FULL_DATASETS = tuple("cauldronfull_" + s for s in CAULDRON_SUBSETS)  # uncapped prep, see the docstring
 DATASETS = CAULDRON_DATASETS
 CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
@@ -315,7 +318,7 @@ def finetune(
     gpu="A100",
     cpu=24,
     memory=65536,
-    timeout=170 * 60,
+    timeout=300 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
 )
 def finetune_long(
@@ -663,11 +666,11 @@ def publish(repo: str = "thaitea/laya-vision-smolvlm-256m", run: str = "all3-3ep
 @app.function(image=image, cpu=4, memory=16384, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
               secrets=[modal.Secret.from_name("huggingface-thaitea")])
 def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int = 4, val_pct: float = 5.0,
-                            max_side: int = 1024, seed: int = 0):
-    """Stream one Cauldron subset and write /data/vqa/cauldron_<subset>/{train,val}.jsonl + images/.
+                            max_side: int = 1024, seed: int = 0, prefix: str = "cauldron_"):
+    """Stream one Cauldron subset and write /data/vqa/<prefix><subset>/{train,val}.jsonl + images/.
 
     Rows are taken in stream order until ``max_rows`` *usable* rows (at least one closed-form turn, see
-    ``laya.cauldron``) are written; each keeps at most ``max_texts`` turns. A seeded ``val_pct`` percent of rows
+    ``laya.cauldron``) are written (``max_rows=0``: no cap, the whole subset); each keeps at most ``max_texts`` turns. A seeded ``val_pct`` percent of rows
     go to ``val`` (by row, so an image never sits in both splits). Images are saved as JPEG with the longest side
     at most ``max_side`` (the model sees 512-pixel tiles). The Cauldron is train-only upstream, so its
     ``aokvqa`` / ``scienceqa`` / ``vqav2`` rows are the official train splits and do not overlap the official val
@@ -681,7 +684,7 @@ def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int =
 
     from laya.cauldron import cauldron_records
 
-    name = "cauldron_" + subset
+    name = prefix + subset
     final_dir = os.path.join("/data/vqa", name)
     tmp_dir = final_dir + ".tmp"
     shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -692,7 +695,7 @@ def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int =
     n_rows, n_seen, counts = 0, 0, {"train": Counter(), "val": Counter()}
     files = {split: open(os.path.join(tmp_dir, split + ".jsonl"), "w") for split in ("train", "val")}
     for i, row in enumerate(ds):
-        if n_rows >= max_rows:
+        if max_rows and n_rows >= max_rows:
             break
         n_seen += 1
         n_img = len(row["images"]) if isinstance(row["images"], list) else 1  # parse before decoding any pixels
@@ -729,10 +732,14 @@ def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int =
 
 @app.local_entrypoint()
 def prepare_cauldron(subsets: str = ",".join(CAULDRON_SUBSETS), max_rows: int = 10000, max_texts: int = 4,
-                     val_pct: float = 5.0, max_side: int = 1024):
-    """modal run modal_app.py::prepare_cauldron [--subsets ai2d,aokvqa] -- one container per subset, in parallel."""
+                     val_pct: float = 5.0, max_side: int = 1024, prefix: str = "cauldron_"):
+    """modal run modal_app.py::prepare_cauldron [--subsets ai2d,aokvqa] -- one container per subset, in parallel.
+
+    ``--max-rows 0`` takes every usable row of each subset; pair it with ``--prefix cauldronfull_`` (and
+    ``--val-pct 1``) to write the uncapped layout next to the capped ``cauldron_<subset>`` sets instead of over them.
+    """
     names = [s for s in subsets.split(",") if s]
-    kw = dict(max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_side=max_side)
+    kw = dict(max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_side=max_side, prefix=prefix)
     print("%-16s %8s %8s  %s" % ("subset", "rows", "seen", "records"))
     for meta in prepare_cauldron_subset.map(names, kwargs=kw, order_outputs=True, return_exceptions=True):
         if isinstance(meta, Exception):
