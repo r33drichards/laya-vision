@@ -6,6 +6,9 @@ frames (no photo-VQA data), then scored by playing ALE games.
     modal run --detach modal_atari_train.py::train_atari --run-name atari-v1 [--sources expert,atari_head,jat]
     modal run --detach modal_atari_train.py::train_atari --run-name atari8-2f --sources expert2f --frames 2 \
         --games Breakout,Pong --init-from atari-expert-v1/best
+    modal run --detach modal_atari_train.py::train_atari --run-name atari-ab-base --sources expert2f \
+        --games Breakout,Pong --backbone HuggingFaceTB/SmolVLM-256M-Base   # A/B against the Instruct default
+    modal run --detach modal_atari_train.py::ab_backbone                # both arms of that A/B, then play them
     modal run modal_atari_train.py::atari_eval --model atari-v1/best [--games Breakout,Pong] [--episodes 3] [--sample]
     modal run modal_atari_train.py::renormalize --results play.json [--out play_renorm.json]
 
@@ -126,6 +129,7 @@ def train_atari(
     balance: str = "game",
     image_size: int = 0,
     preprocess: str = "",
+    backbone: str = "",
 ):
     """Train SmolVLM (fresh head, vision tower frozen) on Atari frames only; save /ckpt/smolvlm/<run_name>/best.
 
@@ -161,6 +165,10 @@ def train_atari(
       NLL; both are logged either way, with the step each would pick.
     * ``balance="game_source"`` samples every (game, source) pair equally instead of pooling a game's sources, so
       mixing e.g. 20k ``expert2f`` with 5k ``dagger1`` frames per game gives a 50/50 mix by samples.
+    * ``backbone`` (a Hub id, default ``BACKBONE``) is the pretrained SmolVLM a fresh run starts from, e.g.
+      ``HuggingFaceTB/SmolVLM-256M-Base`` to A/B the pre-instruction-tuned checkpoint against the Instruct one.
+      It must share the 256M architecture and processor settings (``laya.preprocess`` checks the latter). Ignored
+      with ``init_from``, whose checkpoint records its own backbone.
     """
     import math
 
@@ -231,7 +239,8 @@ def train_atari(
         agent = VLMAgent(os.path.join(CKPT_ROOT, init_from), device="cuda", **prep_kw)
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
-        agent = VLMAgent(backbone=BACKBONE, device="cuda", **prep_kw)
+        agent = VLMAgent(backbone=backbone or BACKBONE, device="cuda", **prep_kw)
+        print("fresh head on backbone %s" % agent.cfg["backbone"])
     print("preprocessing: %r -> %d image tokens per frame" % (agent.prep, agent.prep.image_seq_len))
     init_temps = list(agent.temperature)
     agent.cfg["atari_frames"] = frames
@@ -246,7 +255,7 @@ def train_atari(
                         val_per_ds=val_per_ds, synthetic=synthetic, select_by=select_by, group_size=group_size,
                         sigma=sigma, sigma_end=sigma_end or None, w_sph=w_sph, w_ce=w_ce,
                         w_ce_schedule=w_ce_schedule, train_act=train_act, td_lambda=td_lambda,
-                        top_episode_frac=top_episode_frac, balance=balance),
+                        top_episode_frac=top_episode_frac, balance=balance, backbone=agent.cfg["backbone"]),
            "evals": []}
     best = {"nll": math.inf, "play": -math.inf, "step": None, "state": None, "nll_step": None, "play_step": None}
 
@@ -603,6 +612,70 @@ def renormalize(results: str, out: str = ""):
         with open(out, "w") as f:
             json.dump(data, f, indent=2)
         print("wrote", out)
+
+
+@app.local_entrypoint()
+def ab_backbone(
+    games: str = "Breakout,Pong",
+    sources: str = "expert2f",
+    backbones: str = BACKBONE + ",HuggingFaceTB/SmolVLM-256M-Base",
+    prefix: str = "atari-ab",
+    passes: float = 1.0,
+    max_minutes: float = 12.0,
+    n_evals: int = 3,
+    episodes: int = 5,
+    max_steps: int = 4500,
+    train_only: bool = False,
+    restart: bool = False,
+):
+    """A/B two pretrained backbones under identical cheap settings, then play both.
+
+        modal run --detach modal_atari_train.py::ab_backbone            # Instruct vs 256M-Base, Breakout+Pong
+
+    One ``train_atari`` run per backbone (fresh head, same games, sources, passes and budget; ``max_minutes`` is
+    training time only, evals add a few minutes) runs in parallel on an A100 each, named ``<prefix>-<tag>`` where
+    ``tag`` is the last path component of the backbone id, lower-cased. Then each ``best`` plays ``games`` for
+    ``episodes`` greedy episodes on L4s, and the summary prints val accuracy / NLL and median normalised play
+    score side by side. ``train_only`` stops after training; a rerun without it resumes each arm from its saved
+    ``state.pt`` (no training left, only the final scoring is redone) and then plays.
+    """
+    bb = _split(backbones)
+    game_list = _split(games)
+    runs = ["%s-%s" % (prefix, b.rsplit("/", 1)[-1].lower()) for b in bb]
+    print("training %s on %s (%s), %.2f passes, %.0f min each" % (", ".join(runs), games, sources, passes, max_minutes))
+    calls = [train_atari.spawn(run_name=r, sources=sources, games=games, passes=passes, max_minutes=max_minutes,
+                               n_evals=n_evals, backbone=b, restart=restart) for r, b in zip(runs, bb)]
+    trained = {}
+    for r, b, c in zip(runs, bb, calls):
+        try:
+            trained[r] = c.get()
+        except Exception as e:  # keep the other arm's result
+            print("%s (%s) failed: %r" % (r, b, e))
+    if train_only or not trained:
+        for r, res in trained.items():
+            print(r, json.dumps(res["final_mean"], indent=1))
+        return
+    play = {}
+    for r in trained:
+        play[r] = list(play_atari.starmap([(g, r + "/best", episodes, max_steps) for g in game_list],
+                                          return_exceptions=True))
+    print("\n%-36s %8s %8s %8s %8s  %s" % ("run", "val acc", "val nll", "ece", "median", "per game"))
+    for r, b in zip(runs, bb):
+        if r not in trained:
+            continue
+        m = trained[r]["final_mean"]["val_calibrated"]
+        ok = [x for x in play[r] if not isinstance(x, Exception)]
+        for x in play[r]:
+            if isinstance(x, Exception):
+                print("%s play failed: %r" % (r, x))
+        text, summ = _summary(ok)
+        per_game = ", ".join("%s %s" % (x["game"], "-" if x["normalized"] is None else "%.2f" % x["normalized"])
+                             for x in sorted(ok, key=lambda x: x["game"]))
+        med = summ["median_normalized"]
+        print("%-36s %8.4f %8.4f %8.4f %8s  %s" % (b, m["acc"], m["nll"], m["ece"], "-" if med is None else "%.3f" % med,
+                                                  per_game))
+    for r in trained:
+        print("\n== %s ==\n%s" % (r, _summary([x for x in play[r] if not isinstance(x, Exception)])[0]))
 
 
 @app.local_entrypoint()

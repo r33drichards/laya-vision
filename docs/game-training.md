@@ -439,6 +439,35 @@ games are flat or down. The filter difference is tiny (0.049 grey levels mean, t
 in 50) and it still shows up in play. **Train and play on the same path**; do not migrate an existing checkpoint by
 flipping the flag.
 
+## Backbone A/B: SmolVLM-256M-Base against Instruct (set up 2026-09-21, not yet run)
+
+Every Atari run so far starts from `HuggingFaceTB/SmolVLM-256M-Instruct`. Its instruction tuning is on chat-formatted
+photo and document data (The Cauldron, Docmatix), which is not obviously useful for a fresh head trained on game
+frames, and a base checkpoint sometimes fine-tunes more freely. `HuggingFaceTB/SmolVLM-256M-Base` is the same
+architecture, tokenizer and processor (so `laya.preprocess` is unchanged; its model card on the Hub is an empty
+template, the config's training path is what identifies it as the pre-SFT checkpoint). Checked on CPU: both build
+through `VLMAgent` with `--preprocess gpu --image-size 512`, pass the processor check, cost 64 image tokens per
+frame, have the same 236.6M parameters and answer a `choice` question. The one difference is the tokenizer:
+Instruct moved `<end_of_utterance>` to id 49279 and made 49191-49278 reserved tokens, Base has it at 49191. Each
+checkpoint saves its own processor, so the prompt resolves to the id the backbone was trained with. Note that the 2.2B
+`HuggingFaceTB/SmolVLM-Base` is *not* a drop-in: SigLIP so400m at 384 with patch 14 and pixel shuffle 3, different
+special-token ids, and about eleven times the trainable parameters under `freeze="full"`.
+
+`train_atari` takes `--backbone`, and `ab_backbone` runs both arms with identical cheap settings and plays them:
+
+    modal run --detach modal_atari_train.py::ab_backbone
+    # = two train_atari runs, atari-ab-smolvlm-256m-instruct and atari-ab-smolvlm-256m-base, fresh head,
+    #   Breakout+Pong from expert2f, 1 pass, 12 min training each on an A100, then 5 greedy episodes per game
+
+That is roughly 20 minutes of A100 per arm including evals, plus a few L4 minutes to play. Both arms start from the
+raw backbone rather than `atari-expert-v1/best` (an Instruct-derived checkpoint), so the comparison is clean but the
+absolute scores will be below the 8-game runs above. Compare the calibrated val NLL and accuracy first (one seed,
+two games: play medians within a few hundredths are noise), and only promote Base to the long recipe if it is ahead
+on both. Longer or wider: `--games Breakout,Pong,Freeway,SpaceInvaders --passes 2 --max-minutes 30 --episodes 10`.
+
+For the photo model (`modal_app.py`) the expectation is the other way round: its training sets (ScienceQA, A-OKVQA,
+VQAv2) are all inside The Cauldron, so Instruct starts with a head start there that Base gives up.
+
 ## Durability of long runs
 
 Modal preempts containers, and an A100 training run is the expensive thing to lose, so `train_atari` is
