@@ -62,6 +62,31 @@ Laya Vision can also act as a game policy: the screen is the image and the optio
 
 The released checkpoint doesn't know any games; in ViZDoom `basic` it only ever shoots. Trained for 7 minutes on 20,000 frames auto-labelled by a scripted expert, it plays `basic` at expert level: mean reward +75.4 and 100% kills over 50 unseen episodes, against the expert's +75.8. See [docs/game-training.md](docs/game-training.md) for the pipeline, results and training-data ideas.
 
+## ModernVBERT experiment
+
+Laya's text model reads each option at a bidirectional `[MASK]` marker. SmolVLM is a causal decoder, so `laya/vlm.py` has to put the options last, read each one at its line terminator, and work around the option-order bias that leaves (random orders in training, permutation averaging at inference). [ModernVBERT](https://huggingface.co/ModernVBERT/modernvbert) (ModernBERT-150M plus a SigLIP2 vision tower, 250M parameters, MIT licence) is a bidirectional encoder pretrained with masked language modelling behind the same Idefics3 image processor SmolVLM uses, so the text model's readout carries over unchanged:
+
+```
+[CLS]User:<image tokens> choice question: What kind of item is this?[SEP][MASK] electronics[MASK] clothing ...[SEP]{"note": "..."}[SEP]
+```
+
+Both backbones run through the same `VLMAgent`, training loop, evaluation and checkpoint format. The checkpoint records which it is (`"readout": "mask"` or `"terminator"` in `vlm_agent_config.json`), and `laya.load_vlm` picks the right sequence builder from it.
+
+```python
+agent = laya.load_vlm(backbone="ModernVBERT/modernvbert")   # fresh, untrained head
+```
+
+```bash
+python -m laya.vlm_train --synthetic --steps 3 --backbone ModernVBERT/modernvbert           # local smoke run
+modal run modal_app.py::test                                                                # tests + latency, both backbones
+modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep   # same recipe as all3-3ep
+modal run modal_app.py::evaluate --run-name modernvbert/mvb-3ep/best
+```
+
+`finetune_long` keeps everything else identical to the SmolVLM run above (data, objective, schedule, evaluation, calibration), which is what makes the two comparable. The ModernVBERT run saves under `/ckpt/modernvbert/`, so it can reuse a run name.
+
+**Status: no trained ModernVBERT checkpoint yet.** ModernVBERT was pretrained and evaluated for document retrieval, and its paper reports no VQA numbers, so whether it reaches the SmolVLM results above is the open question this experiment answers. It needs `transformers >= 5.3` (the Modal jobs and the Space pin 5.17).
+
 ## What didn't work
 
 The branch [`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment) tried to keep Laya's ModernBERT encoder and feed it SigLIP2 image patches through a learned projector. It kept text-only answers bit-identical, but in 5 training runs it never learned to use the image. Every run collapsed to uniform predictions, and accuracy with shuffled images matched accuracy with the real ones. Details are in that branch's `laya/vision_train.py` and commit history.
@@ -75,4 +100,4 @@ The branch [`siglip-projector-experiment`](https://github.com/r33drichards/laya-
 
 ## Credits
 
-Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) by Convai Innovations, Apache 2.0, and is not affiliated with them. The text decision model, its typed-question API (`choice` / `score` / `noul`), the RLCD training objective and the temperature calibration are theirs; this fork adds image input, the SmolVLM backbone and the game work. The design is described in the author's [write-up](https://dev.to/nandakishor_m_6cc0adfde9f/i-built-non-autoregressive-decision-models-a-year-ago-then-a-frontier-lab-called-it-a-18me). The original text model and its Colab/Kaggle notebooks live in the upstream repo.
+Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) by Convai Innovations, Apache 2.0, and is not affiliated with them. The text decision model, its typed-question API (`choice` / `score` / `noul`), the RLCD training objective and the temperature calibration are theirs; this fork adds image input, the SmolVLM and ModernVBERT backbones and the game work. The design is described in the author's [write-up](https://dev.to/nandakishor_m_6cc0adfde9f/i-built-non-autoregressive-decision-models-a-year-ago-then-a-frontier-lab-called-it-a-18me). The original text model and its Colab/Kaggle notebooks live in the upstream repo.

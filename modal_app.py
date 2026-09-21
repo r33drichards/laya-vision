@@ -1,9 +1,11 @@
-"""Modal jobs for the SmolVLM-backed decision model (``laya.vlm``).
+"""Modal jobs for the VLM-backed decision model (``laya.vlm``): SmolVLM by default, ModernVBERT on request.
 
-    modal run modal_app.py::test                     # pytest on a GPU + latency
+    modal run modal_app.py::test                     # pytest on a GPU + latency, both backbones
     modal run modal_app.py::finetune --minutes 18    # short fine-tune + held-out acc / ECE
     modal run modal_app.py::evaluate --run-name <run> # re-evaluate a saved checkpoint
     modal run --detach modal_app.py::finetune_long   # ~3-epoch A100 run with per-epoch eval + best checkpoint
+    modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep
+                                                     # the same run on the bidirectional backbone
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
@@ -12,7 +14,11 @@
 Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
     laya-datasets     -> /data       (read-only; /data/vqa/<name>/{<split>.jsonl, images/, _READY})
-    laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/)
+    laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/ and /ckpt/modernvbert/)
+
+Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
+(``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``--init-from``)
+the name is relative to /ckpt/smolvlm as before, or to /ckpt, so a ModernVBERT run is ``modernvbert/<run>/best``.
 """
 import json
 import os
@@ -53,18 +59,35 @@ def _with_local_code(img):
 image = _with_local_code(base_image)
 
 BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
+MODERNVBERT = "ModernVBERT/modernvbert"
 DATASETS = ("aokvqa", "scienceqa", "vqav2_yesno")
-CKPT_ROOT = "/ckpt/smolvlm"
+CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", MODERNVBERT: "/ckpt/modernvbert"}
+CKPT_ROOT = CKPT_ROOTS[BACKBONE]
 
 
-@app.function(image=image, gpu="L4", timeout=30 * 60, volumes={"/cache/hf": hf_vol})
-def test():
-    """Run tests/test_vlm.py on the GPU, then time predict() in fp32 and bf16."""
+def _ckpt_root(backbone: str) -> str:
+    """Where a backbone's runs go: the two known ones by name, anything else by its Hub name."""
+    return CKPT_ROOTS.get(backbone, "/ckpt/" + backbone.split("/")[-1].lower())
+
+
+def _ckpt_path(run_name: str) -> str:
+    """A saved run: ``<run>`` under /ckpt/smolvlm (the original layout) or ``<family>/<run>`` under /ckpt."""
+    for root in (CKPT_ROOT, "/ckpt"):
+        path = os.path.join(root, run_name)
+        if os.path.exists(os.path.join(path, "vlm_agent_config.json")):
+            return path
+    return os.path.join(CKPT_ROOT, run_name)
+
+
+@app.function(image=image, gpu="L4", timeout=45 * 60, volumes={"/cache/hf": hf_vol})
+def test(backbones: str = BACKBONE + "," + MODERNVBERT):
+    """Run tests/test_vlm.py and tests/test_modernvbert.py on the GPU, then time predict() in fp32 and bf16."""
     import torch
 
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     rc = subprocess.run(
-        [sys.executable, "-m", "pytest", "/root/tests/test_vlm.py", "-v", "-s", "-p", "no:cacheprovider", "-W", "ignore"],
+        [sys.executable, "-m", "pytest", "/root/tests/test_vlm.py", "/root/tests/test_modernvbert.py", "-v", "-s",
+         "-p", "no:cacheprovider", "-W", "ignore"],
         cwd="/root",
     ).returncode
     hf_vol.commit()
@@ -78,22 +101,23 @@ def test():
     one = {"is_red": {"type": "noul", "instructions": "Is the square red?"}}
     three = dict(one, color={"type": "choice", "instructions": "What color?", "criteria": ["red", "blue", "green"]},
                  size={"type": "score", "instructions": "How big?", "criteria": ["small", "medium", "large"]})
-    for dtype in ("fp32", "bf16"):
-        agent = VLMAgent(backbone=BACKBONE, device="cuda", dtype=dtype)
-        for label, state, qs in (("image, 1 q", {"image": img}, one), ("image, 3 q", {"image": img}, three),
-                                 ("text, 1 q", "Customer: I was billed twice.", one), ("text, 3 q", "Customer: I was billed twice.", three)):
-            for _ in range(3):
-                agent.predict(state, qs)
-            ts = []
-            for _ in range(20):
-                torch.cuda.synchronize()
-                t0 = time.perf_counter()
-                agent.predict(state, qs)
-                torch.cuda.synchronize()
-                ts.append((time.perf_counter() - t0) * 1000)
-            ts.sort()
-            print("latency %-5s %-11s median %6.1f ms  p90 %6.1f ms" % (dtype, label, ts[10], ts[18]))
-        del agent
+    for backbone in [b for b in backbones.split(",") if b]:
+        for dtype in ("fp32", "bf16"):
+            agent = VLMAgent(backbone=backbone, device="cuda", dtype=dtype)
+            for label, state, qs in (("image, 1 q", {"image": img}, one), ("image, 3 q", {"image": img}, three),
+                                     ("text, 1 q", "Customer: I was billed twice.", one), ("text, 3 q", "Customer: I was billed twice.", three)):
+                for _ in range(3):
+                    agent.predict(state, qs)
+                ts = []
+                for _ in range(20):
+                    torch.cuda.synchronize()
+                    t0 = time.perf_counter()
+                    agent.predict(state, qs)
+                    torch.cuda.synchronize()
+                    ts.append((time.perf_counter() - t0) * 1000)
+                ts.sort()
+                print("latency %-28s %-5s %-11s median %6.1f ms  p90 %6.1f ms" % (backbone, dtype, label, ts[10], ts[18]))
+            del agent
     if rc != 0:
         raise SystemExit("pytest failed with exit code %d" % rc)
 
@@ -151,8 +175,10 @@ def finetune(
     num_workers: int = 14,
     synthetic: bool = False,
     run_name: str = "",
+    backbone: str = BACKBONE,
 ):
-    """Short fine-tune on the prepared VQA sets; logs loss and held-out accuracy / ECE, saves to /ckpt/smolvlm/<run>.
+    """Short fine-tune on the prepared VQA sets; logs loss and held-out accuracy / ECE, saves to
+    ``<backbone root>/<run>`` (/ckpt/smolvlm or /ckpt/modernvbert).
 
     ``max_train`` / ``max_val`` = 0 means the whole split; otherwise the first N records in file order.
     ``val_caps`` overrides the val cap per dataset, e.g. ``"vqav2_yesno=1000"``.
@@ -165,7 +191,7 @@ def finetune(
     t_start = time.time()
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     run_name = run_name or time.strftime("run-%Y%m%d-%H%M%S")
-    out_dir = os.path.join(CKPT_ROOT, run_name)
+    out_dir = os.path.join(_ckpt_root(backbone), run_name)
 
     caps = {k: int(v) for k, v in (kv.split("=") for kv in val_caps.split(",") if kv)}
     if synthetic:
@@ -175,7 +201,8 @@ def finetune(
     else:
         train_ex, calib_ex, val_ex = _load_data(datasets, train_split, val_split, n_calib, max_train, max_val, caps)
 
-    agent = VLMAgent(backbone=BACKBONE, device="cuda")
+    agent = VLMAgent(backbone=backbone, device="cuda")
+    print("backbone %s, readout %s" % (backbone, agent.model.readout))
     hf_vol.commit()
     model, proc = agent.model, agent.processor
     ev_kw = dict(batch_size=32, num_workers=num_workers)
@@ -183,8 +210,9 @@ def finetune(
     for name in sorted({ex["dataset"] for ex in val_ex}):
         small_val += [ex for ex in val_ex if ex["dataset"] == name][:200]
 
-    log = {"run": run_name, "args": dict(datasets=datasets, minutes=minutes, freeze=freeze, n_last=n_last, batch_size=batch_size,
-                                         lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train, max_val=max_val, val_caps=caps),
+    log = {"run": run_name, "args": dict(backbone=backbone, datasets=datasets, minutes=minutes, freeze=freeze, n_last=n_last,
+                                         batch_size=batch_size, lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train,
+                                         max_val=max_val, val_caps=caps),
            "evals": []}
     base = metrics_from(collect_logits(model, proc, small_val, **ev_kw))
     print("[eval step 0, untrained head] " + format_metrics(base), flush=True)
@@ -249,6 +277,7 @@ def finetune_long(
     num_workers: int = 22,
     run_name: str = "all3-3ep",
     init_from: str = "",
+    backbone: str = BACKBONE,
 ):
     """Multi-epoch fine-tune (vision tower frozen) with per-epoch train/val tracking and best-checkpoint keeping.
 
@@ -260,9 +289,13 @@ def finetune_long(
       training) to expose overfitting. ``last/`` is saved every eval; ``best/`` when mean per-dataset val acc
       improves. The final model is the best one: temperatures are fitted on the calibration holdout, then the full
       val splits are scored raw and calibrated, plus an option-order-bias check on aokvqa.
-    * ``init_from`` (a run under /ckpt/smolvlm, e.g. ``all3-3ep/best``) continues from a trained checkpoint
-      instead of a fresh head. Question types absent from the calibration holdout keep that checkpoint's
-      temperature rather than being reset to 1.0.
+    * ``init_from`` (a run under /ckpt/smolvlm, e.g. ``all3-3ep/best``, or ``modernvbert/<run>/best``) continues
+      from a trained checkpoint instead of a fresh head. Question types absent from the calibration holdout keep
+      that checkpoint's temperature rather than being reset to 1.0.
+    * ``backbone`` picks the family: SmolVLM (causal, the released model) or ``ModernVBERT/modernvbert``
+      (bidirectional, ``[MASK]`` readout). The run is saved under that backbone's root, so the two can share
+      a ``run_name``. Everything else, data, objective, schedule and evaluation, is identical, which is what
+      makes the two comparable.
     """
     import math
 
@@ -274,7 +307,7 @@ def finetune_long(
 
     t_start = time.time()
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
-    out_dir = os.path.join(CKPT_ROOT, run_name)
+    out_dir = os.path.join(_ckpt_root(backbone), run_name)
     train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, 0, 0, {})
     names = sorted({ex["dataset"] for ex in train_ex})
     train_eval = []
@@ -294,16 +327,18 @@ def finetune_long(
           % (max_passes or None, {n: round(per_ds / sizes[n], 2) for n in names}))
 
     if init_from:
-        agent = VLMAgent(os.path.join(CKPT_ROOT, init_from), device="cuda")
+        agent = VLMAgent(_ckpt_path(init_from), device="cuda")
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
-        agent = VLMAgent(backbone=BACKBONE, device="cuda")
+        agent = VLMAgent(backbone=backbone, device="cuda")
+    print("backbone %s, readout %s" % (agent.cfg["backbone"], agent.model.readout))
     init_temps = list(agent.temperature)
     hf_vol.commit()
     model, proc = agent.model, agent.processor
     ev_kw = dict(batch_size=64, num_workers=num_workers)
-    log = {"run": run_name, "args": dict(datasets=datasets, epochs=epochs, max_minutes=max_minutes, batch_size=batch_size,
-                                         lr_head=lr_h, lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
+    log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
+                                         epochs=epochs, max_minutes=max_minutes, batch_size=batch_size, lr_head=lr_h,
+                                         lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
                                          max_passes=max_passes, n_calib=n_calib, train_eval_n=train_eval_n),
            "evals": []}
     best = {"score": -1.0, "step": None, "state": None}
@@ -402,7 +437,8 @@ def finetune_long(
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
 def evaluate(run_name: str, datasets: str = ",".join(DATASETS), val_split: str = "val", max_val: int = 0):
-    """Evaluate a saved checkpoint (/ckpt/smolvlm/<run_name>) on the val splits, raw and with its temperatures."""
+    """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
+    raw and with its temperatures."""
     import torch
 
     from laya.vlm import VLMAgent
@@ -418,7 +454,8 @@ def evaluate(run_name: str, datasets: str = ",".join(DATASETS), val_split: str =
         va = _load_split(name, val_split, max_val or 0)
         print("dataset %s: %d val" % (name, len(va)))
         val_ex += va
-    agent = VLMAgent(os.path.join(CKPT_ROOT, run_name), device="cuda")
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda")
+    print("backbone %s, readout %s" % (agent.cfg["backbone"], agent.model.readout))
     records = collect_logits(agent.model, agent.processor, val_ex, batch_size=32, num_workers=14)
     raw, cal = metrics_from(records), metrics_from(records, agent.temperature)
     print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
@@ -453,7 +490,7 @@ def ask(image_bytes: bytes, questions: dict, state_text: str = "", run_name: str
     from laya.vlm import VLMAgent
 
     t0 = time.time()
-    agent = VLMAgent(os.path.join(CKPT_ROOT, run_name), device="cuda")
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda")
     load_s = time.time() - t0
     state = {"image": Image.open(io.BytesIO(image_bytes)).convert("RGB")}
     if state_text:
@@ -510,7 +547,7 @@ def push_to_hub(repo_id: str, run_name: str, model_card: str, metrics_path: str 
 
     from huggingface_hub import HfApi
 
-    src = os.path.join(CKPT_ROOT, run_name)
+    src = _ckpt_path(run_name)
     if not os.path.exists(os.path.join(src, "vlm_agent_config.json")):
         raise SystemExit("no checkpoint at %s" % src)
     stage = tempfile.mkdtemp()
@@ -644,7 +681,7 @@ def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int
     if policy == "model":
         from laya.vlm import VLMAgent
 
-        path = os.path.join(CKPT_ROOT, model)
+        path = _ckpt_path(model)
         agent = VLMAgent(path if os.path.exists(path) else model, device="cuda", dtype="bf16")
     qs = doom_question("basic", buttons)
     rng = random.Random(seed)

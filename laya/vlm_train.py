@@ -1,8 +1,10 @@
-"""Training sketch for the SmolVLM-backed decision model (``laya.vlm``).
+"""Training sketch for the VLM-backed decision model (``laya.vlm``), SmolVLM or ModernVBERT.
 
 Fine-tunes on multiple-choice VQA with the same objective as the text model's notebooks: a soft
 cross-entropy term plus a proper-scoring-rule policy-gradient term over noisy logits (``proper_reward``).
-Options are shuffled per example so the causal backbone cannot learn a position prior.
+Options are shuffled per example so a causal backbone cannot learn a position prior (harmless for the
+bidirectional one). Nothing here depends on the backbone family: the sequence builder and the model's
+readout follow the processor and checkpoint (``laya.vlm.processor_readout``).
 
 Data sources (adapters take one HF ``datasets`` row each):
   * A-OKVQA (``HuggingFaceM4/A-OKVQA``)      -> ``choice``
@@ -15,6 +17,7 @@ runs ``finetune`` on these from the ``laya-datasets`` volume.
 
 Smoke run on a tiny synthetic batch (no downloads beyond the backbone):
     python -m laya.vlm_train --synthetic --steps 3 --freeze head
+    python -m laya.vlm_train --synthetic --steps 3 --freeze head --backbone ModernVBERT/modernvbert
 """
 import argparse
 import functools
