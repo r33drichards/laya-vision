@@ -75,6 +75,16 @@ CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
 
 
+def _parse_mix(mix: str) -> dict:
+    """``"name=w,name=w"`` -> ``{name: float(w)}``; ``""`` -> ``{}`` (equal sampling)."""
+    out = {}
+    for kv in mix.split(","):
+        if kv.strip():
+            k, v = kv.split("=")
+            out[k.strip()] = float(v)
+    return out
+
+
 def _ckpt_root(backbone: str) -> str:
     """Where a backbone's runs go: the two known ones by name, anything else by its Hub name."""
     return CKPT_ROOTS.get(backbone, "/ckpt/" + backbone.split("/")[-1].lower())
@@ -201,6 +211,8 @@ def finetune(
     val_datasets: str = "",
     preprocess: str = "processor",
     w_ce_schedule: str = "const",
+    mix: str = "",
+    mix_alpha: float = 0.0,
 ):
     """Short fine-tune on the prepared VQA sets; logs loss and held-out accuracy / ECE, saves to
     ``<backbone root>/<run>`` (/ckpt/smolvlm or /ckpt/modernvbert).
@@ -209,7 +221,8 @@ def finetune(
     ``val_caps`` overrides the val cap per dataset, e.g. ``"vqav2_yesno=1000"``. ``preprocess`` is the image
     path recorded in the checkpoint: ``"processor"`` (the Hugging Face processor, what the released model
     used) for photos of mixed sizes; the device-side ``"gpu"`` path stacks raw frames and needs them all the
-    same size, so it is for game frames (``modal_atari_train.py``). ``w_ce_schedule``: see ``finetune_long``.
+    same size, so it is for game frames (``modal_atari_train.py``). ``w_ce_schedule``, ``mix`` and ``mix_alpha``:
+    see ``finetune_long``.
     """
     import torch
 
@@ -238,8 +251,10 @@ def finetune(
     for name in sorted({ex["dataset"] for ex in val_ex}):
         small_val += [ex for ex in val_ex if ex["dataset"] == name][:200]
 
+    mix_weights = _parse_mix(mix)
     log = {"run": run_name, "args": dict(backbone=backbone, datasets=datasets, val_datasets=val_datasets or datasets,
-                                         preprocess=preprocess, w_ce_schedule=w_ce_schedule, minutes=minutes, freeze=freeze, n_last=n_last,
+                                         preprocess=preprocess, w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
+                                         minutes=minutes, freeze=freeze, n_last=n_last,
                                          batch_size=batch_size, lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train,
                                          max_val=max_val, val_caps=caps),
            "evals": []}
@@ -256,6 +271,7 @@ def finetune(
         model, proc, train_ex, steps=10**9, batch_size=batch_size, freeze=freeze, n_last=n_last,
         lr_head=lr_head, lr_backbone=lr_backbone, device="cuda", log_every=50, max_minutes=minutes,
         num_workers=num_workers, warmup=100, eval_fn=eval_fn, eval_every=eval_every, w_ce_schedule=w_ce_schedule,
+        mix_weights=mix_weights, mix_alpha=mix_alpha,
     )
     log["steps"], log["examples_seen"] = len(losses), len(losses) * batch_size
     log["loss_first50"], log["loss_last50"] = sum(losses[:50]) / min(50, len(losses)), sum(losses[-50:]) / min(50, len(losses))
@@ -310,11 +326,13 @@ def finetune_long(
     val_datasets: str = "",
     preprocess: str = "processor",
     w_ce_schedule: str = "const",
+    mix: str = "",
+    mix_alpha: float = 0.0,
 ):
     """Multi-epoch fine-tune (vision tower frozen) with per-epoch train/val tracking and best-checkpoint keeping.
 
-    * ``epochs`` counts samples over the combined train set (datasets are still sampled equally, so small sets
-      repeat more; ``max_passes`` > 0 caps the passes over any one dataset).
+    * ``epochs`` counts samples over the combined train set (datasets are sampled by the mix below, equally by
+      default, so small sets repeat more; ``max_passes`` > 0 caps the passes over any one dataset).
     * LRs are given for ``lr_ref_batch`` and scaled by sqrt(batch_size / lr_ref_batch) (the usual rule for Adam).
     * Linear warmup over ``warmup_frac`` of the steps, then cosine decay to 10%; ``max_minutes`` caps wall-clock.
     * Each eval scores the full val splits and the first ``train_eval_n`` train records per dataset (seen in
@@ -330,7 +348,12 @@ def finetune_long(
       makes the two comparable.
     * ``datasets`` defaults to The Cauldron subsets; ``val_datasets`` can score other sets, e.g. the official
       A-OKVQA / ScienceQA / VQAv2 val splits of the README table, on a Cauldron-trained model. With many
-      subsets of very different sizes, set ``max_passes`` (the sampler draws subsets equally).
+      subsets of very different sizes, set ``max_passes`` (the sampler draws subsets equally by default).
+    * ``mix`` and ``mix_alpha`` set the sampling mix: dataset ``k`` is drawn with probability proportional to
+      ``w_k * n_k ** mix_alpha``, where ``w_k`` comes from ``mix`` (``"name=w,name=w"``, e.g.
+      ``"cauldron_ai2d=2,cauldron_figureqa=0.5"``; unlisted datasets get 1) and ``n_k`` is the dataset's train
+      size. The defaults (``""``, 0) are the equal sampling of the earlier runs; ``mix_alpha=1`` samples in
+      proportion to size, ``0.5`` by square root. The effective probabilities are printed at the start.
     * ``preprocess``: see ``finetune``.
     * ``w_ce_schedule="anneal"`` holds the soft cross-entropy weight for the first 30% of training and decays it
       to 0 by 80%, so the run ends on the proper scoring rule alone, which keeps the raw model calibrated
@@ -342,7 +365,8 @@ def finetune_long(
 
     from laya.common import QTYPES
     from laya.vlm import VLMAgent, _permutations
-    from laya.vlm_train import collect_logits, cyclic_orders, fit_temperatures_from, format_metrics, metrics_from, train
+    from laya.vlm_train import (collect_logits, cyclic_orders, fit_temperatures_from, format_metrics, metrics_from,
+                                mix_probabilities, train)
 
     t_start = time.time()
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
@@ -360,11 +384,12 @@ def finetune_long(
     eval_every = max(1, int(round(steps / (epochs * evals_per_epoch))))
     warmup = max(1, int(warmup_frac * steps))
     sizes = {n: sum(ex["dataset"] == n for ex in train_ex) for n in names}
-    per_ds = epochs * len(train_ex) / len(names)
+    mix_weights = _parse_mix(mix)
+    probs = mix_probabilities({n: range(sizes[n]) for n in names}, mix_weights, mix_alpha)
     print("plan: %d steps x batch %d (%.1f epochs of %d), warmup %d, eval every %d, lr head %.2e backbone %.2e"
           % (steps, batch_size, epochs, len(train_ex), warmup, eval_every, lr_h, lr_b))
-    print("expected passes per dataset with equal sampling (before max_passes=%s): %s"
-          % (max_passes or None, {n: round(per_ds / sizes[n], 2) for n in names}))
+    print("expected passes per dataset with the sampling mix (before max_passes=%s): %s"
+          % (max_passes or None, {n: round(epochs * len(train_ex) * probs[n] / sizes[n], 2) for n in names}))
 
     if init_from:
         agent = VLMAgent(_ckpt_path(init_from), device="cuda")
@@ -378,7 +403,7 @@ def finetune_long(
     ev_kw = dict(batch_size=64, num_workers=num_workers)
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
-                                         w_ce_schedule=w_ce_schedule,
+                                         w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
                                          epochs=epochs, max_minutes=max_minutes, batch_size=batch_size, lr_head=lr_h,
                                          lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
                                          max_passes=max_passes, n_calib=n_calib, train_eval_n=train_eval_n),
@@ -417,7 +442,7 @@ def finetune_long(
         model, proc, train_ex, steps=steps, batch_size=batch_size, freeze="full", lr_head=lr_h, lr_backbone=lr_b,
         device="cuda", log_every=100, max_minutes=max_minutes, num_workers=num_workers, warmup=warmup,
         eval_fn=eval_fn, eval_every=eval_every, max_passes=max_passes or None, stats=stats,
-        w_ce_schedule=w_ce_schedule,
+        w_ce_schedule=w_ce_schedule, mix_weights=mix_weights, mix_alpha=mix_alpha,
     )
     if not log["evals"] or log["evals"][-1]["step"] != stats["steps"]:
         eval_fn(stats["steps"])

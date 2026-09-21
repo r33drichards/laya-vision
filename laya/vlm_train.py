@@ -204,23 +204,49 @@ def _single_thread_worker(_):
     torch.set_num_threads(1)  # avoid CPU oversubscription across loader workers
 
 
-class ItemStream(torch.utils.data.IterableDataset):
-    """Endless stream of shuffled-option items, sampling each ``balance_key`` group (dataset) equally.
+def group_weights(groups: Dict[str, Sequence], weights: Optional[Dict[str, float]] = None,
+                  size_alpha: float = 0.0) -> Dict[str, float]:
+    """Unnormalised sampling weight per group: ``weights.get(k, 1.0) * len(group_k) ** size_alpha``.
 
-    ``max_passes`` caps how many times a group is sampled (in passes over it); a capped group leaves the mix and
-    the others keep equal shares. The stream ends when every group is capped. With several loader workers the
-    cap is split evenly between them. ``consumed`` (samples already taken per group in an earlier attempt of a
-    resumed run) counts against those caps.
+    The defaults give every group the same weight (the equal sampling every earlier run used); ``size_alpha=1``
+    draws in proportion to size (a plain shuffle of the union), ``0.5`` in proportion to its square root.
+    """
+    weights = weights or {}
+    return {k: float(weights.get(k, 1.0)) * float(len(g)) ** size_alpha for k, g in groups.items()}
+
+
+def mix_probabilities(groups: Dict[str, Sequence], weights: Optional[Dict[str, float]] = None,
+                      size_alpha: float = 0.0) -> Dict[str, float]:
+    """``group_weights`` normalised to sum to 1 (the effective mix before any ``max_passes`` cap)."""
+    w = group_weights(groups, weights, size_alpha)
+    total = sum(w.values()) or 1.0
+    return {k: v / total for k, v in w.items()}
+
+
+class ItemStream(torch.utils.data.IterableDataset):
+    """Endless stream of shuffled-option items, sampling each ``balance_key`` group (dataset) by weight.
+
+    Group ``k`` is drawn with probability proportional to ``weights.get(k, 1.0) * len(group_k) ** size_alpha``
+    (``group_weights``); the defaults draw every group equally. ``max_passes`` caps how many times a group is
+    sampled (in passes over it); a capped group leaves the mix and the others keep their relative shares. The
+    stream ends when every group is capped. With several loader workers the cap is split evenly between them.
+    ``consumed`` (samples already taken per group in an earlier attempt of a resumed run) counts against those
+    caps.
     """
 
     def __init__(self, processor, examples: List[Dict], seed: int = 0, balance_key: str = "dataset",
-                 max_passes: Optional[float] = None, consumed: Optional[Dict[str, int]] = None, **item_kw):
+                 max_passes: Optional[float] = None, consumed: Optional[Dict[str, int]] = None,
+                 weights: Optional[Dict[str, float]] = None, size_alpha: float = 0.0, **item_kw):
         self.processor, self.seed, self.item_kw, self.max_passes = processor, seed, item_kw, max_passes
         self.consumed = consumed or {}
         self.groups: Dict[str, List[Dict]] = {}
         for ex in examples:
             self.groups.setdefault(ex.get(balance_key, "_"), []).append(ex)
         self.keys = sorted(self.groups)
+        self.weights = group_weights(self.groups, weights, size_alpha)
+        unknown = sorted(set(weights or {}) - set(self.groups))
+        if unknown:
+            print("mix weights for groups not in the data (ignored): %s" % unknown)
 
     def __iter__(self):
         wi = torch.utils.data.get_worker_info()
@@ -233,7 +259,7 @@ class ItemStream(torch.utils.data.IterableDataset):
             keys = [k for k in self.keys if left[k] >= 1]
             if not keys:
                 return
-            key = rng.choice(keys)
+            key = rng.choices(keys, weights=[self.weights[k] for k in keys])[0]
             left[key] -= 1
             ex = rng.choice(self.groups[key])
             try:
@@ -282,6 +308,8 @@ def train(
     resume: Optional[Dict] = None,
     save_state_fn: Optional[Callable[[int, Dict], None]] = None,
     save_state_every_min: float = 0.0,
+    mix_weights: Optional[Dict[str, float]] = None,
+    mix_alpha: float = 0.0,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -293,6 +321,9 @@ def train(
     ``sigma_end`` over training when given) control the exploration noise, ``w_sph`` the spherical score, and
     ``w_ce_schedule="anneal"`` holds the cross-entropy weight at ``w_ce`` for the first 30% of progress then
     decays it linearly to 0 by 80%. ``train_act`` trains the act/escalate head on its cost matrix.
+
+    Sampling mix: dataset ``k`` is drawn with probability proportional to
+    ``mix_weights.get(k, 1.0) * n_k ** mix_alpha`` (``ItemStream``); the defaults draw every dataset equally.
 
     ``eval_fn(step)`` is called every ``eval_every`` steps and should return a truthy value when it really
     evaluated, so a caller can use it as a cheap progress probe at a small ``eval_every`` without paying for a
@@ -319,9 +350,14 @@ def train(
     model.to(device).train()
     dtype = model.encoder.dtype
     amp = device.type == "cuda"
+    stream = ItemStream(processor, examples, seed + (resume["step"] if resume else 0), balance_key=balance_key,
+                        max_passes=max_passes, consumed=resume["seen"] if resume else None,
+                        weights=mix_weights, size_alpha=mix_alpha)
+    probs = mix_probabilities(stream.groups, mix_weights, mix_alpha)
+    print("sampling mix (alpha=%g, before max_passes): %s"
+          % (mix_alpha, ", ".join("%s %.3f" % (k, probs[k]) for k in stream.keys)), flush=True)
     loader = torch.utils.data.DataLoader(
-        ItemStream(processor, examples, seed + (resume["step"] if resume else 0), balance_key=balance_key,
-                   max_passes=max_passes, consumed=resume["seen"] if resume else None),
+        stream,
         batch_size=batch_size,
         num_workers=num_workers,
         collate_fn=functools.partial(_collate_train, pad_id=processor.tokenizer.pad_token_id),
