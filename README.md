@@ -4,7 +4,7 @@ Image inputs for [Laya](https://github.com/NandhaKishorM/laya): typed, calibrate
 
 Laya Vision swaps Laya's ModernBERT text encoder for [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct), which already understands images. It keeps Laya's `predict(state, questions)` API, output schema, proper-scoring-rule training and temperature calibration.
 
-- **Model:** [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m)
+- **Models:** [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m) (the results below) and [thaitea/laya-vision-modernvbert-250m](https://huggingface.co/thaitea/laya-vision-modernvbert-250m) (bidirectional backbone, trained on The Cauldron; see the ModernVBERT section)
 - **Try it in the browser:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Hugging Face Space on free CPU at about 3 s per image. Its source is in `space/`.
 - **Status:** experimental research fork. It is not affiliated with Convai Innovations, the authors of Laya.
 
@@ -128,7 +128,7 @@ Run `modernvbert/cauldron-2ep`: 2 epochs over the 19 Cauldron subsets, 4 passes 
 
 A second run, 3 epochs with the cross-entropy weight annealed to zero (`cauldron-3ep-anneal`), tied it on accuracy (72.1% over all sets) and calibrated ECE (0.030) while making the raw model more overconfident, so the constant-weight recipe stays the default; details in the same doc.
 
-ModernVBERT was pretrained for document retrieval and its paper reports no VQA numbers; on Laya's typed questions it trains as readily as SmolVLM, beats the released model on A-OKVQA, and trails it on ScienceQA, where the SmolVLM run made 12 passes over the train split against 4 here. It is also the faster of the two at inference (32 ms vs 41 ms per image question in bf16 on an L4). Latest checkpoint: `/ckpt/modernvbert/cauldron-2ep/best` on the `laya-checkpoints` volume, not yet published to the Hub. Needs `transformers >= 5.3` (the Modal jobs and the Space pin 5.17).
+ModernVBERT was pretrained for document retrieval and its paper reports no VQA numbers; on Laya's typed questions it trains as readily as SmolVLM, beats the released model on A-OKVQA, and trails it on ScienceQA, where the SmolVLM run made 12 passes over the train split against 4 here. It is also the faster of the two at inference (32 ms vs 41 ms per image question in bf16 on an L4). Published as [thaitea/laya-vision-modernvbert-250m](https://huggingface.co/thaitea/laya-vision-modernvbert-250m) (`laya.load_vlm("thaitea/laya-vision-modernvbert-250m")`), model card in `hf_model_card_modernvbert.md`. Needs `transformers >= 5.3` (the Modal jobs and the Space pin 5.17).
 
 ## What didn't work
 

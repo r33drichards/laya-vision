@@ -9,6 +9,8 @@
     modal run modal_app.py::prepare_cauldron          # The Cauldron's closed-form subsets -> /data/vqa/cauldron_<subset>
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
+    modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
+        --metrics modernvbert/cauldron-2ep/metrics.json --card hf_model_card_modernvbert.md   # the ModernVBERT one
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
 
@@ -88,6 +90,16 @@ def _parse_mix(mix: str) -> dict:
 def _ckpt_root(backbone: str) -> str:
     """Where a backbone's runs go: the two known ones by name, anything else by its Hub name."""
     return CKPT_ROOTS.get(backbone, "/ckpt/" + backbone.split("/")[-1].lower())
+
+
+def _ckpt_file(rel: str) -> str:
+    """A file under a run, e.g. ``all3-3ep/metrics.json`` or ``modernvbert/cauldron-2ep/metrics.json``, resolved
+    like ``_ckpt_path``: under /ckpt/smolvlm first, then /ckpt."""
+    for root in (CKPT_ROOT, "/ckpt"):
+        path = os.path.join(root, rel)
+        if os.path.exists(path):
+            return path
+    return os.path.join(CKPT_ROOT, rel)
 
 
 def _ckpt_path(run_name: str) -> str:
@@ -621,7 +633,7 @@ def push_to_hub(repo_id: str, run_name: str, model_card: str, metrics_path: str 
     with open(os.path.join(stage, "README.md"), "w") as f:
         f.write(model_card)
     if metrics_path:
-        shutil.copy(os.path.join(CKPT_ROOT, metrics_path), os.path.join(stage, "training_metrics.json"))
+        shutil.copy(_ckpt_file(metrics_path), os.path.join(stage, "training_metrics.json"))
     for root, _, files in os.walk(stage):
         for name in files:
             p = os.path.join(root, name)
