@@ -21,7 +21,7 @@ This is the fine-tuned checkpoint `all3-3ep/best`: 3 passes over 72k training ex
 
 - **Latency:** about 71 ms for one image question on an NVIDIA L4 (bf16). The image is encoded once and reused for every question in the call.
 - **Option-order sensitivity:** across 4 rotations of the A-OKVQA option order, accuracy varies by 0.7 points.
-- **`score` questions are not trained yet.** There was no ordinal image data, so treat `score` outputs as meaningless.
+- **`score` questions are not trained yet** in this checkpoint: there was no ordinal image data, so treat its `score` outputs as meaningless. Four rubric-scored sets (response grading, aesthetics votes, generated-image ratings, damage severity) are now prepared for it; see [docs/score-data.md](docs/score-data.md).
 
 ## Usage
 

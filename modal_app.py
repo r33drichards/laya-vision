@@ -7,6 +7,11 @@
     modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep
                                                      # the same run on the bidirectional backbone
     modal run modal_app.py::prepare_cauldron          # The Cauldron's closed-form subsets -> /data/vqa/cauldron_<subset>
+    modal run modal_app.py::prepare_score             # rubric-scored sets (score questions) -> /data/vqa/score_<name>
+    modal run --detach modal_app.py::finetune_long --run-name cauldron-score-2ep --epochs 2 --max-passes 4 \
+        --datasets cauldron,score --val-datasets vqa,cauldron,score
+                                                     # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
+                                                     # add --backbone ModernVBERT/modernvbert for the bidirectional one
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
@@ -23,7 +28,11 @@ Data: the fine-tune jobs default to The Cauldron subsets (``CAULDRON_DATASETS``,
 two layouts exist on the volume: the capped ``cauldron_<subset>`` sets (10,000 usable rows per subset, 5% val)
 and the uncapped ``cauldronfull_<subset>`` sets (``CAULDRON_FULL_DATASETS``, every usable row, 1% val, written by
 ``prepare_cauldron --prefix cauldronfull_ --max-rows 0 --val-pct 1``). The original three VQA sets (``VQA_DATASETS``, official val splits, the README table) stay available with
-``--datasets aokvqa,scienceqa,vqav2_yesno`` and as ``--val-datasets`` for a Cauldron-trained model.
+``--datasets aokvqa,scienceqa,vqav2_yesno`` and as ``--val-datasets`` for a Cauldron-trained model. The ``score``
+head has its own sets (``SCORE_DATASETS``, written by ``prepare_score`` from ``laya.rubric``): rubric-graded
+responses, aesthetics votes, generated-image ratings and damage levels; add them to ``--datasets`` to train it.
+``--datasets`` and ``--val-datasets`` take dataset names and the group names ``vqa``, ``cauldron``, ``cauldronfull``
+and ``score`` (``DATASET_GROUPS``).
 
 Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
 (``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``--init-from``)
@@ -75,6 +84,8 @@ CAULDRON_SUBSETS = ("ai2d", "aokvqa", "iconqa", "intergps", "scienceqa", "tqa", 
                     "clevr", "dvqa", "mapqa", "ocrvqa", "vqav2", "chartqa")  # see laya/cauldron.py
 CAULDRON_DATASETS = tuple("cauldron_" + s for s in CAULDRON_SUBSETS)
 CAULDRON_FULL_DATASETS = tuple("cauldronfull_" + s for s in CAULDRON_SUBSETS)  # uncapped prep, see the docstring
+SCORE_SOURCES = ("vlfeedback", "ava", "richhf", "crisismmd")  # see laya/rubric.py
+SCORE_DATASETS = tuple("score_" + s for s in SCORE_SOURCES)  # rubric-scored sets for the ``score`` head, written by prepare_score
 DATASETS = CAULDRON_DATASETS
 CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
@@ -163,9 +174,23 @@ def _load_split(name: str, split: str, limit):
     return load_jsonl_examples("/data/vqa", name, split, limit=limit)
 
 
+DATASET_GROUPS = {"vqa": VQA_DATASETS, "cauldron": CAULDRON_DATASETS, "cauldronfull": CAULDRON_FULL_DATASETS,
+                  "score": SCORE_DATASETS}
+
+
+def _expand_datasets(names: str) -> list:
+    """``"cauldron,score,aokvqa"`` -> the dataset names, with the group names in ``DATASET_GROUPS`` expanded."""
+    out = []
+    for name in [d.strip() for d in names.split(",") if d.strip()]:
+        for n in DATASET_GROUPS.get(name, (name,)):
+            if n not in out:
+                out.append(n)
+    return out
+
+
 def _ready(names: str):
     out = []
-    for name in [d for d in names.split(",") if d]:
+    for name in _expand_datasets(names):
         if os.path.exists("/data/vqa/%s/_READY" % name):
             out.append(name)
         else:
@@ -519,7 +544,8 @@ def finetune_long(
     timeout=30 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
-def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS), val_split: str = "val", max_val: int = 0):
+def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS), val_split: str = "val",
+             max_val: int = 0):
     """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
     raw and with its temperatures. Defaults to every prepared set (the official VQA splits and the Cauldron
     holdouts); sets that are not prepared are skipped."""
@@ -746,6 +772,143 @@ def prepare_cauldron(subsets: str = ",".join(CAULDRON_SUBSETS), max_rows: int = 
             print("FAILED:", repr(meta)[:300])
             continue
         print("%-16s %8d %8d  %s" % (meta["subset"], meta["rows"], meta["rows_seen"], meta["records"]))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Rubric-scored datasets -> prepared ``score`` datasets (laya/rubric.py)
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _score_source(name: str, split: str, rng, max_texts: int, max_chars: int):
+    """Yield ``(row_id, image, records)`` for one source and split (``"train"`` / ``"val"``); ``image`` is a PIL
+    image or a Hub file path to download. Sources with an upstream validation split use it for ``val``."""
+    from datasets import load_dataset
+
+    from laya.rubric import SOURCES, ava_record, crisismmd_record, richhf_records, vlfeedback_records
+
+    repo = SOURCES[name]
+    if name == "vlfeedback":
+        if split == "val":
+            return  # no upstream split: the job holds out val_pct of the train rows
+        for i, row in enumerate(load_dataset(repo, split="train", streaming=True)):
+            rid = "vlf-%s" % (row.get("id") or i)
+            yield rid, row["image"], vlfeedback_records(row, rid, rng, max_texts=max_texts, max_chars=max_chars)
+    elif name == "ava":
+        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True)):
+            rid = "ava-%s" % (row.get("image_id") or i)
+            rec = ava_record(row, rid, rng)
+            yield rid, row["image"], [rec] if rec else []
+    elif name == "richhf":
+        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True)):
+            rid = "richhf-%d" % i
+            yield rid, row["image"], richhf_records(row, rid, rng, max_texts=max_texts)
+    elif name == "crisismmd":
+        for i, row in enumerate(load_dataset(repo, "damage", split="dev" if split == "val" else "train")):
+            rid = "crisis-%s" % (row.get("image_id") or i)
+            rec = crisismmd_record(row, rid, rng)
+            yield rid, row.get("image") or row["image_path"], [rec] if rec else []
+    else:
+        raise ValueError("unknown score source %r (one of %s)" % (name, sorted(SOURCES)))
+
+
+@app.function(image=image, cpu=4, memory=16384, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def prepare_score_dataset(name: str, max_rows: int = 0, max_texts: int = 2, val_pct: float = 5.0, max_val: int = 1000,
+                          max_side: int = 1024, seed: int = 0, balance: float = 3.0, max_chars: int = 1200,
+                          prefix: str = "score_"):
+    """Stream one rubric-scored source (``laya.rubric.SOURCES``) and write /data/vqa/<prefix><name>/{train,val}.jsonl + images/.
+
+    Rows are taken in stream order until ``max_rows`` usable rows (0: all); each keeps at most ``max_texts``
+    records (sampled). Sources with an upstream validation split use it for ``val`` (capped at ``max_val``
+    rows); the others hold out a seeded ``val_pct`` percent of rows by row, so an image never sits in both
+    splits. After streaming, the train split is level-balanced (``laya.rubric.balance_levels``: no level above
+    ``balance`` x the median level count) and images no record points at are deleted. Images are JPEG with the
+    longest side at most ``max_side``. Records carry ``"target"`` (AVA's vote histogram) where the source has it.
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    from huggingface_hub import hf_hub_download
+    from PIL import Image
+
+    from laya.rubric import SOURCES, balance_levels, level_counts
+
+    ds_name = prefix + name
+    final_dir = os.path.join("/data/vqa", ds_name)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    rng = random.Random(seed)
+    t0 = time.time()
+    recs = {"train": [], "val": []}
+    n_rows = {"train": 0, "val": 0}
+    for split in ("train", "val"):
+        for rid, image, rows in _score_source(name, split, rng, max_texts, max_chars):
+            if not rows:
+                continue
+            if split == "train" and max_rows and n_rows["train"] >= max_rows:
+                break
+            if split == "val" and max_val and n_rows["val"] >= max_val:
+                break
+            target = split
+            if split == "train" and name in ("vlfeedback",):
+                target = "val" if rng.random() < val_pct / 100 else "train"
+                if target == "val" and max_val and n_rows["val"] >= max_val:
+                    target = "train"
+            path = "images/%s.jpg" % rid
+            if isinstance(image, str):
+                image = Image.open(hf_hub_download(SOURCES[name], image, repo_type="dataset"))
+            im = image.convert("RGB")
+            im.thumbnail((max_side, max_side))
+            im.save(os.path.join(tmp_dir, path), quality=90)
+            for rec in rows:
+                rec["image"] = path
+            recs[target] += rows
+            n_rows[target] += 1
+            if sum(n_rows.values()) % 1000 == 0:
+                print("%s: %s rows in %.1f min" % (name, n_rows, (time.time() - t0) / 60), flush=True)
+    before = level_counts(recs["train"])
+    recs["train"] = balance_levels(recs["train"], balance, rng)
+    used = {r["image"] for split in recs for r in recs[split]}
+    dropped = 0
+    for fn in os.listdir(os.path.join(tmp_dir, "images")):
+        if "images/" + fn not in used:
+            os.remove(os.path.join(tmp_dir, "images", fn))
+            dropped += 1
+    for split in ("train", "val"):
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as f:
+            for rec in recs[split]:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    meta = {"source": SOURCES[name], "name": name, "rows": n_rows, "max_rows": max_rows, "max_texts": max_texts,
+            "val_pct": val_pct, "max_val": max_val, "max_side": max_side, "seed": seed, "balance": balance,
+            "max_chars": max_chars, "records": {s: len(recs[s]) for s in recs},
+            "levels": {"train_before_balance": dict(sorted(before.items())), "train": dict(sorted(level_counts(recs["train"]).items())),
+                       "val": dict(sorted(level_counts(recs["val"]).items()))},
+            "images_dropped_by_balance": dropped, "minutes": round((time.time() - t0) / 60, 1)}
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    print("%s: rows %s, records %s, levels %s, %.1f min" % (name, n_rows, meta["records"], meta["levels"], meta["minutes"]))
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_score(names: str = ",".join(SCORE_SOURCES), max_rows: int = 0, max_texts: int = 2, val_pct: float = 5.0,
+                  max_val: int = 1000, max_side: int = 1024, balance: float = 3.0, max_chars: int = 1200,
+                  prefix: str = "score_"):
+    """modal run modal_app.py::prepare_score [--names ava,crisismmd] -- one container per source, in parallel."""
+    kw = dict(max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_val=max_val, max_side=max_side,
+              balance=balance, max_chars=max_chars, prefix=prefix)
+    print("%-12s %-28s %-24s  %s" % ("source", "rows", "records", "train levels"))
+    for meta in prepare_score_dataset.map([n for n in names.split(",") if n], kwargs=kw, order_outputs=True, return_exceptions=True):
+        if isinstance(meta, Exception):
+            print("FAILED:", repr(meta)[:300])
+            continue
+        print("%-12s %-28s %-24s  %s" % (meta["name"], meta["rows"], meta["records"], meta["levels"]["train"]))
 
 
 # ---------------------------------------------------------------------------------------------------------
