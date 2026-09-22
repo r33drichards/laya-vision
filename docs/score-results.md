@@ -125,10 +125,29 @@ Both models order the pairs the right way on the trained rubrics: severe over no
 
 The checkpoint is `/ckpt/smolvlm/cauldron-score-2ep-bidir-full/best` on the `laya-checkpoints` volume and is published as [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score); it is the first Laya Vision checkpoint whose `score` answers mean something.
 
+## A third epoch from the published checkpoint
+
+`cauldron-score-3ep-bidir-vlf5`: `--init-from cauldron-score-2ep-bidir-full/best --epochs 1 --max-passes 2 --mix score_vlfeedback=5`, so one more pass over the 481k examples with VLFeedback at 20% of the draws (0.77 further passes), a fresh warmup and cosine decay on top of the converged model. 15,040 steps in 89 minutes; best checkpoint at the end. Temperatures (choice, score, noul): 2.51 / 1.41 / 2.33. Log: `smolvlm-cauldron-score-3ep-vlf5-metrics.json`.
+
+| | Published (2 epochs) | + 1 epoch, VLFeedback x5 | Prior only |
+|---|---|---|---|
+| Mean of per-set val acc, 26 sets | 75.1% | **75.2%** | |
+| A-OKVQA / ScienceQA / VQAv2 yes-no | 60.0 / 82.8 / 72.4 | 60.6 / **83.8** / 72.1 | |
+| A-OKVQA cyclic-shift spread | 1.4 | **0.3** | |
+| IconQA / RAVEN / TQA / InterGPS | 93.7 / 77.1 / 73.1 / 34.0 | 93.1 / 78.2 / 72.0 / 36.2 | |
+| score_vlfeedback acc / mae | 53.9% / 0.796 | **54.4% / 0.771** | 27.5% / 1.369 |
+| score_richhf acc / mae | 57.3% / 0.497 | 57.9% / 0.496 | 44% / 0.663 |
+| score_crisismmd acc / mae | **69.0% / 0.376** | 67.1% / 0.387 | 62.8% / 0.636 |
+| score_ava mae / xent | 0.253 / 1.212 | **0.242 / 1.204** | 0.293 / 1.233 |
+| Calibrated ECE, all sets | 0.034 | 0.034 | |
+
+Half a point on VLFeedback, a point on ScienceQA, two points lost on CrisisMMD (529 rows, so within noise), and a more overconfident raw model (choice temperature 2.5 vs 2.2). The one striking number is the A-OKVQA option-order spread, 0.3 points against 1.4 for every earlier run; on 1,138 rows a single run cannot separate that from luck, but it is what the bidirectional option block was supposed to deliver once the backbone had enough steps under the new mask. The rubric sets have flattened: VLFeedback gained 4 points from the first extra 0.5 passes and 0.5 from the next 0.8. **The published checkpoint stays as is**; this one is `/ckpt/smolvlm/cauldron-score-3ep-bidir-vlf5/best` on the volume if anyone wants the order-spread result checked on more rows.
+
 ## Next
 
-- Done above: the completed schedule, VLFeedback x3 and the unbalanced AVA (`prepare_score --names ava --balance 0`). VLFeedback was still improving; a third epoch or `--mix score_vlfeedback=5` is the obvious next lever.
+- Done above: the completed schedule, VLFeedback x3, the unbalanced AVA and a third epoch with VLFeedback x5. More passes over the same rubric data are flat now; the next gains need new rubric data (MM-RLHF's human ratings, LLaVA-Critic's 0-100 caption grades) or per-dataset `score` temperatures.
+- Re-check the 0.3-point order spread of the third-epoch checkpoint on the Cauldron A-OKVQA holdout and ScienceQA (`evaluate` with cyclic orders) before drawing a conclusion from it.
 - Published: `cauldron-score-2ep-bidir-full/best` is [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score), model card in `hf_model_card_score.md`; the same weights are also at [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision), the moving "latest recommended" repo.
-- Running: `cauldron-score-3ep-bidir-vlf5`, one more epoch from that checkpoint with VLFeedback drawn 5x.
+- Done: `cauldron-score-3ep-bidir-vlf5`, one more epoch from that checkpoint with VLFeedback drawn 5x; see the last section. Diminishing returns, the published checkpoint stays.
 - Per-option-count or per-dataset temperatures for `score`.
 - Report `mae` / `xent` in the training-time evals too (they are in `metrics_from` now, so the next run's `metrics.json` will carry them).
