@@ -622,18 +622,36 @@ def fit_temperatures(model: VLMDecisionModel, processor, examples: List[Dict], *
 
 
 def metrics_from(records: List[Dict], temperatures: Sequence[float] = (1.0, 1.0, 1.0)) -> Dict[str, Dict[str, float]]:
-    """Accuracy, ECE (max-prob confidence, 15 bins), and NLL overall and per dataset."""
+    """Accuracy, ECE (max-prob confidence, 15 bins), and NLL overall and per dataset.
+
+    Groups with ``score`` records also get two ordinal metrics over those records: ``mae``, the absolute
+    difference between the expected level under the model and under the target (``|E_p[i] - E_t[i]|``, in
+    levels; with a one-hot target that is the distance from the label), and ``xent``, the cross-entropy against
+    the (possibly soft) target, which is what a vote-histogram target like AVA's is actually trained on. Argmax
+    accuracy and NLL against the argmax label understate such a model: it is trained to spread probability.
+    """
     groups: Dict[str, List] = {"all": []}
+    ordinal: Dict[str, List] = {}
     for r in records:
         p = torch.softmax(r["logits"] / temperatures[r["qtype"]], -1)
         row = (float(p.max()), float(int(p.argmax()) == r["label"]), -float(torch.log(p[r["label"]].clamp_min(1e-12))))
         groups["all"].append(row)
         groups.setdefault(r["dataset"], []).append(row)
+        if r["qtype"] == QTYPES["score"] and r.get("target") is not None:
+            t = torch.as_tensor(r["target"], dtype=torch.float32)
+            t = t / t.sum().clamp_min(1e-12)
+            levels = torch.arange(len(p), dtype=torch.float32)
+            orow = (abs(float((p * levels).sum() - (t * levels).sum())), -float((t * torch.log(p.clamp_min(1e-12))).sum()))
+            ordinal.setdefault("all", []).append(orow)
+            ordinal.setdefault(r["dataset"], []).append(orow)
     out = {}
     for name, rows in groups.items():
         a = np.array(rows) if rows else np.zeros((0, 3))
         out[name] = {"n": len(rows), "acc": float(a[:, 1].mean()) if rows else float("nan"),
                      "ece": ece_score(a[:, 0], a[:, 1]), "nll": float(a[:, 2].mean()) if rows else float("nan")}
+        if name in ordinal:
+            o = np.array(ordinal[name])
+            out[name].update(n_score=len(o), mae=float(o[:, 0].mean()), xent=float(o[:, 1].mean()))
     return out
 
 
@@ -642,7 +660,12 @@ def evaluate(model: VLMDecisionModel, processor, examples: List[Dict], temperatu
 
 
 def format_metrics(m: Dict) -> str:
-    return " | ".join("%s n=%d acc=%.3f ece=%.3f nll=%.3f" % (k, v["n"], v["acc"], v["ece"], v["nll"]) for k, v in m.items())
+    def one(k, v):
+        s = "%s n=%d acc=%.3f ece=%.3f nll=%.3f" % (k, v["n"], v["acc"], v["ece"], v["nll"])
+        if "mae" in v:
+            s += " mae=%.3f xent=%.3f" % (v["mae"], v["xent"])
+        return s
+    return " | ".join(one(k, v) for k, v in m.items())
 
 
 def main(argv: Optional[Iterable[str]] = None):
