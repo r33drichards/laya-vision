@@ -17,6 +17,7 @@
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
         --metrics modernvbert/cauldron-2ep/metrics.json --card hf_model_card_modernvbert.md   # the ModernVBERT one
+    modal run modal_app.py::publish_space            # push space/ to the thaitea/laya-vision-demo Space
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
 
@@ -683,6 +684,39 @@ def push_to_hub(repo_id: str, run_name: str, model_card: str, metrics_path: str 
                              commit_message="Upload %s checkpoint" % run_name)
     print("uploaded:", info.commit_url)
     return info.commit_url
+
+
+@app.function(image=image, timeout=15 * 60, secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def push_space(repo_id: str, files: dict):
+    """Upload ``files`` (``{relative path: bytes}``, the contents of ``space/``) to a Hugging Face Space."""
+    import tempfile
+
+    from huggingface_hub import HfApi
+
+    stage = tempfile.mkdtemp()
+    for rel, data in files.items():
+        path = os.path.join(stage, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        print("%10d  %s" % (len(data), rel))
+    api = HfApi()
+    api.create_repo(repo_id, repo_type="space", space_sdk="gradio", exist_ok=True)
+    info = api.upload_folder(folder_path=stage, repo_id=repo_id, repo_type="space", commit_message="Update Space from space/")
+    print("uploaded:", info.commit_url)
+    return info.commit_url
+
+
+@app.local_entrypoint()
+def publish_space(repo: str = "thaitea/laya-vision-demo", folder: str = "space"):
+    """modal run modal_app.py::publish_space  -- push the demo's source (space/) to its Hugging Face Space."""
+    files = {}
+    for root, _, names in os.walk(folder):
+        for name in names:
+            path = os.path.join(root, name)
+            with open(path, "rb") as f:
+                files[os.path.relpath(path, folder)] = f.read()
+    print(push_space.remote(repo, files))
 
 
 @app.local_entrypoint()
