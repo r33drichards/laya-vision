@@ -38,6 +38,8 @@ Accuracies are on the official validation splits (VQAv2 yes/no is a re-split of 
 
 The full scorecard for the recommended checkpoint covers 34 validation sets, human-vote calibration, the games suite and latency: [docs/evals/laya-vision.md](docs/evals/laya-vision.md).
 
+The recommended row's accuracies are backed by committed per-row predictions in [results/raw/](results/raw/); `python benchmarks/verify_published.py` recomputes them (and calibrated ECE) and checks them against this table and [its metrics](docs/smolvlm-cauldron-score-bidir-full-metrics.json). Rules for adding or changing numbers: [AGENTS.md](AGENTS.md).
+
 The recommended checkpoint is the only one whose `score` answers mean anything. On held-out rubric data it scores 54% over 5 levels on VLFeedback response grading (prior-only baseline 27.5%), is 0.8 levels off on average against 1.4 for the baseline, and 0.38 levels off on 3-level damage severity. Full tables, the ordinal metrics and what each run changed are in [docs/score-results.md](docs/score-results.md).
 
 ## How it works
