@@ -1,18 +1,43 @@
-"""Modal jobs for the SmolVLM-backed decision model (``laya.vlm``).
+"""Modal jobs for the VLM-backed decision model (``laya.vlm``): SmolVLM by default, ModernVBERT on request.
 
-    modal run modal_app.py::test                     # pytest on a GPU + latency
+    modal run modal_app.py::test                     # pytest on a GPU + latency, both backbones
     modal run modal_app.py::finetune --minutes 18    # short fine-tune + held-out acc / ECE
     modal run modal_app.py::evaluate --run-name <run> # re-evaluate a saved checkpoint
     modal run --detach modal_app.py::finetune_long   # ~3-epoch A100 run with per-epoch eval + best checkpoint
+    modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep
+                                                     # the same run on the bidirectional backbone
+    modal run modal_app.py::prepare_cauldron          # The Cauldron's closed-form subsets -> /data/vqa/cauldron_<subset>
+    modal run modal_app.py::prepare_score             # rubric-scored sets (score questions) -> /data/vqa/score_<name>
+    modal run --detach modal_app.py::finetune_long --run-name cauldron-score-2ep --epochs 2 --max-passes 4 \
+        --datasets cauldron,score --val-datasets vqa,cauldron,score
+                                                     # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
+                                                     # add --backbone ModernVBERT/modernvbert for the bidirectional one,
+                                                     # or --option-attention bidirectional to un-causal SmolVLM's option block
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
+    modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
+        --metrics modernvbert/cauldron-2ep/metrics.json --card hf_model_card_modernvbert.md   # the ModernVBERT one
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
 
 Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
     laya-datasets     -> /data       (read-only; /data/vqa/<name>/{<split>.jsonl, images/, _READY})
-    laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/)
+    laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/ and /ckpt/modernvbert/)
+
+Data: the fine-tune jobs default to The Cauldron subsets (``CAULDRON_DATASETS``, written by ``prepare_cauldron``);
+two layouts exist on the volume: the capped ``cauldron_<subset>`` sets (10,000 usable rows per subset, 5% val)
+and the uncapped ``cauldronfull_<subset>`` sets (``CAULDRON_FULL_DATASETS``, every usable row, 1% val, written by
+``prepare_cauldron --prefix cauldronfull_ --max-rows 0 --val-pct 1``). The original three VQA sets (``VQA_DATASETS``, official val splits, the README table) stay available with
+``--datasets aokvqa,scienceqa,vqav2_yesno`` and as ``--val-datasets`` for a Cauldron-trained model. The ``score``
+head has its own sets (``SCORE_DATASETS``, written by ``prepare_score`` from ``laya.rubric``): rubric-graded
+responses, aesthetics votes, generated-image ratings and damage levels; add them to ``--datasets`` to train it.
+``--datasets`` and ``--val-datasets`` take dataset names and the group names ``vqa``, ``cauldron``, ``cauldronfull``
+and ``score`` (``DATASET_GROUPS``).
+
+Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
+(``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``--init-from``)
+the name is relative to /ckpt/smolvlm as before, or to /ckpt, so a ModernVBERT run is ``modernvbert/<run>/best``.
 """
 import json
 import os
@@ -53,18 +78,63 @@ def _with_local_code(img):
 image = _with_local_code(base_image)
 
 BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
-DATASETS = ("aokvqa", "scienceqa", "vqav2_yesno")
-CKPT_ROOT = "/ckpt/smolvlm"
+MODERNVBERT = "ModernVBERT/modernvbert"
+VQA_DATASETS = ("aokvqa", "scienceqa", "vqav2_yesno")  # the original post-training sets, official val splits
+CAULDRON_SUBSETS = ("ai2d", "aokvqa", "iconqa", "intergps", "scienceqa", "tqa", "visual7w", "raven",
+                    "figureqa", "hateful_memes", "nlvr2", "vsr", "vqarad",
+                    "clevr", "dvqa", "mapqa", "ocrvqa", "vqav2", "chartqa")  # see laya/cauldron.py
+CAULDRON_DATASETS = tuple("cauldron_" + s for s in CAULDRON_SUBSETS)
+CAULDRON_FULL_DATASETS = tuple("cauldronfull_" + s for s in CAULDRON_SUBSETS)  # uncapped prep, see the docstring
+SCORE_SOURCES = ("vlfeedback", "ava", "richhf", "crisismmd")  # see laya/rubric.py
+SCORE_DATASETS = tuple("score_" + s for s in SCORE_SOURCES)  # rubric-scored sets for the ``score`` head, written by prepare_score
+DATASETS = CAULDRON_DATASETS
+CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", MODERNVBERT: "/ckpt/modernvbert"}
+CKPT_ROOT = CKPT_ROOTS[BACKBONE]
 
 
-@app.function(image=image, gpu="L4", timeout=30 * 60, volumes={"/cache/hf": hf_vol})
-def test():
-    """Run tests/test_vlm.py on the GPU, then time predict() in fp32 and bf16."""
+def _parse_mix(mix: str) -> dict:
+    """``"name=w,name=w"`` -> ``{name: float(w)}``; ``""`` -> ``{}`` (equal sampling)."""
+    out = {}
+    for kv in mix.split(","):
+        if kv.strip():
+            k, v = kv.split("=")
+            out[k.strip()] = float(v)
+    return out
+
+
+def _ckpt_root(backbone: str) -> str:
+    """Where a backbone's runs go: the two known ones by name, anything else by its Hub name."""
+    return CKPT_ROOTS.get(backbone, "/ckpt/" + backbone.split("/")[-1].lower())
+
+
+def _ckpt_file(rel: str) -> str:
+    """A file under a run, e.g. ``all3-3ep/metrics.json`` or ``modernvbert/cauldron-2ep/metrics.json``, resolved
+    like ``_ckpt_path``: under /ckpt/smolvlm first, then /ckpt."""
+    for root in (CKPT_ROOT, "/ckpt"):
+        path = os.path.join(root, rel)
+        if os.path.exists(path):
+            return path
+    return os.path.join(CKPT_ROOT, rel)
+
+
+def _ckpt_path(run_name: str) -> str:
+    """A saved run: ``<run>`` under /ckpt/smolvlm (the original layout) or ``<family>/<run>`` under /ckpt."""
+    for root in (CKPT_ROOT, "/ckpt"):
+        path = os.path.join(root, run_name)
+        if os.path.exists(os.path.join(path, "vlm_agent_config.json")):
+            return path
+    return os.path.join(CKPT_ROOT, run_name)
+
+
+@app.function(image=image, gpu="L4", timeout=45 * 60, volumes={"/cache/hf": hf_vol})
+def test(backbones: str = BACKBONE + "," + MODERNVBERT):
+    """Run tests/test_vlm.py and tests/test_modernvbert.py on the GPU, then time predict() in fp32 and bf16."""
     import torch
 
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     rc = subprocess.run(
-        [sys.executable, "-m", "pytest", "/root/tests/test_vlm.py", "-v", "-s", "-p", "no:cacheprovider", "-W", "ignore"],
+        [sys.executable, "-m", "pytest", "/root/tests/test_vlm.py", "/root/tests/test_modernvbert.py", "-v", "-s",
+         "-p", "no:cacheprovider", "-W", "ignore"],
         cwd="/root",
     ).returncode
     hf_vol.commit()
@@ -78,22 +148,23 @@ def test():
     one = {"is_red": {"type": "noul", "instructions": "Is the square red?"}}
     three = dict(one, color={"type": "choice", "instructions": "What color?", "criteria": ["red", "blue", "green"]},
                  size={"type": "score", "instructions": "How big?", "criteria": ["small", "medium", "large"]})
-    for dtype in ("fp32", "bf16"):
-        agent = VLMAgent(backbone=BACKBONE, device="cuda", dtype=dtype)
-        for label, state, qs in (("image, 1 q", {"image": img}, one), ("image, 3 q", {"image": img}, three),
-                                 ("text, 1 q", "Customer: I was billed twice.", one), ("text, 3 q", "Customer: I was billed twice.", three)):
-            for _ in range(3):
-                agent.predict(state, qs)
-            ts = []
-            for _ in range(20):
-                torch.cuda.synchronize()
-                t0 = time.perf_counter()
-                agent.predict(state, qs)
-                torch.cuda.synchronize()
-                ts.append((time.perf_counter() - t0) * 1000)
-            ts.sort()
-            print("latency %-5s %-11s median %6.1f ms  p90 %6.1f ms" % (dtype, label, ts[10], ts[18]))
-        del agent
+    for backbone in [b for b in backbones.split(",") if b]:
+        for dtype in ("fp32", "bf16"):
+            agent = VLMAgent(backbone=backbone, device="cuda", dtype=dtype)
+            for label, state, qs in (("image, 1 q", {"image": img}, one), ("image, 3 q", {"image": img}, three),
+                                     ("text, 1 q", "Customer: I was billed twice.", one), ("text, 3 q", "Customer: I was billed twice.", three)):
+                for _ in range(3):
+                    agent.predict(state, qs)
+                ts = []
+                for _ in range(20):
+                    torch.cuda.synchronize()
+                    t0 = time.perf_counter()
+                    agent.predict(state, qs)
+                    torch.cuda.synchronize()
+                    ts.append((time.perf_counter() - t0) * 1000)
+                ts.sort()
+                print("latency %-28s %-5s %-11s median %6.1f ms  p90 %6.1f ms" % (backbone, dtype, label, ts[10], ts[18]))
+            del agent
     if rc != 0:
         raise SystemExit("pytest failed with exit code %d" % rc)
 
@@ -104,24 +175,50 @@ def _load_split(name: str, split: str, limit):
     return load_jsonl_examples("/data/vqa", name, split, limit=limit)
 
 
-def _load_data(datasets: str, train_split: str, val_split: str, n_calib: int, max_train: int, max_val: int, caps: dict):
+DATASET_GROUPS = {"vqa": VQA_DATASETS, "cauldron": CAULDRON_DATASETS, "cauldronfull": CAULDRON_FULL_DATASETS,
+                  "score": SCORE_DATASETS}
+
+
+def _expand_datasets(names: str) -> list:
+    """``"cauldron,score,aokvqa"`` -> the dataset names, with the group names in ``DATASET_GROUPS`` expanded."""
+    out = []
+    for name in [d.strip() for d in names.split(",") if d.strip()]:
+        for n in DATASET_GROUPS.get(name, (name,)):
+            if n not in out:
+                out.append(n)
+    return out
+
+
+def _ready(names: str):
+    out = []
+    for name in _expand_datasets(names):
+        if os.path.exists("/data/vqa/%s/_READY" % name):
+            out.append(name)
+        else:
+            print("dataset %s not ready (no _READY); skipping" % name)
+    return out
+
+
+def _load_data(datasets: str, train_split: str, val_split: str, n_calib: int, max_train: int, max_val: int, caps: dict,
+               val_datasets: str = ""):
     """(train, calib, val) examples. The LAST ``n_calib`` train records per dataset (file order) are held out of
     training for temperature fitting, as in the SigLIP-projector runs (runs before commit 2651641 held out a seeded
-    random 300 instead)."""
+    random 300 instead). ``val_datasets`` scores different sets than were trained on (default: the same)."""
     data_vol.reload()
     train_ex, calib_ex, val_ex = [], [], []
-    for name in [d for d in datasets.split(",") if d]:
-        if not os.path.exists("/data/vqa/%s/_READY" % name):
-            print("dataset %s not ready (no _READY); skipping" % name)
-            continue
+    for name in _ready(datasets):
         tr = _load_split(name, train_split, max_train + n_calib if max_train else 0)
         calib_ex += tr[-n_calib:]
         train_ex += tr[:-n_calib]
+        print("dataset %s: %d train, %d calib" % (name, len(tr) - n_calib, min(n_calib, len(tr))))
+    for name in _ready(val_datasets or datasets):
         va = _load_split(name, val_split, caps.get(name, max_val) or 0)
         val_ex += va
-        print("dataset %s: %d train, %d calib, %d val" % (name, len(tr) - n_calib, min(n_calib, len(tr)), len(va)))
+        print("dataset %s: %d val" % (name, len(va)))
     if not train_ex:
         raise SystemExit("no training data (datasets not ready)")
+    if not val_ex:
+        raise SystemExit("no validation data (datasets not ready)")
     return train_ex, calib_ex, val_ex
 
 
@@ -151,11 +248,23 @@ def finetune(
     num_workers: int = 14,
     synthetic: bool = False,
     run_name: str = "",
+    backbone: str = BACKBONE,
+    val_datasets: str = "",
+    preprocess: str = "processor",
+    option_attention: str = "causal",
+    w_ce_schedule: str = "const",
+    mix: str = "",
+    mix_alpha: float = 0.0,
 ):
-    """Short fine-tune on the prepared VQA sets; logs loss and held-out accuracy / ECE, saves to /ckpt/smolvlm/<run>.
+    """Short fine-tune on the prepared VQA sets; logs loss and held-out accuracy / ECE, saves to
+    ``<backbone root>/<run>`` (/ckpt/smolvlm or /ckpt/modernvbert).
 
     ``max_train`` / ``max_val`` = 0 means the whole split; otherwise the first N records in file order.
-    ``val_caps`` overrides the val cap per dataset, e.g. ``"vqav2_yesno=1000"``.
+    ``val_caps`` overrides the val cap per dataset, e.g. ``"vqav2_yesno=1000"``. ``preprocess`` is the image
+    path recorded in the checkpoint: ``"processor"`` (the Hugging Face processor, what the released model
+    used) for photos of mixed sizes; the device-side ``"gpu"`` path stacks raw frames and needs them all the
+    same size, so it is for game frames (``modal_atari_train.py``). ``w_ce_schedule``, ``mix`` and ``mix_alpha``:
+    see ``finetune_long``.
     """
     import torch
 
@@ -165,7 +274,7 @@ def finetune(
     t_start = time.time()
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     run_name = run_name or time.strftime("run-%Y%m%d-%H%M%S")
-    out_dir = os.path.join(CKPT_ROOT, run_name)
+    out_dir = os.path.join(_ckpt_root(backbone), run_name)
 
     caps = {k: int(v) for k, v in (kv.split("=") for kv in val_caps.split(",") if kv)}
     if synthetic:
@@ -173,9 +282,10 @@ def finetune(
         calib_ex = [dict(ex, dataset="synthetic") for ex in synthetic_examples(16, seed=2)]
         val_ex = [dict(ex, dataset="synthetic") for ex in synthetic_examples(32, seed=1)]
     else:
-        train_ex, calib_ex, val_ex = _load_data(datasets, train_split, val_split, n_calib, max_train, max_val, caps)
+        train_ex, calib_ex, val_ex = _load_data(datasets, train_split, val_split, n_calib, max_train, max_val, caps, val_datasets)
 
-    agent = VLMAgent(backbone=BACKBONE, device="cuda")
+    agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention)
+    print("backbone %s, readout %s, preprocess %s" % (backbone, agent.model.readout, agent.prep.backend))
     hf_vol.commit()
     model, proc = agent.model, agent.processor
     ev_kw = dict(batch_size=32, num_workers=num_workers)
@@ -183,8 +293,13 @@ def finetune(
     for name in sorted({ex["dataset"] for ex in val_ex}):
         small_val += [ex for ex in val_ex if ex["dataset"] == name][:200]
 
-    log = {"run": run_name, "args": dict(datasets=datasets, minutes=minutes, freeze=freeze, n_last=n_last, batch_size=batch_size,
-                                         lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train, max_val=max_val, val_caps=caps),
+    mix_weights = _parse_mix(mix)
+    log = {"run": run_name, "args": dict(backbone=backbone, datasets=datasets, val_datasets=val_datasets or datasets,
+                                         preprocess=preprocess, option_attention=agent.model.option_attention,
+                                         w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
+                                         minutes=minutes, freeze=freeze, n_last=n_last,
+                                         batch_size=batch_size, lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train,
+                                         max_val=max_val, val_caps=caps),
            "evals": []}
     base = metrics_from(collect_logits(model, proc, small_val, **ev_kw))
     print("[eval step 0, untrained head] " + format_metrics(base), flush=True)
@@ -198,7 +313,8 @@ def finetune(
     losses = train(
         model, proc, train_ex, steps=10**9, batch_size=batch_size, freeze=freeze, n_last=n_last,
         lr_head=lr_head, lr_backbone=lr_backbone, device="cuda", log_every=50, max_minutes=minutes,
-        num_workers=num_workers, warmup=100, eval_fn=eval_fn, eval_every=eval_every,
+        num_workers=num_workers, warmup=100, eval_fn=eval_fn, eval_every=eval_every, w_ce_schedule=w_ce_schedule,
+        mix_weights=mix_weights, mix_alpha=mix_alpha,
     )
     log["steps"], log["examples_seen"] = len(losses), len(losses) * batch_size
     log["loss_first50"], log["loss_last50"] = sum(losses[:50]) / min(50, len(losses)), sum(losses[-50:]) / min(50, len(losses))
@@ -230,7 +346,7 @@ def finetune(
     gpu="A100",
     cpu=24,
     memory=65536,
-    timeout=170 * 60,
+    timeout=300 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
 )
 def finetune_long(
@@ -249,20 +365,48 @@ def finetune_long(
     num_workers: int = 22,
     run_name: str = "all3-3ep",
     init_from: str = "",
+    backbone: str = BACKBONE,
+    val_datasets: str = "",
+    preprocess: str = "processor",
+    option_attention: str = "causal",
+    w_ce_schedule: str = "const",
+    mix: str = "",
+    mix_alpha: float = 0.0,
 ):
     """Multi-epoch fine-tune (vision tower frozen) with per-epoch train/val tracking and best-checkpoint keeping.
 
-    * ``epochs`` counts samples over the combined train set (datasets are still sampled equally, so small sets
-      repeat more; ``max_passes`` > 0 caps the passes over any one dataset).
+    * ``epochs`` counts samples over the combined train set (datasets are sampled by the mix below, equally by
+      default, so small sets repeat more; ``max_passes`` > 0 caps the passes over any one dataset).
     * LRs are given for ``lr_ref_batch`` and scaled by sqrt(batch_size / lr_ref_batch) (the usual rule for Adam).
     * Linear warmup over ``warmup_frac`` of the steps, then cosine decay to 10%; ``max_minutes`` caps wall-clock.
     * Each eval scores the full val splits and the first ``train_eval_n`` train records per dataset (seen in
       training) to expose overfitting. ``last/`` is saved every eval; ``best/`` when mean per-dataset val acc
       improves. The final model is the best one: temperatures are fitted on the calibration holdout, then the full
       val splits are scored raw and calibrated, plus an option-order-bias check on aokvqa.
-    * ``init_from`` (a run under /ckpt/smolvlm, e.g. ``all3-3ep/best``) continues from a trained checkpoint
-      instead of a fresh head. Question types absent from the calibration holdout keep that checkpoint's
-      temperature rather than being reset to 1.0.
+    * ``init_from`` (a run under /ckpt/smolvlm, e.g. ``all3-3ep/best``, or ``modernvbert/<run>/best``) continues
+      from a trained checkpoint instead of a fresh head. Question types absent from the calibration holdout keep
+      that checkpoint's temperature rather than being reset to 1.0.
+    * ``backbone`` picks the family: SmolVLM (causal, the released model) or ``ModernVBERT/modernvbert``
+      (bidirectional, ``[MASK]`` readout). The run is saved under that backbone's root, so the two can share
+      a ``run_name``. Everything else, data, objective, schedule and evaluation, is identical, which is what
+      makes the two comparable.
+    * ``datasets`` defaults to The Cauldron subsets; ``val_datasets`` can score other sets, e.g. the official
+      A-OKVQA / ScienceQA / VQAv2 val splits of the README table, on a Cauldron-trained model. With many
+      subsets of very different sizes, set ``max_passes`` (the sampler draws subsets equally by default).
+    * ``mix`` and ``mix_alpha`` set the sampling mix: dataset ``k`` is drawn with probability proportional to
+      ``w_k * n_k ** mix_alpha``, where ``w_k`` comes from ``mix`` (``"name=w,name=w"``, e.g.
+      ``"cauldron_ai2d=2,cauldron_figureqa=0.5"``; unlisted datasets get 1) and ``n_k`` is the dataset's train
+      size. The defaults (``""``, 0) are the equal sampling of the earlier runs; ``mix_alpha=1`` samples in
+      proportion to size, ``0.5`` by square root. The effective probabilities are printed at the start.
+    * ``preprocess``: see ``finetune``.
+    * ``option_attention="bidirectional"`` (SmolVLM only) lets the option block attend to itself in both
+      directions through a 4D mask (``laya.vlm.option_block_mask``), so every option's readout sees every other
+      option, as ModernVBERT's ``[MASK]`` readout does; the state and question stay causal. The pretrained
+      backbone never saw this pattern, so it is only meaningful with the backbone unfrozen, as here. The setting
+      is saved in the checkpoint and applied at inference. Ignored (rejected) for the ``"mask"`` readout.
+    * ``w_ce_schedule="anneal"`` holds the soft cross-entropy weight for the first 30% of training and decays it
+      to 0 by 80%, so the run ends on the proper scoring rule alone, which keeps the raw model calibrated
+      (``laya.vlm_train.train``); ``"const"`` is the released recipe.
     """
     import math
 
@@ -270,13 +414,15 @@ def finetune_long(
 
     from laya.common import QTYPES
     from laya.vlm import VLMAgent, _permutations
-    from laya.vlm_train import collect_logits, cyclic_orders, fit_temperatures_from, format_metrics, metrics_from, train
+    from laya.vlm_train import (collect_logits, cyclic_orders, fit_temperatures_from, format_metrics, metrics_from,
+                                mix_probabilities, train)
 
     t_start = time.time()
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
-    out_dir = os.path.join(CKPT_ROOT, run_name)
-    train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, 0, 0, {})
+    out_dir = os.path.join(_ckpt_root(backbone), run_name)
+    train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, 0, 0, {}, val_datasets)
     names = sorted({ex["dataset"] for ex in train_ex})
+    val_names = sorted({ex["dataset"] for ex in val_ex})
     train_eval = []
     for name in names:
         train_eval += [ex for ex in train_ex if ex["dataset"] == name][:train_eval_n]
@@ -287,23 +433,29 @@ def finetune_long(
     eval_every = max(1, int(round(steps / (epochs * evals_per_epoch))))
     warmup = max(1, int(warmup_frac * steps))
     sizes = {n: sum(ex["dataset"] == n for ex in train_ex) for n in names}
-    per_ds = epochs * len(train_ex) / len(names)
+    mix_weights = _parse_mix(mix)
+    probs = mix_probabilities({n: range(sizes[n]) for n in names}, mix_weights, mix_alpha)
     print("plan: %d steps x batch %d (%.1f epochs of %d), warmup %d, eval every %d, lr head %.2e backbone %.2e"
           % (steps, batch_size, epochs, len(train_ex), warmup, eval_every, lr_h, lr_b))
-    print("expected passes per dataset with equal sampling (before max_passes=%s): %s"
-          % (max_passes or None, {n: round(per_ds / sizes[n], 2) for n in names}))
+    print("expected passes per dataset with the sampling mix (before max_passes=%s): %s"
+          % (max_passes or None, {n: round(epochs * len(train_ex) * probs[n] / sizes[n], 2) for n in names}))
 
     if init_from:
-        agent = VLMAgent(os.path.join(CKPT_ROOT, init_from), device="cuda")
+        agent = VLMAgent(_ckpt_path(init_from), device="cuda")
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
-        agent = VLMAgent(backbone=BACKBONE, device="cuda")
+        agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention)
+    print("backbone %s, readout %s, preprocess %s" % (agent.cfg["backbone"], agent.model.readout, agent.prep.backend))
     init_temps = list(agent.temperature)
     hf_vol.commit()
     model, proc = agent.model, agent.processor
     ev_kw = dict(batch_size=64, num_workers=num_workers)
-    log = {"run": run_name, "args": dict(datasets=datasets, epochs=epochs, max_minutes=max_minutes, batch_size=batch_size,
-                                         lr_head=lr_h, lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
+    log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
+                                         val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
+                                         option_attention=agent.model.option_attention,
+                                         w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
+                                         epochs=epochs, max_minutes=max_minutes, batch_size=batch_size, lr_head=lr_h,
+                                         lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
                                          max_passes=max_passes, n_calib=n_calib, train_eval_n=train_eval_n),
            "evals": []}
     best = {"score": -1.0, "step": None, "state": None}
@@ -317,14 +469,14 @@ def finetune_long(
         te = time.time()
         val_m = metrics_from(collect_logits(model, proc, val_ex, **ev_kw))
         tr_m = metrics_from(collect_logits(model, proc, train_eval, **ev_kw))
-        score = sum(val_m[n]["acc"] for n in names) / len(names)
+        score = sum(val_m[n]["acc"] for n in val_names) / len(val_names)
         row = {"step": step, "epoch": round(step * batch_size / len(train_ex), 2), "mean_val_acc": score,
                "val": val_m, "train": tr_m}
         log["evals"].append(row)
-        print("[eval step %d, epoch %.2f] mean val acc %.4f | %s" % (step, row["epoch"], score, " | ".join(
-            "%s train %.3f val %.3f (gap %+.3f) ece %.3f nll %.3f" % (n, tr_m[n]["acc"], val_m[n]["acc"],
-                                                                     tr_m[n]["acc"] - val_m[n]["acc"], val_m[n]["ece"], val_m[n]["nll"])
-            for n in names)), flush=True)
+        print("[eval step %d, epoch %.2f] mean val acc %.4f | val: %s | train (seen): %s" % (
+            step, row["epoch"], score,
+            " | ".join("%s %.3f ece %.3f nll %.3f" % (n, val_m[n]["acc"], val_m[n]["ece"], val_m[n]["nll"]) for n in val_names),
+            " | ".join("%s %.3f" % (n, tr_m[n]["acc"]) for n in names)), flush=True)
         agent.save(os.path.join(out_dir, "last"))
         if score > best["score"]:
             best.update(score=score, step=step, state={k: v.detach().cpu().clone() for k, v in model.state_dict().items()})
@@ -340,6 +492,7 @@ def finetune_long(
         model, proc, train_ex, steps=steps, batch_size=batch_size, freeze="full", lr_head=lr_h, lr_backbone=lr_b,
         device="cuda", log_every=100, max_minutes=max_minutes, num_workers=num_workers, warmup=warmup,
         eval_fn=eval_fn, eval_every=eval_every, max_passes=max_passes or None, stats=stats,
+        w_ce_schedule=w_ce_schedule, mix_weights=mix_weights, mix_alpha=mix_alpha,
     )
     if not log["evals"] or log["evals"][-1]["step"] != stats["steps"]:
         eval_fn(stats["steps"])
@@ -395,14 +548,17 @@ def finetune_long(
 
 @app.function(
     image=image,
-    gpu="A10G",
+    gpu=["A10G", "L4", "A100"],  # any of these: an eval should not queue on one GPU type's capacity
     cpu=16,
     memory=32768,
     timeout=30 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
-def evaluate(run_name: str, datasets: str = ",".join(DATASETS), val_split: str = "val", max_val: int = 0):
-    """Evaluate a saved checkpoint (/ckpt/smolvlm/<run_name>) on the val splits, raw and with its temperatures."""
+def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS), val_split: str = "val",
+             max_val: int = 0):
+    """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
+    raw and with its temperatures. Defaults to every prepared set (the official VQA splits and the Cauldron
+    holdouts); sets that are not prepared are skipped."""
     import torch
 
     from laya.vlm import VLMAgent
@@ -411,14 +567,12 @@ def evaluate(run_name: str, datasets: str = ",".join(DATASETS), val_split: str =
     print("GPU:", torch.cuda.get_device_name(0))
     data_vol.reload()
     val_ex = []
-    for name in [d for d in datasets.split(",") if d]:
-        if not os.path.exists("/data/vqa/%s/_READY" % name):
-            print("dataset %s not ready (no _READY); skipping" % name)
-            continue
+    for name in _ready(datasets):
         va = _load_split(name, val_split, max_val or 0)
         print("dataset %s: %d val" % (name, len(va)))
         val_ex += va
-    agent = VLMAgent(os.path.join(CKPT_ROOT, run_name), device="cuda")
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda")
+    print("backbone %s, readout %s" % (agent.cfg["backbone"], agent.model.readout))
     records = collect_logits(agent.model, agent.processor, val_ex, batch_size=32, num_workers=14)
     raw, cal = metrics_from(records), metrics_from(records, agent.temperature)
     print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
@@ -453,7 +607,7 @@ def ask(image_bytes: bytes, questions: dict, state_text: str = "", run_name: str
     from laya.vlm import VLMAgent
 
     t0 = time.time()
-    agent = VLMAgent(os.path.join(CKPT_ROOT, run_name), device="cuda")
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda")
     load_s = time.time() - t0
     state = {"image": Image.open(io.BytesIO(image_bytes)).convert("RGB")}
     if state_text:
@@ -510,7 +664,7 @@ def push_to_hub(repo_id: str, run_name: str, model_card: str, metrics_path: str 
 
     from huggingface_hub import HfApi
 
-    src = os.path.join(CKPT_ROOT, run_name)
+    src = _ckpt_path(run_name)
     if not os.path.exists(os.path.join(src, "vlm_agent_config.json")):
         raise SystemExit("no checkpoint at %s" % src)
     stage = tempfile.mkdtemp()
@@ -518,7 +672,7 @@ def push_to_hub(repo_id: str, run_name: str, model_card: str, metrics_path: str 
     with open(os.path.join(stage, "README.md"), "w") as f:
         f.write(model_card)
     if metrics_path:
-        shutil.copy(os.path.join(CKPT_ROOT, metrics_path), os.path.join(stage, "training_metrics.json"))
+        shutil.copy(_ckpt_file(metrics_path), os.path.join(stage, "training_metrics.json"))
     for root, _, files in os.walk(stage):
         for name in files:
             p = os.path.join(root, name)
@@ -538,6 +692,233 @@ def publish(repo: str = "thaitea/laya-vision-smolvlm-256m", run: str = "all3-3ep
     with open(card) as f:
         text = f.read()
     print(push_to_hub.remote(repo, run, text, metrics_path=metrics, private=private))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The Cauldron: closed-form subsets -> prepared datasets
+# ---------------------------------------------------------------------------------------------------------
+
+
+@app.function(image=image, cpu=4, memory=16384, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int = 4, val_pct: float = 5.0,
+                            max_side: int = 1024, seed: int = 0, prefix: str = "cauldron_"):
+    """Stream one Cauldron subset and write /data/vqa/<prefix><subset>/{train,val}.jsonl + images/.
+
+    Rows are taken in stream order until ``max_rows`` *usable* rows (at least one closed-form turn, see
+    ``laya.cauldron``) are written (``max_rows=0``: no cap, the whole subset); each keeps at most ``max_texts`` turns. A seeded ``val_pct`` percent of rows
+    go to ``val`` (by row, so an image never sits in both splits). Images are saved as JPEG with the longest side
+    at most ``max_side`` (the model sees 512-pixel tiles). The Cauldron is train-only upstream, so its
+    ``aokvqa`` / ``scienceqa`` / ``vqav2`` rows are the official train splits and do not overlap the official val
+    splits in ``VQA_DATASETS``.
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    from datasets import load_dataset
+
+    from laya.cauldron import cauldron_records
+
+    name = prefix + subset
+    final_dir = os.path.join("/data/vqa", name)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    rng = random.Random(seed)
+    ds = load_dataset("HuggingFaceM4/the_cauldron", subset, split="train", streaming=True)
+    t0 = time.time()
+    n_rows, n_seen, counts = 0, 0, {"train": Counter(), "val": Counter()}
+    files = {split: open(os.path.join(tmp_dir, split + ".jsonl"), "w") for split in ("train", "val")}
+    for i, row in enumerate(ds):
+        if max_rows and n_rows >= max_rows:
+            break
+        n_seen += 1
+        n_img = len(row["images"]) if isinstance(row["images"], list) else 1  # parse before decoding any pixels
+        paths = ["images/%s-%d-%d.jpg" % (subset, i, j) for j in range(n_img)]
+        recs = cauldron_records(row["texts"], paths, "%s-%d" % (subset, i), max_texts=max_texts, rng=rng)
+        if not recs:
+            continue
+        split = "val" if rng.random() < val_pct / 100 else "train"
+        images = row["images"] if isinstance(row["images"], list) else [row["images"]]
+        for im, path in zip(images, paths):
+            im = im.convert("RGB")
+            im.thumbnail((max_side, max_side))
+            im.save(os.path.join(tmp_dir, path), quality=90)
+        for rec in recs:
+            files[split].write(json.dumps(rec, ensure_ascii=False) + "\n")
+            counts[split][rec["question"]["type"]] += 1
+        n_rows += 1
+        if n_rows % 1000 == 0:
+            print("%s: %d rows (%d seen) in %.1f min" % (subset, n_rows, n_seen, (time.time() - t0) / 60), flush=True)
+    for f in files.values():
+        f.close()
+    meta = {"source": "HuggingFaceM4/the_cauldron", "subset": subset, "rows": n_rows, "rows_seen": n_seen,
+            "max_rows": max_rows, "max_texts": max_texts, "val_pct": val_pct, "max_side": max_side, "seed": seed,
+            "records": {k: dict(v) for k, v in counts.items()}, "minutes": round((time.time() - t0) / 60, 1)}
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    print("%s: %d usable rows of %d seen, records %s, %.1f min" % (subset, n_rows, n_seen, meta["records"], meta["minutes"]))
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_cauldron(subsets: str = ",".join(CAULDRON_SUBSETS), max_rows: int = 10000, max_texts: int = 4,
+                     val_pct: float = 5.0, max_side: int = 1024, prefix: str = "cauldron_"):
+    """modal run modal_app.py::prepare_cauldron [--subsets ai2d,aokvqa] -- one container per subset, in parallel.
+
+    ``--max-rows 0`` takes every usable row of each subset; pair it with ``--prefix cauldronfull_`` (and
+    ``--val-pct 1``) to write the uncapped layout next to the capped ``cauldron_<subset>`` sets instead of over them.
+    """
+    names = [s for s in subsets.split(",") if s]
+    kw = dict(max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_side=max_side, prefix=prefix)
+    print("%-16s %8s %8s  %s" % ("subset", "rows", "seen", "records"))
+    for meta in prepare_cauldron_subset.map(names, kwargs=kw, order_outputs=True, return_exceptions=True):
+        if isinstance(meta, Exception):
+            print("FAILED:", repr(meta)[:300])
+            continue
+        print("%-16s %8d %8d  %s" % (meta["subset"], meta["rows"], meta["rows_seen"], meta["records"]))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Rubric-scored datasets -> prepared ``score`` datasets (laya/rubric.py)
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _score_source(name: str, split: str, rng, max_texts: int, max_chars: int):
+    """Yield ``(row_id, image, records)`` for one source and split (``"train"`` / ``"val"``); ``image`` is a PIL
+    image or a Hub file path to download. Sources with an upstream validation split use it for ``val``."""
+    from datasets import load_dataset
+
+    from laya.rubric import SOURCES, ava_record, crisismmd_record, richhf_records, vlfeedback_records
+
+    repo = SOURCES[name]
+    if name == "vlfeedback":
+        if split == "val":
+            return  # no upstream split: the job holds out val_pct of the train rows
+        for i, row in enumerate(load_dataset(repo, split="train", streaming=True)):
+            rid = "vlf-%s" % (row.get("id") or i)
+            yield rid, row["image"], vlfeedback_records(row, rid, rng, max_texts=max_texts, max_chars=max_chars)
+    elif name == "ava":
+        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True)):
+            rid = "ava-%s" % (row.get("image_id") or i)
+            rec = ava_record(row, rid, rng)
+            yield rid, row["image"], [rec] if rec else []
+    elif name == "richhf":
+        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True)):
+            rid = "richhf-%d" % i
+            yield rid, row["image"], richhf_records(row, rid, rng, max_texts=max_texts)
+    elif name == "crisismmd":
+        for i, row in enumerate(load_dataset(repo, "damage", split="dev" if split == "val" else "train")):
+            rid = "crisis-%s" % (row.get("image_id") or i)
+            rec = crisismmd_record(row, rid, rng)
+            yield rid, row.get("image") or row["image_path"], [rec] if rec else []
+    else:
+        raise ValueError("unknown score source %r (one of %s)" % (name, sorted(SOURCES)))
+
+
+@app.function(image=image, cpu=4, memory=16384, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def prepare_score_dataset(name: str, max_rows: int = 0, max_texts: int = 2, val_pct: float = 5.0, max_val: int = 1000,
+                          max_side: int = 1024, seed: int = 0, balance: float = 3.0, max_chars: int = 1200,
+                          prefix: str = "score_"):
+    """Stream one rubric-scored source (``laya.rubric.SOURCES``) and write /data/vqa/<prefix><name>/{train,val}.jsonl + images/.
+
+    Rows are taken in stream order until ``max_rows`` usable rows (0: all); each keeps at most ``max_texts``
+    records (sampled). Sources with an upstream validation split use it for ``val`` (capped at ``max_val``
+    rows); the others hold out a seeded ``val_pct`` percent of rows by row, so an image never sits in both
+    splits. After streaming, the train split is level-balanced (``laya.rubric.balance_levels``: no level above
+    ``balance`` x the median level count) and images no record points at are deleted. Images are JPEG with the
+    longest side at most ``max_side``. Records carry ``"target"`` (AVA's vote histogram) where the source has it.
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    from huggingface_hub import hf_hub_download
+    from PIL import Image
+
+    from laya.rubric import SOURCES, balance_levels, level_counts
+
+    ds_name = prefix + name
+    final_dir = os.path.join("/data/vqa", ds_name)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    rng = random.Random(seed)
+    t0 = time.time()
+    recs = {"train": [], "val": []}
+    n_rows = {"train": 0, "val": 0}
+    for split in ("train", "val"):
+        for rid, image, rows in _score_source(name, split, rng, max_texts, max_chars):
+            if not rows:
+                continue
+            if split == "train" and max_rows and n_rows["train"] >= max_rows:
+                break
+            if split == "val" and max_val and n_rows["val"] >= max_val:
+                break
+            target = split
+            if split == "train" and name in ("vlfeedback",):
+                target = "val" if rng.random() < val_pct / 100 else "train"
+                if target == "val" and max_val and n_rows["val"] >= max_val:
+                    target = "train"
+            path = "images/%s.jpg" % rid
+            if isinstance(image, str):
+                image = Image.open(hf_hub_download(SOURCES[name], image, repo_type="dataset"))
+            im = image.convert("RGB")
+            im.thumbnail((max_side, max_side))
+            im.save(os.path.join(tmp_dir, path), quality=90)
+            for rec in rows:
+                rec["image"] = path
+            recs[target] += rows
+            n_rows[target] += 1
+            if sum(n_rows.values()) % 1000 == 0:
+                print("%s: %s rows in %.1f min" % (name, n_rows, (time.time() - t0) / 60), flush=True)
+    before = level_counts(recs["train"])
+    recs["train"] = balance_levels(recs["train"], balance, rng)
+    used = {r["image"] for split in recs for r in recs[split]}
+    dropped = 0
+    for fn in os.listdir(os.path.join(tmp_dir, "images")):
+        if "images/" + fn not in used:
+            os.remove(os.path.join(tmp_dir, "images", fn))
+            dropped += 1
+    for split in ("train", "val"):
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as f:
+            for rec in recs[split]:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    meta = {"source": SOURCES[name], "name": name, "rows": n_rows, "max_rows": max_rows, "max_texts": max_texts,
+            "val_pct": val_pct, "max_val": max_val, "max_side": max_side, "seed": seed, "balance": balance,
+            "max_chars": max_chars, "records": {s: len(recs[s]) for s in recs},
+            "levels": {"train_before_balance": dict(sorted(before.items())), "train": dict(sorted(level_counts(recs["train"]).items())),
+                       "val": dict(sorted(level_counts(recs["val"]).items()))},
+            "images_dropped_by_balance": dropped, "minutes": round((time.time() - t0) / 60, 1)}
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    print("%s: rows %s, records %s, levels %s, %.1f min" % (name, n_rows, meta["records"], meta["levels"], meta["minutes"]))
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_score(names: str = ",".join(SCORE_SOURCES), max_rows: int = 0, max_texts: int = 2, val_pct: float = 5.0,
+                  max_val: int = 1000, max_side: int = 1024, balance: float = 3.0, max_chars: int = 1200,
+                  prefix: str = "score_"):
+    """modal run modal_app.py::prepare_score [--names ava,crisismmd] -- one container per source, in parallel."""
+    kw = dict(max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_val=max_val, max_side=max_side,
+              balance=balance, max_chars=max_chars, prefix=prefix)
+    print("%-12s %-28s %-24s  %s" % ("source", "rows", "records", "train levels"))
+    for meta in prepare_score_dataset.map([n for n in names.split(",") if n], kwargs=kw, order_outputs=True, return_exceptions=True):
+        if isinstance(meta, Exception):
+            print("FAILED:", repr(meta)[:300])
+            continue
+        print("%-12s %-28s %-24s  %s" % (meta["name"], meta["rows"], meta["records"], meta["levels"]["train"]))
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -644,7 +1025,7 @@ def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int
     if policy == "model":
         from laya.vlm import VLMAgent
 
-        path = os.path.join(CKPT_ROOT, model)
+        path = _ckpt_path(model)
         agent = VLMAgent(path if os.path.exists(path) else model, device="cuda", dtype="bf16")
     qs = doom_question("basic", buttons)
     rng = random.Random(seed)

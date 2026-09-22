@@ -1,8 +1,10 @@
-"""Training sketch for the SmolVLM-backed decision model (``laya.vlm``).
+"""Training sketch for the VLM-backed decision model (``laya.vlm``), SmolVLM or ModernVBERT.
 
 Fine-tunes on multiple-choice VQA with the same objective as the text model's notebooks: a soft
 cross-entropy term plus a proper-scoring-rule policy-gradient term over noisy logits (``proper_reward``).
-Options are shuffled per example so the causal backbone cannot learn a position prior.
+Options are shuffled per example so a causal backbone cannot learn a position prior (harmless for the
+bidirectional one). Nothing here depends on the backbone family: the sequence builder and the model's
+readout follow the processor and checkpoint (``laya.vlm.processor_readout``).
 
 Data sources (adapters take one HF ``datasets`` row each):
   * A-OKVQA (``HuggingFaceM4/A-OKVQA``)      -> ``choice``
@@ -15,6 +17,7 @@ runs ``finetune`` on these from the ``laya-datasets`` volume.
 
 Smoke run on a tiny synthetic batch (no downloads beyond the backbone):
     python -m laya.vlm_train --synthetic --steps 3 --freeze head
+    python -m laya.vlm_train --synthetic --steps 3 --freeze head --backbone ModernVBERT/modernvbert
 """
 import argparse
 import functools
@@ -201,23 +204,49 @@ def _single_thread_worker(_):
     torch.set_num_threads(1)  # avoid CPU oversubscription across loader workers
 
 
-class ItemStream(torch.utils.data.IterableDataset):
-    """Endless stream of shuffled-option items, sampling each ``balance_key`` group (dataset) equally.
+def group_weights(groups: Dict[str, Sequence], weights: Optional[Dict[str, float]] = None,
+                  size_alpha: float = 0.0) -> Dict[str, float]:
+    """Unnormalised sampling weight per group: ``weights.get(k, 1.0) * len(group_k) ** size_alpha``.
 
-    ``max_passes`` caps how many times a group is sampled (in passes over it); a capped group leaves the mix and
-    the others keep equal shares. The stream ends when every group is capped. With several loader workers the
-    cap is split evenly between them. ``consumed`` (samples already taken per group in an earlier attempt of a
-    resumed run) counts against those caps.
+    The defaults give every group the same weight (the equal sampling every earlier run used); ``size_alpha=1``
+    draws in proportion to size (a plain shuffle of the union), ``0.5`` in proportion to its square root.
+    """
+    weights = weights or {}
+    return {k: float(weights.get(k, 1.0)) * float(len(g)) ** size_alpha for k, g in groups.items()}
+
+
+def mix_probabilities(groups: Dict[str, Sequence], weights: Optional[Dict[str, float]] = None,
+                      size_alpha: float = 0.0) -> Dict[str, float]:
+    """``group_weights`` normalised to sum to 1 (the effective mix before any ``max_passes`` cap)."""
+    w = group_weights(groups, weights, size_alpha)
+    total = sum(w.values()) or 1.0
+    return {k: v / total for k, v in w.items()}
+
+
+class ItemStream(torch.utils.data.IterableDataset):
+    """Endless stream of shuffled-option items, sampling each ``balance_key`` group (dataset) by weight.
+
+    Group ``k`` is drawn with probability proportional to ``weights.get(k, 1.0) * len(group_k) ** size_alpha``
+    (``group_weights``); the defaults draw every group equally. ``max_passes`` caps how many times a group is
+    sampled (in passes over it); a capped group leaves the mix and the others keep their relative shares. The
+    stream ends when every group is capped. With several loader workers the cap is split evenly between them.
+    ``consumed`` (samples already taken per group in an earlier attempt of a resumed run) counts against those
+    caps.
     """
 
     def __init__(self, processor, examples: List[Dict], seed: int = 0, balance_key: str = "dataset",
-                 max_passes: Optional[float] = None, consumed: Optional[Dict[str, int]] = None, **item_kw):
+                 max_passes: Optional[float] = None, consumed: Optional[Dict[str, int]] = None,
+                 weights: Optional[Dict[str, float]] = None, size_alpha: float = 0.0, **item_kw):
         self.processor, self.seed, self.item_kw, self.max_passes = processor, seed, item_kw, max_passes
         self.consumed = consumed or {}
         self.groups: Dict[str, List[Dict]] = {}
         for ex in examples:
             self.groups.setdefault(ex.get(balance_key, "_"), []).append(ex)
         self.keys = sorted(self.groups)
+        self.weights = group_weights(self.groups, weights, size_alpha)
+        unknown = sorted(set(weights or {}) - set(self.groups))
+        if unknown:
+            print("mix weights for groups not in the data (ignored): %s" % unknown)
 
     def __iter__(self):
         wi = torch.utils.data.get_worker_info()
@@ -230,7 +259,7 @@ class ItemStream(torch.utils.data.IterableDataset):
             keys = [k for k in self.keys if left[k] >= 1]
             if not keys:
                 return
-            key = rng.choice(keys)
+            key = rng.choices(keys, weights=[self.weights[k] for k in keys])[0]
             left[key] -= 1
             ex = rng.choice(self.groups[key])
             try:
@@ -279,6 +308,8 @@ def train(
     resume: Optional[Dict] = None,
     save_state_fn: Optional[Callable[[int, Dict], None]] = None,
     save_state_every_min: float = 0.0,
+    mix_weights: Optional[Dict[str, float]] = None,
+    mix_alpha: float = 0.0,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -290,6 +321,9 @@ def train(
     ``sigma_end`` over training when given) control the exploration noise, ``w_sph`` the spherical score, and
     ``w_ce_schedule="anneal"`` holds the cross-entropy weight at ``w_ce`` for the first 30% of progress then
     decays it linearly to 0 by 80%. ``train_act`` trains the act/escalate head on its cost matrix.
+
+    Sampling mix: dataset ``k`` is drawn with probability proportional to
+    ``mix_weights.get(k, 1.0) * n_k ** mix_alpha`` (``ItemStream``); the defaults draw every dataset equally.
 
     ``eval_fn(step)`` is called every ``eval_every`` steps and should return a truthy value when it really
     evaluated, so a caller can use it as a cheap progress probe at a small ``eval_every`` without paying for a
@@ -316,9 +350,14 @@ def train(
     model.to(device).train()
     dtype = model.encoder.dtype
     amp = device.type == "cuda"
+    stream = ItemStream(processor, examples, seed + (resume["step"] if resume else 0), balance_key=balance_key,
+                        max_passes=max_passes, consumed=resume["seen"] if resume else None,
+                        weights=mix_weights, size_alpha=mix_alpha)
+    probs = mix_probabilities(stream.groups, mix_weights, mix_alpha)
+    print("sampling mix (alpha=%g, before max_passes): %s"
+          % (mix_alpha, ", ".join("%s %.3f" % (k, probs[k]) for k in stream.keys)), flush=True)
     loader = torch.utils.data.DataLoader(
-        ItemStream(processor, examples, seed + (resume["step"] if resume else 0), balance_key=balance_key,
-                   max_passes=max_passes, consumed=resume["seen"] if resume else None),
+        stream,
         batch_size=batch_size,
         num_workers=num_workers,
         collate_fn=functools.partial(_collate_train, pad_id=processor.tokenizer.pad_token_id),
@@ -433,6 +472,7 @@ def train(
 def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     """``{"id", "image", "state_text", "question": {type, instructions, criteria}, "label"}`` -> training example.
 
+    ``"images"`` (a list of paths) replaces ``"image"`` for a multi-image record, e.g. NLVR2's pairs.
     ``label`` indexes the rendered options (choice: criteria order; score: level; noul: 0=false, 1=true).
     An optional ``"target"`` (a probability per option, same order) replaces the one-hot target, e.g. an expert
     policy's action distribution; ``label`` is still used for accuracy.
@@ -448,6 +488,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     state = {}
     if rec.get("image"):
         state["image"] = os.path.join(root, rec["image"])
+    elif rec.get("images"):
+        state["images"] = [os.path.join(root, p) for p in rec["images"]]
     if rec.get("state_text"):
         state["context"] = rec["state_text"]
     target = _one_hot(label, k)
@@ -580,18 +622,36 @@ def fit_temperatures(model: VLMDecisionModel, processor, examples: List[Dict], *
 
 
 def metrics_from(records: List[Dict], temperatures: Sequence[float] = (1.0, 1.0, 1.0)) -> Dict[str, Dict[str, float]]:
-    """Accuracy, ECE (max-prob confidence, 15 bins), and NLL overall and per dataset."""
+    """Accuracy, ECE (max-prob confidence, 15 bins), and NLL overall and per dataset.
+
+    Groups with ``score`` records also get two ordinal metrics over those records: ``mae``, the absolute
+    difference between the expected level under the model and under the target (``|E_p[i] - E_t[i]|``, in
+    levels; with a one-hot target that is the distance from the label), and ``xent``, the cross-entropy against
+    the (possibly soft) target, which is what a vote-histogram target like AVA's is actually trained on. Argmax
+    accuracy and NLL against the argmax label understate such a model: it is trained to spread probability.
+    """
     groups: Dict[str, List] = {"all": []}
+    ordinal: Dict[str, List] = {}
     for r in records:
         p = torch.softmax(r["logits"] / temperatures[r["qtype"]], -1)
         row = (float(p.max()), float(int(p.argmax()) == r["label"]), -float(torch.log(p[r["label"]].clamp_min(1e-12))))
         groups["all"].append(row)
         groups.setdefault(r["dataset"], []).append(row)
+        if r["qtype"] == QTYPES["score"] and r.get("target") is not None:
+            t = torch.as_tensor(r["target"], dtype=torch.float32)
+            t = t / t.sum().clamp_min(1e-12)
+            levels = torch.arange(len(p), dtype=torch.float32)
+            orow = (abs(float((p * levels).sum() - (t * levels).sum())), -float((t * torch.log(p.clamp_min(1e-12))).sum()))
+            ordinal.setdefault("all", []).append(orow)
+            ordinal.setdefault(r["dataset"], []).append(orow)
     out = {}
     for name, rows in groups.items():
         a = np.array(rows) if rows else np.zeros((0, 3))
         out[name] = {"n": len(rows), "acc": float(a[:, 1].mean()) if rows else float("nan"),
                      "ece": ece_score(a[:, 0], a[:, 1]), "nll": float(a[:, 2].mean()) if rows else float("nan")}
+        if name in ordinal:
+            o = np.array(ordinal[name])
+            out[name].update(n_score=len(o), mae=float(o[:, 0].mean()), xent=float(o[:, 1].mean()))
     return out
 
 
@@ -600,7 +660,12 @@ def evaluate(model: VLMDecisionModel, processor, examples: List[Dict], temperatu
 
 
 def format_metrics(m: Dict) -> str:
-    return " | ".join("%s n=%d acc=%.3f ece=%.3f nll=%.3f" % (k, v["n"], v["acc"], v["ece"], v["nll"]) for k, v in m.items())
+    def one(k, v):
+        s = "%s n=%d acc=%.3f ece=%.3f nll=%.3f" % (k, v["n"], v["acc"], v["ece"], v["nll"])
+        if "mae" in v:
+            s += " mae=%.3f xent=%.3f" % (v["mae"], v["xent"])
+        return s
+    return " | ".join(one(k, v) for k, v in m.items())
 
 
 def main(argv: Optional[Iterable[str]] = None):

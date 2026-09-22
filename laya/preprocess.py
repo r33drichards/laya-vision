@@ -1,4 +1,7 @@
-"""Cheap image preprocessing for the SmolVLM decision model: one step, on the target device.
+"""Cheap image preprocessing for the VLM decision model: one step, on the target device.
+
+SmolVLM and ModernVBERT ship the same ``Idefics3Processor`` settings (512-pixel tiles, mean = std = 0.5, patch 16,
+pixel shuffle 4, 64 image tokens), so everything here serves both backbones unchanged.
 
 The Hugging Face ``Idefics3ImageProcessor`` costs about 13 ms of CPU per 210x160 Atari frame, and almost none
 of it is useful work. Its ``preprocess`` resizes twice with LANCZOS:
@@ -133,7 +136,8 @@ class ImagePrep:
         ]
         wrong = ["%s=%r (expected %r)" % (k, got, want) for k, got, want in expected if got != want]
         if wrong:
-            raise ValueError("this preprocessing path assumes the SmolVLM processor's settings; " + ", ".join(wrong))
+            raise ValueError("this preprocessing path assumes the Idefics3 processor settings SmolVLM and ModernVBERT "
+                             "ship; " + ", ".join(wrong))
 
     # -- the actual work --------------------------------------------------------------------------------------
 
