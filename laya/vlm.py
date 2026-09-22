@@ -44,7 +44,14 @@ the act head pools ``[CLS]``. Every marker sees the whole sequence, so there is 
 mitigate: ``n_permutations`` and ``option_attention`` are accepted and do nothing useful. ``readout`` is chosen
 from the backbone's ``model_type`` (``readout_for``), recorded in ``vlm_agent_config.json``, and left on the
 processor as ``laya_readout`` so the sequence builders follow it (``ImagePrep`` does the same for the pixels).
+
+Provenance: a Hub checkpoint or backbone can be pinned (``VLMAgent(..., revision=..., backbone_revision=...)``);
+the commit actually loaded is recorded (``VLMAgent.source``, ``cfg["backbone_revision"]``, written to
+``vlm_agent_config.json`` by ``save``), and every ``predict`` result carries a ``provenance`` block: the prompt
+format version, a hash of the exact input ids, the checkpoint and backbone revisions, dtype, device, library
+versions, and the option attention, permutation count and temperatures used.
 """
+import hashlib
 import inspect
 import json
 import math
@@ -84,6 +91,29 @@ OPTION_END = "\n"
 # tokenizer's ``[CLS] ... [SEP]``; the question and options then follow ``laya.common.build_sequence``
 MASK_PREFIX_TEXT = "[CLS]User:"
 MASK_QUESTION_TEXT = " %s question: %s"
+#: Version of the prompt format above (the text framing, option rendering and truncation in ``build_vlm_inputs``
+#: and ``_mask_inputs``), reported in ``predict``'s ``provenance``. Bump it in the same commit as any change that
+#: can alter the input ids built for some (state, question): framing strings, option bullets or terminators,
+#: budgets, truncation order, image-token expansion. A refactor that leaves every id unchanged does not bump it.
+PROMPT_FORMAT_VERSION = "1"
+
+
+def input_ids_sha256(rows: Sequence[Sequence[int]]) -> str:
+    """sha256 over token-id rows (each as its length, int64 LE, then its ids, int32 LE): the hash ``predict``
+    reports over all its rows and the row-level evidence files report per row (``input_ids_sha256([ids])``)."""
+    h = hashlib.sha256()
+    for ids in rows:
+        h.update(np.asarray(len(ids), dtype="<i8").tobytes())
+        h.update(np.asarray(ids, dtype="<i4").tobytes())
+    return h.hexdigest()
+
+
+def snapshot_revision(path: str) -> Optional[str]:
+    """The commit a Hub snapshot directory holds (``.../snapshots/<sha>``), or None for any other path."""
+    head, sha = os.path.split(os.path.normpath(path))
+    if os.path.basename(head) == "snapshots" and len(sha) == 40 and all(c in "0123456789abcdef" for c in sha):
+        return sha
+    return None
 
 
 def normalize_option_attention(value: str) -> str:
@@ -662,15 +692,20 @@ def set_trainable(model: VLMDecisionModel, mode: str = "head", n_last: int = 4, 
 
 
 def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.dtype = torch.float32,
-                    prep: Optional[ImagePrep] = None) -> VLMDecisionModel:
-    """Build from pretrained backbone weights, or (``backbone_dir``) an architecture-only config to load into."""
+                    prep: Optional[ImagePrep] = None, revision: Optional[str] = None,
+                    token: Optional[str] = None) -> VLMDecisionModel:
+    """Build from pretrained backbone weights, or (``backbone_dir``) an architecture-only config to load into.
+
+    ``revision`` pins the pretrained backbone (default: ``cfg["backbone_revision"]``, else the Hub's default
+    branch); the commit actually loaded is ``model.encoder.config._commit_hash`` (None for a local backbone)."""
     from transformers import AutoConfig, AutoModel
 
     if backbone_dir and os.path.exists(backbone_dir):
         bcfg = AutoConfig.from_pretrained(backbone_dir)
         backbone = AutoModel.from_config(bcfg, attn_implementation="sdpa", dtype=dtype)
     else:
-        backbone = AutoModel.from_pretrained(cfg["backbone"], attn_implementation="sdpa", dtype=dtype)
+        backbone = AutoModel.from_pretrained(cfg["backbone"], attn_implementation="sdpa", dtype=dtype,
+                                             revision=revision or cfg.get("backbone_revision"), token=token)
     return VLMDecisionModel(
         backbone,
         cfg.get("head_layers", 2),
@@ -747,6 +782,11 @@ class VLMAgent:
     ``VLMAgent("path/or/hub-id")``. ``backbone=SMOLVLM2_BACKBONE`` builds on SmolVLM2 instead. A fresh agent
     takes config overrides as keywords, e.g. ``image_split_edge=2048`` for the processor's image splitting (see
     ``laya.preprocess``), which also raises ``max_len`` (``default_max_len``) unless one is given.
+
+    ``revision`` pins a Hub checkpoint (a branch, tag or, reproducibly, a 40-character commit) and
+    ``backbone_revision`` the pretrained backbone of a fresh or head-only agent. The commits actually loaded are
+    recorded: ``source`` (``{"id", "revision"}`` of the checkpoint; revision None for a local directory) and
+    ``cfg["backbone_revision"]``, which ``save`` writes and a head-only reload then pins to.
     """
 
     def __init__(
@@ -756,11 +796,17 @@ class VLMAgent:
         device: Optional[str] = None,
         token: Optional[str] = None,
         dtype: Optional[str] = None,
+        revision: Optional[str] = None,
+        backbone_revision: Optional[str] = None,
         **cfg_overrides,
     ):
         from transformers import AutoProcessor
 
         self.device = _resolve_device(device)
+        self.source = {"id": model_id_or_path, "revision": None}
+        self._static_provenance = None
+        if backbone_revision:
+            cfg_overrides["backbone_revision"] = backbone_revision
         if "option_attention" in cfg_overrides:
             cfg_overrides["option_attention"] = normalize_option_attention(cfg_overrides["option_attention"])
         if model_id_or_path is None:
@@ -781,11 +827,13 @@ class VLMAgent:
             self.cfg.update(self.prep.to_config())
             if not cfg_overrides.get("max_len"):
                 self.cfg["max_len"] = default_max_len(self.prep)
-            self.processor = AutoProcessor.from_pretrained(self.cfg["backbone"], token=token)
+            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep, token=token)
+            self.cfg["backbone_revision"] = self._backbone_commit()
+            self.processor = AutoProcessor.from_pretrained(self.cfg["backbone"], token=token,
+                                                           revision=self.cfg["backbone_revision"])
             self.prep.apply(self.processor)
-            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep)
         else:
-            self._load(model_id_or_path, token, dtype, cfg_overrides)
+            self._load(model_id_or_path, token, dtype, cfg_overrides, revision)
         # the sequence builders only ever see the processor, so it carries the readout and the sequence cap like
         # it carries the prep (the training loader and ``collect_logits`` follow the checkpoint without being told)
         self.cfg["readout"] = self.processor.laya_readout = self.model.readout
@@ -794,13 +842,16 @@ class VLMAgent:
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
         self.temperature_by_options = self.cfg.get("temperature_by_options", {})
-        self.source = model_id_or_path or self.cfg["backbone"]  # what a ``Calibration`` records it was fitted for
         self.model.to(self.device).eval()
 
     def _torch_dtype(self) -> torch.dtype:
         return torch.bfloat16 if self.cfg.get("dtype") == "bf16" else torch.float32
 
-    def _load(self, model_id_or_path: str, token, dtype, overrides):
+    def _backbone_commit(self) -> Optional[str]:
+        """The backbone commit the weights came from: what the Hub load resolved, else what the config recorded."""
+        return getattr(self.model.encoder.config, "_commit_hash", None) or self.cfg.get("backbone_revision")
+
+    def _load(self, model_id_or_path: str, token, dtype, overrides, revision: Optional[str] = None):
         from safetensors.torch import load_file
         from transformers import AutoProcessor
 
@@ -808,7 +859,8 @@ class VLMAgent:
         if not os.path.exists(model_dir):
             from huggingface_hub import snapshot_download
 
-            model_dir = snapshot_download(model_id_or_path, token=token or os.environ.get("HF_TOKEN"))
+            model_dir = snapshot_download(model_id_or_path, revision=revision, token=token or os.environ.get("HF_TOKEN"))
+            self.source["revision"] = snapshot_revision(model_dir) or revision
         cfg_path = os.path.join(model_dir, CONFIG_NAME)
         if not os.path.exists(cfg_path):
             raise FileNotFoundError("%r does not contain %s" % (model_id_or_path, CONFIG_NAME))
@@ -818,7 +870,8 @@ class VLMAgent:
             self.cfg["dtype"] = dtype
         self.cfg.update(overrides)
         proc_dir = os.path.join(model_dir, "processor")
-        self.processor = AutoProcessor.from_pretrained(proc_dir if os.path.exists(proc_dir) else self.cfg["backbone"])
+        self.processor = AutoProcessor.from_pretrained(proc_dir) if os.path.exists(proc_dir) else \
+            AutoProcessor.from_pretrained(self.cfg["backbone"], revision=self.cfg.get("backbone_revision"))
         # honour the checkpoint's recorded input resolution and preprocessing path; a config written before
         # those keys existed means 512 through the Hugging Face processor, which is what it was trained with
         self.prep = ImagePrep.from_config(self.cfg, default_backend="processor")
@@ -832,7 +885,8 @@ class VLMAgent:
             self.model.load_state_dict(load_file(full), strict=True)
         else:
             # head-only checkpoint: backbone comes from the pretrained id in the config
-            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep)
+            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep, token=token)
+            self.cfg["backbone_revision"] = self._backbone_commit()
             missing, unexpected = self.model.load_state_dict(load_file(os.path.join(model_dir, HEAD_WEIGHTS_NAME)), strict=False)
             bad = [k for k in missing if not k.startswith("encoder.")] + list(unexpected)
             if bad:
@@ -851,6 +905,8 @@ class VLMAgent:
             temperature_by_options=dict(self.temperature_by_options),
             **self.prep.to_config(),
         )
+        if self.source["id"] is not None:
+            cfg["loaded_from"] = dict(self.source)
         with open(os.path.join(path, CONFIG_NAME), "w") as f:
             json.dump(cfg, f, indent=2)
         self.processor.save_pretrained(os.path.join(path, "processor"))
@@ -963,7 +1019,7 @@ class VLMAgent:
             for r in range(len(chunk)):
                 row_logits.append((logits[r], act[r]))
 
-        answers = {}
+        answers, temps_used = {}, {}
         for qid in ids:
             q = internal[qid]
             k = len(render_options(q))
@@ -978,6 +1034,7 @@ class VLMAgent:
             if _raw_logits is not None:
                 _raw_logits[qid] = z_sum / n
             t_scale = t_override.get(qt, self._checkpoint_temperature(qt, k))
+            temps_used[qid] = float(t_scale)
             z = (z_sum / n) / max(1e-3, float(t_scale))
             p = np.exp(z - z.max())
             p = p / p.sum()
@@ -1013,6 +1070,7 @@ class VLMAgent:
             "model": "laya-vlm",
             "answers": answers,
             "usage": {"input_tokens": n_tokens, "output_tokens": 0, "images": len(images)},
+            "provenance": self.provenance(rows, n_permutations, temps_used),
         }
 
     system_one = predict
@@ -1076,6 +1134,28 @@ class VLMAgent:
                                  checkpoint=checkpoint_identity(self), n_permutations=n_permutations)
 
 
+    def provenance(self, rows: Sequence[Dict], n_permutations: int, temperatures: Dict[str, float]) -> Dict[str, Any]:
+        """``predict``'s ``provenance`` block: what produced these numbers. The per-agent part is built once;
+        per call it adds one sha256 over every scored row's input ids (``input_ids_sha256``, rows in question
+        then permutation order), the permutation count and the temperature each question was divided by."""
+        if self._static_provenance is None:
+            import transformers
+
+            self._static_provenance = {
+                "prompt_format_version": PROMPT_FORMAT_VERSION,
+                "checkpoint": dict(self.source),
+                "backbone": {"id": self.cfg.get("backbone"), "revision": self.cfg.get("backbone_revision")},
+                "dtype": str(self.model.encoder.dtype).replace("torch.", ""),
+                "device": self.device.type,
+                "torch": str(torch.__version__),
+                "transformers": str(transformers.__version__),
+                "readout": self.model.readout,
+                "option_attention": self.model.option_attention,
+            }
+        return dict(self._static_provenance, input_ids_sha256=input_ids_sha256([it["ids"] for it in rows]),
+                    n_rows=len(rows), n_permutations=max(1, n_permutations), temperatures=temperatures)
+
+
 def _label_index(q: Dict, label: Any, qid: str) -> int:
     """A user label as an option index: option name (``choice``), level index (``score``), bool (``noul``)."""
     k = len(render_options(q))
@@ -1098,7 +1178,11 @@ def load_vlm(
     backbone: Optional[str] = None,
     device: Optional[str] = None,
     token: Optional[str] = None,
+    revision: Optional[str] = None,
+    backbone_revision: Optional[str] = None,
     **kwargs,
 ) -> VLMAgent:
-    """Load a saved VLM agent, or build a fresh one on ``backbone`` (its head is untrained)."""
-    return VLMAgent(model_id_or_path, backbone=backbone, device=device, token=token, **kwargs)
+    """Load a saved VLM agent, or build a fresh one on ``backbone`` (its head is untrained). ``revision`` /
+    ``backbone_revision`` pin the Hub checkpoint / backbone (see ``VLMAgent``)."""
+    return VLMAgent(model_id_or_path, backbone=backbone, device=device, token=token, revision=revision,
+                    backbone_revision=backbone_revision, **kwargs)

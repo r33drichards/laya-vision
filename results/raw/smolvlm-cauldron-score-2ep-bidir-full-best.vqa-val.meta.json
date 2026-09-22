@@ -1,0 +1,195 @@
+{
+  "run": "cauldron-score-2ep-bidir-full/best",
+  "checkpoint_path": "/ckpt/smolvlm/cauldron-score-2ep-bidir-full/best",
+  "created_utc": "2026-09-22T22:29:58+00:00",
+  "code_commit": "07b6b53e304b6fb2090afc0aae905bea14a09d93",
+  "prompt_format_version": "1",
+  "weights_sha256": "b5eb3ca675cfc010cee381e4be528dafba73fe00745548d5acfc89c933b9122f",
+  "config_sha256": "d68e817d4d4f74d11261553ecfc217d36430f42dbd57a7b2a62b410c315ae44e",
+  "backbone": "HuggingFaceTB/SmolVLM-256M-Instruct",
+  "backbone_revision": null,
+  "readout": "terminator",
+  "option_attention": "block",
+  "temperature": [
+    2.2027783393859863,
+    1.365213394165039,
+    2.133272647857666
+  ],
+  "calibration": "probs_calibrated = softmax(logits / temperature[qtype]), qtype order (choice, score, noul)",
+  "scoring": {
+    "orders": "identity",
+    "n_permutations": 1,
+    "autocast": "bf16",
+    "batch_size": 32,
+    "weights_dtype": "float32"
+  },
+  "gpu": "NVIDIA L4",
+  "torch": "2.14.0+cu130",
+  "transformers": "5.17.0",
+  "datasets": {
+    "aokvqa": {
+      "n": 1138,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "27b06a99788837cfe0bb5c48cb9ee12c446028abc5558652a0d8c16d2042523b",
+      "meta.json": {
+        "dataset": "aokvqa",
+        "source": "HuggingFaceM4/A-OKVQA",
+        "counts": {
+          "train": 17026,
+          "val": 1138
+        },
+        "label_counts": {
+          "train": {
+            "3": 4381,
+            "0": 4112,
+            "1": 4218,
+            "2": 4315
+          },
+          "val": {
+            "3": 287,
+            "2": 294,
+            "1": 279,
+            "0": 278
+          }
+        },
+        "images": 18164,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 116.0
+      }
+    },
+    "scienceqa": {
+      "n": 2097,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "34eb99b352f00d7ccd9f7540658ddf931986afe8d38e506f0dc1a2d5579305e3",
+      "meta.json": {
+        "dataset": "scienceqa",
+        "source": "derek-thomas/ScienceQA",
+        "counts": {
+          "train": 6218,
+          "val": 2097
+        },
+        "label_counts": {
+          "train": {
+            "0": 2273,
+            "1": 2179,
+            "2": 1167,
+            "3": 583,
+            "4": 16
+          },
+          "val": {
+            "1": 764,
+            "2": 389,
+            "3": 209,
+            "0": 728,
+            "4": 7
+          }
+        },
+        "images": 8315,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 38.0
+      }
+    },
+    "vqav2_yesno": {
+      "n": 5000,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "2005732643ac1475f298e29b0a0877fbbee066420ad5330e47d020f926e7a42f",
+      "meta.json": {
+        "dataset": "vqav2_yesno",
+        "source": "lmms-lab-encoder/VQAv2",
+        "counts": {
+          "train": 50000,
+          "val": 5000
+        },
+        "label_counts": {
+          "train": {
+            "0": 24774,
+            "1": 25226
+          },
+          "val": {
+            "0": 2445,
+            "1": 2555
+          }
+        },
+        "images": 23330,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 512.3
+      }
+    }
+  },
+  "val_split": "val",
+  "n_rows": 8235,
+  "minutes": 1.92,
+  "metrics": {
+    "val_raw": {
+      "all": {
+        "n": 8235,
+        "acc": 0.7350333940497875,
+        "ece": 0.1821991158602957,
+        "nll": 0.8846031582869648
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.6036906854130053,
+        "ece": 0.2987782008461458,
+        "nll": 1.7409772022756362
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8292799237005246,
+        "ece": 0.11161513553384264,
+        "nll": 0.644277268480325
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7254,
+        "ece": 0.1869182233095169,
+        "nll": 0.7904851040600479
+      }
+    },
+    "val_calibrated": {
+      "all": {
+        "n": 8235,
+        "acc": 0.7350333940497875,
+        "ece": 0.07563652425515846,
+        "nll": 0.5936085202929106
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.6036906854130053,
+        "ece": 0.15713593130685743,
+        "nll": 1.0458207550967646
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8292799237005246,
+        "ece": 0.03464583437898697,
+        "nll": 0.43328190776179726
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7254,
+        "ece": 0.07746114351749422,
+        "nll": 0.5579259969471022
+      }
+    }
+  },
+  "rows_file": "smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.predictions.jsonl.gz"
+}

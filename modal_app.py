@@ -3,6 +3,9 @@
     modal run modal_app.py::test                     # pytest on a GPU + latency, both backbones
     modal run modal_app.py::finetune --minutes 18    # short fine-tune + held-out acc / ECE
     modal run modal_app.py::evaluate --run-name <run> # re-evaluate a saved checkpoint
+    modal run modal_app.py::evidence --run cauldron-score-2ep-bidir-full/best
+                                                     # row-level val predictions -> results/raw/ + SHA256SUMS
+                                                     # (checked by benchmarks/verify_published.py)
     modal run --detach modal_app.py::finetune_long   # ~3-epoch A100 run with per-epoch eval + best checkpoint
     modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep
                                                      # the same run on the bidirectional backbone
@@ -705,6 +708,143 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     return {"val_raw": raw, "val_calibrated": cal, "temperature": list(agent.temperature), "dataset_meta": metas}
 
 
+def _file_sha256(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+@app.function(image=image, gpu="L4", cpu=8, memory=32768, timeout=40 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def row_evidence(run_name: str, datasets: str = "vqa", val_split: str = "val", max_val: int = 0, batch_size: int = 32,
+                 code_commit: str = "") -> dict:
+    """Score a saved checkpoint on val splits and return one row per example: the evidence behind a headline number.
+
+    Scored exactly as ``evaluate`` and the fine-tune jobs' final eval (``collect_logits``: identity option order,
+    bf16 autocast, ``batch_size`` 32), so the rows reproduce those metrics up to GPU-type numerics. Each row has
+    the dataset, the record id and its index among the split's usable records, the label, the option order used,
+    the raw label-order logits, the probabilities after the checkpoint's per-type temperature (what ``metrics_from``
+    calibrates with), and the sha256 of the exact input ids (``laya.vlm.input_ids_sha256``). Returns
+    ``{"rows_jsonl": bytes, "meta_json": str}``; the meta records the checkpoint (weights and config sha256, backbone
+    revision), the datasets (val file sha256, and ``manifest.json`` / ``meta.json`` where the prep wrote one),
+    library versions, the GPU and the metrics computed here.
+    """
+    import datetime
+
+    import torch
+    import transformers
+
+    from laya.vlm import PROMPT_FORMAT_VERSION, VLMAgent
+    from laya.vlm_train import collect_logits, metrics_from
+
+    gpu = torch.cuda.get_device_name(0)
+    print("GPU:", gpu)
+    data_vol.reload()
+    val_ex, ds_meta = [], {}
+    for name in _ready(datasets):
+        va = _load_split(name, val_split, max_val or 0)
+        base = os.path.join("/data/vqa", name)
+        info = {"n": len(va), "max_val": max_val, "file": "%s.jsonl" % val_split,
+                "file_sha256": _file_sha256(os.path.join(base, val_split + ".jsonl"))}
+        for extra in ("manifest.json", "meta.json"):
+            if os.path.exists(os.path.join(base, extra)):
+                with open(os.path.join(base, extra)) as f:
+                    info[extra] = json.load(f)
+        ds_meta[name] = info
+        print("dataset %s: %d val" % (name, len(va)))
+        val_ex += [dict(ex, index=i) for i, ex in enumerate(va)]
+    path = _ckpt_path(run_name)
+    agent = VLMAgent(path, device="cuda")
+    t0 = time.time()
+    records = collect_logits(agent.model, agent.processor, val_ex, batch_size=batch_size, num_workers=7)
+    minutes = (time.time() - t0) / 60
+    temps = [float(t) for t in agent.temperature]
+    lines = []
+    for ex, r in zip(val_ex, records):
+        z = r["logits"]
+        p = torch.softmax(z / temps[r["qtype"]], -1)
+        lines.append(json.dumps({
+            "dataset": r["dataset"], "id": ex.get("id"), "index": ex["index"], "qtype": ex["q"]["t"],
+            "label": r["label"], "option_order": list(range(len(z))),
+            "logits": [round(float(v), 6) for v in z], "probs_calibrated": [round(float(v), 6) for v in p],
+            "input_ids_sha256": r["input_ids_sha256"][0],
+        }, separators=(",", ":")))
+    weights = os.path.join(path, "model.safetensors")
+    meta = {
+        "run": run_name, "checkpoint_path": path,
+        "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "code_commit": code_commit or None, "prompt_format_version": PROMPT_FORMAT_VERSION,
+        "weights_sha256": _file_sha256(weights) if os.path.exists(weights) else None,
+        "config_sha256": _file_sha256(os.path.join(path, "vlm_agent_config.json")),
+        "backbone": agent.cfg.get("backbone"), "backbone_revision": agent.cfg.get("backbone_revision"),
+        "readout": agent.model.readout, "option_attention": agent.model.option_attention,
+        "temperature": temps, "calibration": "probs_calibrated = softmax(logits / temperature[qtype]), qtype order "
+                                              "(choice, score, noul)",
+        "scoring": {"orders": "identity", "n_permutations": 1, "autocast": "bf16", "batch_size": batch_size,
+                    "weights_dtype": str(agent.model.encoder.dtype).replace("torch.", "")},
+        "gpu": gpu, "torch": torch.__version__, "transformers": transformers.__version__,
+        "datasets": ds_meta, "val_split": val_split, "n_rows": len(lines), "minutes": round(minutes, 2),
+        "metrics": {"val_raw": metrics_from(records), "val_calibrated": metrics_from(records, temps)},
+    }
+    print(json.dumps(meta["metrics"]["val_calibrated"]))
+    # plain bytes and JSON only: the local side has no torch to unpickle e.g. ``torch.__version__`` (a TorchVersion)
+    return {"rows_jsonl": ("\n".join(lines) + "\n").encode(), "meta_json": json.dumps(meta)}
+
+
+def _write_sha256sums(raw_dir: str) -> None:
+    """Rewrite ``<raw_dir>/SHA256SUMS`` over every file under it but itself and README.md (``sha256sum -c`` format)."""
+    names = []
+    for root, _, files in os.walk(raw_dir):
+        for fn in files:
+            rel = os.path.relpath(os.path.join(root, fn), raw_dir)
+            if rel not in ("SHA256SUMS", "README.md"):
+                names.append(rel)
+    with open(os.path.join(raw_dir, "SHA256SUMS"), "w") as f:
+        for rel in sorted(names):
+            f.write("%s  %s\n" % (_file_sha256(os.path.join(raw_dir, rel)), rel))
+
+
+@app.local_entrypoint()
+def evidence(run: str = "cauldron-score-2ep-bidir-full/best", datasets: str = "vqa", val_split: str = "val",
+             max_val: int = 0, out_dir: str = "results/raw", name: str = ""):
+    """modal run modal_app.py::evidence [--run <run>] [--datasets vqa] -- write row-level val predictions.
+
+    Writes ``<out_dir>/<name>.predictions.jsonl.gz`` (gzip with a zero mtime, so the bytes depend only on the rows)
+    and ``<name>.meta.json``, then regenerates ``<out_dir>/SHA256SUMS``. Results are create-only: an existing file
+    is never overwritten (pick a new ``--name``). ``name`` defaults to the run and datasets, e.g.
+    ``smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val``.
+    """
+    import gzip
+
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True,
+                           text=True).stdout
+    family_run = run if run.startswith(("smolvlm", "modernvbert")) else "smolvlm/" + run
+    name = name or "%s.%s-%s" % (family_run.replace("/", "-"), datasets.replace(",", "+"), val_split)
+    rows_path = os.path.join(out_dir, name + ".predictions.jsonl.gz")
+    meta_path = os.path.join(out_dir, name + ".meta.json")
+    for path in (rows_path, meta_path):
+        if os.path.exists(path):
+            raise SystemExit("%s exists; results are create-only, pass a new --name" % path)
+    res = row_evidence.remote(run, datasets=datasets, val_split=val_split, max_val=max_val,
+                              code_commit=commit + ("-dirty" if dirty.strip() else ""))
+    os.makedirs(out_dir, exist_ok=True)
+    with open(rows_path, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
+        f.write(res["rows_jsonl"])
+    meta = dict(json.loads(res["meta_json"]), rows_file=os.path.basename(rows_path))
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+        f.write("\n")
+    _write_sha256sums(out_dir)
+    print("wrote %s (%d rows) and %s; %s/SHA256SUMS regenerated" % (rows_path, meta["n_rows"], meta_path, out_dir))
+    for ds, m in meta["metrics"]["val_calibrated"].items():
+        print("  %-14s n=%5d acc=%.4f ece=%.4f" % (ds, m["n"], m["acc"], m["ece"]))
+
+
 def _public_question(q: dict) -> dict:
     """An internal ``{"t", "ins", "crit"}`` question back in ``predict``'s input format."""
     crit = q["crit"]
@@ -1068,10 +1208,37 @@ def publish(repo: str = "thaitea/laya-vision-smolvlm-256m", run: str = "all3-3ep
 # ---------------------------------------------------------------------------------------------------------
 
 
+def _dataset_revision(repo: str, revision: str = "") -> str:
+    """The commit a Hub dataset branch, tag or commit resolves to now; the prep jobs load that commit and record it."""
+    from huggingface_hub import HfApi
+
+    return HfApi().dataset_info(repo, revision=revision or None).sha
+
+
+def _write_manifest(tmp_dir: str, sources: dict, params: dict) -> dict:
+    """``manifest.json`` next to a prepared dataset's ``{train,val}.jsonl``: the exact upstream sources
+    (``{repo: commit}``), the prep parameters, and the sha256 of each jsonl file, so a val split can be checked
+    against the row-level evidence that cites it. Written by every prep job from now on (older sets have none)."""
+    import datetime
+
+    files = {}
+    for fn in sorted(os.listdir(tmp_dir)):
+        if fn.endswith(".jsonl"):
+            with open(os.path.join(tmp_dir, fn)) as f:
+                n = sum(1 for line in f if line.strip())
+            files[fn] = {"sha256": _file_sha256(os.path.join(tmp_dir, fn)), "records": n}
+    manifest = {"sources": sources, "params": params, "files": files,
+                "images": len(os.listdir(os.path.join(tmp_dir, "images"))),
+                "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    with open(os.path.join(tmp_dir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+    return manifest
+
+
 @app.function(image=image, cpu=4, memory=16384, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
               secrets=[modal.Secret.from_name("huggingface-thaitea")])
 def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int = 4, val_pct: float = 5.0,
-                            max_side: int = 1024, seed: int = 0, prefix: str = "cauldron_"):
+                            max_side: int = 1024, seed: int = 0, prefix: str = "cauldron_", revision: str = ""):
     """Stream one Cauldron subset and write /data/vqa/<prefix><subset>/{train,val}.jsonl + images/.
 
     Rows are taken in stream order until ``max_rows`` *usable* rows (at least one closed-form turn, see
@@ -1079,7 +1246,8 @@ def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int =
     go to ``val`` (by row, so an image never sits in both splits). Images are saved as JPEG with the longest side
     at most ``max_side`` (the model sees 512-pixel tiles). The Cauldron is train-only upstream, so its
     ``aokvqa`` / ``scienceqa`` / ``vqav2`` rows are the official train splits and do not overlap the official val
-    splits in ``VQA_DATASETS``.
+    splits in ``VQA_DATASETS``. The Cauldron is read at one commit (``revision``, default: what ``main`` is now),
+    recorded in ``manifest.json``.
     """
     import random
     import shutil
@@ -1095,7 +1263,8 @@ def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int =
     shutil.rmtree(tmp_dir, ignore_errors=True)
     os.makedirs(os.path.join(tmp_dir, "images"))
     rng = random.Random(seed)
-    ds = load_dataset("HuggingFaceM4/the_cauldron", subset, split="train", streaming=True)
+    rev = _dataset_revision("HuggingFaceM4/the_cauldron", revision)
+    ds = load_dataset("HuggingFaceM4/the_cauldron", subset, split="train", streaming=True, revision=rev)
     t0 = time.time()
     n_rows, n_seen, counts = 0, 0, {"train": Counter(), "val": Counter()}
     files = {split: open(os.path.join(tmp_dir, split + ".jsonl"), "w") for split in ("train", "val")}
@@ -1127,6 +1296,8 @@ def prepare_cauldron_subset(subset: str, max_rows: int = 10000, max_texts: int =
             "records": {k: dict(v) for k, v in counts.items()}, "minutes": round((time.time() - t0) / 60, 1)}
     with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
+    _write_manifest(tmp_dir, {"HuggingFaceM4/the_cauldron": rev}, dict(
+        subset=subset, max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_side=max_side, seed=seed))
     shutil.rmtree(final_dir, ignore_errors=True)
     os.rename(tmp_dir, final_dir)
     open(os.path.join(final_dir, "_READY"), "w").close()
@@ -1158,9 +1329,10 @@ def prepare_cauldron(subsets: str = ",".join(CAULDRON_SUBSETS), max_rows: int = 
 # ---------------------------------------------------------------------------------------------------------
 
 
-def _score_source(name: str, split: str, rng, max_texts: int, max_chars: int):
+def _score_source(name: str, split: str, rng, max_texts: int, max_chars: int, revision=None):
     """Yield ``(row_id, image, records)`` for one source and split (``"train"`` / ``"val"``); ``image`` is a PIL
-    image or a Hub file path to download. Sources with an upstream validation split use it for ``val``."""
+    image or a Hub file path to download. Sources with an upstream validation split use it for ``val``.
+    ``revision`` pins the source repo's commit."""
     from datasets import load_dataset
 
     from laya.rubric import SOURCES, ava_record, crisismmd_record, richhf_records, vlfeedback_records
@@ -1169,20 +1341,23 @@ def _score_source(name: str, split: str, rng, max_texts: int, max_chars: int):
     if name == "vlfeedback":
         if split == "val":
             return  # no upstream split: the job holds out val_pct of the train rows
-        for i, row in enumerate(load_dataset(repo, split="train", streaming=True)):
+        for i, row in enumerate(load_dataset(repo, split="train", streaming=True, revision=revision)):
             rid = "vlf-%s" % (row.get("id") or i)
             yield rid, row["image"], vlfeedback_records(row, rid, rng, max_texts=max_texts, max_chars=max_chars)
     elif name == "ava":
-        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True)):
+        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True,
+                                                 revision=revision)):
             rid = "ava-%s" % (row.get("image_id") or i)
             rec = ava_record(row, rid, rng)
             yield rid, row["image"], [rec] if rec else []
     elif name == "richhf":
-        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True)):
+        for i, row in enumerate(load_dataset(repo, split="validation" if split == "val" else "train", streaming=True,
+                                                 revision=revision)):
             rid = "richhf-%d" % i
             yield rid, row["image"], richhf_records(row, rid, rng, max_texts=max_texts)
     elif name == "crisismmd":
-        for i, row in enumerate(load_dataset(repo, "damage", split="dev" if split == "val" else "train")):
+        for i, row in enumerate(load_dataset(repo, "damage", split="dev" if split == "val" else "train",
+                                             revision=revision)):
             rid = "crisis-%s" % (row.get("image_id") or i)
             rec = crisismmd_record(row, rid, rng)
             yield rid, row.get("image") or row["image_path"], [rec] if rec else []
@@ -1194,7 +1369,7 @@ def _score_source(name: str, split: str, rng, max_texts: int, max_chars: int):
               secrets=[modal.Secret.from_name("huggingface-thaitea")])
 def prepare_score_dataset(name: str, max_rows: int = 0, max_texts: int = 2, val_pct: float = 5.0, max_val: int = 1000,
                           max_side: int = 1024, seed: int = 0, balance: float = 3.0, max_chars: int = 1200,
-                          prefix: str = "score_"):
+                          prefix: str = "score_", revision: str = ""):
     """Stream one rubric-scored source (``laya.rubric.SOURCES``) and write /data/vqa/<prefix><name>/{train,val}.jsonl + images/.
 
     Rows are taken in stream order until ``max_rows`` usable rows (0: all); each keeps at most ``max_texts``
@@ -1203,6 +1378,7 @@ def prepare_score_dataset(name: str, max_rows: int = 0, max_texts: int = 2, val_
     splits. After streaming, the train split is level-balanced (``laya.rubric.balance_levels``: no level above
     ``balance`` x the median level count) and images no record points at are deleted. Images are JPEG with the
     longest side at most ``max_side``. Records carry ``"target"`` (AVA's vote histogram) where the source has it.
+    The source is read at one commit (``revision``, default: what ``main`` is now), recorded in ``manifest.json``.
     """
     import random
     import shutil
@@ -1219,11 +1395,12 @@ def prepare_score_dataset(name: str, max_rows: int = 0, max_texts: int = 2, val_
     shutil.rmtree(tmp_dir, ignore_errors=True)
     os.makedirs(os.path.join(tmp_dir, "images"))
     rng = random.Random(seed)
+    rev = _dataset_revision(SOURCES[name], revision)
     t0 = time.time()
     recs = {"train": [], "val": []}
     n_rows = {"train": 0, "val": 0}
     for split in ("train", "val"):
-        for rid, image, rows in _score_source(name, split, rng, max_texts, max_chars):
+        for rid, image, rows in _score_source(name, split, rng, max_texts, max_chars, rev):
             if not rows:
                 continue
             if split == "train" and max_rows and n_rows["train"] >= max_rows:
@@ -1237,7 +1414,7 @@ def prepare_score_dataset(name: str, max_rows: int = 0, max_texts: int = 2, val_
                     target = "train"
             path = "images/%s.jpg" % rid
             if isinstance(image, str):
-                image = Image.open(hf_hub_download(SOURCES[name], image, repo_type="dataset"))
+                image = Image.open(hf_hub_download(SOURCES[name], image, repo_type="dataset", revision=rev))
             im = image.convert("RGB")
             im.thumbnail((max_side, max_side))
             im.save(os.path.join(tmp_dir, path), quality=90)
@@ -1267,6 +1444,9 @@ def prepare_score_dataset(name: str, max_rows: int = 0, max_texts: int = 2, val_
             "images_dropped_by_balance": dropped, "minutes": round((time.time() - t0) / 60, 1)}
     with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
+    _write_manifest(tmp_dir, {SOURCES[name]: rev}, dict(
+        name=name, max_rows=max_rows, max_texts=max_texts, val_pct=val_pct, max_val=max_val, max_side=max_side,
+        seed=seed, balance=balance, max_chars=max_chars))
     shutil.rmtree(final_dir, ignore_errors=True)
     os.rename(tmp_dir, final_dir)
     open(os.path.join(final_dir, "_READY"), "w").close()
@@ -1616,6 +1796,10 @@ def prepare_doom_basic(n_train: int = 20000, n_val: int = 2000, eps: float = 0.3
     g.close()
     with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=2)
+    import vizdoom
+
+    _write_manifest(tmp_dir, {"vizdoom": vizdoom.__version__},
+                    dict(n_train=n_train, n_val=n_val, eps=eps, tics=tics, seed=seed))
     shutil.rmtree(final_dir, ignore_errors=True)
     os.rename(tmp_dir, final_dir)
     open(os.path.join(final_dir, "_READY"), "w").close()
