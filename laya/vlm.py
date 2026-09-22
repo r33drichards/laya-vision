@@ -511,6 +511,10 @@ class VLMDecisionModel(nn.Module):
             # the backbone's forward would call the vision tower without the interpolation flag
             image_hidden_states = self._image_features(pixel_values, pixel_attention_mask)
             pixel_values = pixel_attention_mask = None
+        if image_hidden_states is not None:
+            # under autocast the connector returns bf16 while the text embeddings keep the weights' dtype, and
+            # SmolVLM2's merge (an index put) refuses mixed dtypes
+            image_hidden_states = image_hidden_states.to(self.encoder.get_input_embeddings().weight.dtype)
         attn, enc_kw = attention_mask, {}
         if self.readout == "terminator":
             enc_kw["use_cache"] = False
