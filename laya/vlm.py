@@ -47,6 +47,7 @@ processor as ``laya_readout`` so the sequence builders follow it (``ImagePrep`` 
 """
 import inspect
 import json
+import math
 import os
 import random
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -59,6 +60,8 @@ from .common import QTYPES, confidence_from_probs, render_options, serialize_sta
 from .preprocess import ImagePrep, as_uint8_chw, prefix_ids
 
 DEFAULT_BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
+#: SmolVLM2 at the same size: same dimensions and tokenizer, trained on video and multi-image data as well
+SMOLVLM2_BACKBONE = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
 MODERNVBERT_BACKBONE = "ModernVBERT/modernvbert"
 READOUTS = ("terminator", "mask")
 #: backbone ``model_type`` values that are bidirectional encoders and take the ``"mask"`` readout
@@ -80,6 +83,16 @@ MASK_QUESTION_TEXT = " %s question: %s"
 def readout_for(config) -> str:
     """``"mask"`` for a bidirectional encoder backbone (ModernVBERT), ``"terminator"`` for a causal one."""
     return "mask" if getattr(config, "model_type", None) in BIDIRECTIONAL_MODEL_TYPES else "terminator"
+
+
+def default_max_len(prep: Optional[ImagePrep]) -> int:
+    """Sequence cap for a fresh agent: 1024 for one view per image (every released checkpoint). With splitting,
+    the extra tiles are added on top (plus a few tokens each for the row/column tags), rounded up to a multiple
+    of 256, so one split image leaves the question and state text the same room as an unsplit one."""
+    if prep is None or not prep.split_edge:
+        return 1024
+    need = 1024 - prep.image_seq_len + prep.max_tiles * (prep.image_seq_len + 8)
+    return int(math.ceil(need / 256) * 256)
 
 
 def processor_readout(processor) -> str:
@@ -148,6 +161,9 @@ def vlm_prefix(processor, images: Sequence, prep: Optional[ImagePrep] = None,
     (``preprocess.prefix_ids``) and the raw uint8 frames are returned as ``raw_images`` for the device-side
     resize in ``VLMDecisionModel.forward``. This is what keeps the data loader and the play loop cheap.
 
+    With ``prep.split_edge`` set the processor tiles each image, so ``pixel_values`` holds every tile of every
+    image and ``n_images`` counts those views (the batch collator pads on it), not the images in the state.
+
     ``prep`` defaults to the one ``ImagePrep.apply`` left on the processor, so callers that only ever see a
     processor (the training loader, ``collect_logits``) follow the checkpoint's path without being told.
     """
@@ -169,16 +185,17 @@ def vlm_prefix(processor, images: Sequence, prep: Optional[ImagePrep] = None,
     out = processor(
         text=[prefix_text + processor.image_token * len(images)],
         images=[list(images)],
-        do_image_splitting=False,
+        do_image_splitting=bool(prep is not None and prep.split_edge),
         return_tensors="pt",
         add_special_tokens=False,  # the framing is spelled out in prefix_text (a no-op for SmolVLM's tokenizer)
     )
+    pv = out["pixel_values"][0]
     return {
         "ids": out["input_ids"][0].tolist(),
-        "pixel_values": out["pixel_values"][0],
+        "pixel_values": pv,
         "pixel_attention_mask": out["pixel_attention_mask"][0].bool(),
         "raw_images": None,
-        "n_images": len(images),
+        "n_images": int(pv.shape[0]),  # == len(images) without splitting
     }
 
 
@@ -186,7 +203,7 @@ def build_vlm_inputs(
     processor,
     state: Any,
     q: Dict,
-    max_len: int = 1024,
+    max_len: Optional[int] = None,
     head_max_len: int = 256,
     option_order: Optional[List[int]] = None,
     truncate_left: bool = False,
@@ -202,8 +219,11 @@ def build_vlm_inputs(
     (``readout="mask"``, ModernVBERT). ``readout`` defaults to what the processor was bound to
     (``processor_readout``). ``prefix`` (from ``vlm_prefix``) may be passed to reuse image preprocessing across
     questions; the state's images are then ignored in favour of it. ``prep`` picks the preprocessing path (see
-    ``laya.preprocess``); it is ignored when ``prefix`` is given, which already carries the choice.
+    ``laya.preprocess``); it is ignored when ``prefix`` is given, which already carries the choice. ``max_len``
+    defaults to the checkpoint's, which the agent leaves on the processor as ``laya_max_len`` (1024 without one).
     """
+    if max_len is None:
+        max_len = getattr(processor, "laya_max_len", 1024)
     if readout is None:
         readout = processor_readout(processor)
     if readout not in READOUTS:
@@ -487,10 +507,15 @@ class VLMDecisionModel(nn.Module):
                 # padded image slots must stay exactly zero; get_image_features drops them by that test
                 pixel_values = pixel_values * image_mask[..., None, None, None]
                 pixel_attention_mask = pixel_attention_mask & image_mask[..., None, None]
-        if pixel_values is not None and self._vision_kw:
-            # the backbone's forward would call the vision tower without the interpolation flag
+        if pixel_values is not None:
+            # run the vision tower here rather than in the backbone's forward: ModernVBERT's needs the
+            # interpolation flag, and the cast below must happen before the merge
             image_hidden_states = self._image_features(pixel_values, pixel_attention_mask)
             pixel_values = pixel_attention_mask = None
+        if image_hidden_states is not None:
+            # under autocast the connector returns bf16 while the text embeddings keep the weights' dtype, and
+            # SmolVLM2's merge (an index put) refuses mixed dtypes
+            image_hidden_states = image_hidden_states.to(self.encoder.get_input_embeddings().weight.dtype)
         attn, enc_kw = attention_mask, {}
         if self.readout == "terminator":
             enc_kw["use_cache"] = False
@@ -620,7 +645,9 @@ class VLMAgent:
 
     Build fresh (untrained head) with ``VLMAgent(backbone="HuggingFaceTB/SmolVLM-256M-Instruct")`` (or
     ``backbone="ModernVBERT/modernvbert"`` for the bidirectional family) or load a saved agent with
-    ``VLMAgent("path/or/hub-id")``.
+    ``VLMAgent("path/or/hub-id")``. ``backbone=SMOLVLM2_BACKBONE`` builds on SmolVLM2 instead. A fresh agent
+    takes config overrides as keywords, e.g. ``image_split_edge=2048`` for the processor's image splitting (see
+    ``laya.preprocess``), which also raises ``max_len`` (``default_max_len``) unless one is given.
     """
 
     def __init__(
@@ -651,13 +678,17 @@ class VLMAgent:
             # a fresh agent gets the cheap path by default; a saved one keeps whatever it was trained with
             self.prep = ImagePrep.from_config(self.cfg, default_backend="gpu")
             self.cfg.update(self.prep.to_config())
+            if not cfg_overrides.get("max_len"):
+                self.cfg["max_len"] = default_max_len(self.prep)
             self.processor = AutoProcessor.from_pretrained(self.cfg["backbone"], token=token)
             self.prep.apply(self.processor)
             self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep)
         else:
             self._load(model_id_or_path, token, dtype, cfg_overrides)
-        # the sequence builders only ever see the processor, so it carries the readout like it carries the prep
+        # the sequence builders only ever see the processor, so it carries the readout and the sequence cap like
+        # it carries the prep (the training loader and ``collect_logits`` follow the checkpoint without being told)
         self.cfg["readout"] = self.processor.laya_readout = self.model.readout
+        self.processor.laya_max_len = self.cfg.get("max_len", 1024)
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
         self.temperature_by_options = self.cfg.get("temperature_by_options", {})
