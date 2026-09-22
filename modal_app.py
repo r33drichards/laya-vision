@@ -728,7 +728,7 @@ def row_evidence(run_name: str, datasets: str = "vqa", val_split: str = "val", m
     the dataset, the record id and its index among the split's usable records, the label, the option order used,
     the raw label-order logits, the probabilities after the checkpoint's per-type temperature (what ``metrics_from``
     calibrates with), and the sha256 of the exact input ids (``laya.vlm.input_ids_sha256``). Returns
-    ``{"rows_jsonl": bytes, "meta": dict}``; ``meta`` records the checkpoint (weights and config sha256, backbone
+    ``{"rows_jsonl": bytes, "meta_json": str}``; the meta records the checkpoint (weights and config sha256, backbone
     revision), the datasets (val file sha256, and ``manifest.json`` / ``meta.json`` where the prep wrote one),
     library versions, the GPU and the metrics computed here.
     """
@@ -790,7 +790,8 @@ def row_evidence(run_name: str, datasets: str = "vqa", val_split: str = "val", m
         "metrics": {"val_raw": metrics_from(records), "val_calibrated": metrics_from(records, temps)},
     }
     print(json.dumps(meta["metrics"]["val_calibrated"]))
-    return {"rows_jsonl": ("\n".join(lines) + "\n").encode(), "meta": meta}
+    # plain bytes and JSON only: the local side has no torch to unpickle e.g. ``torch.__version__`` (a TorchVersion)
+    return {"rows_jsonl": ("\n".join(lines) + "\n").encode(), "meta_json": json.dumps(meta)}
 
 
 def _write_sha256sums(raw_dir: str) -> None:
@@ -833,7 +834,7 @@ def evidence(run: str = "cauldron-score-2ep-bidir-full/best", datasets: str = "v
     os.makedirs(out_dir, exist_ok=True)
     with open(rows_path, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as f:
         f.write(res["rows_jsonl"])
-    meta = dict(res["meta"], rows_file=os.path.basename(rows_path))
+    meta = dict(json.loads(res["meta_json"]), rows_file=os.path.basename(rows_path))
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
         f.write("\n")
