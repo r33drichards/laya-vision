@@ -15,6 +15,7 @@
                                                      # or --option-attention block to un-causal SmolVLM's option block
     modal run --detach modal_app.py::split_bench      # SmolVLM2, image splitting off vs 1024 vs 2048 on a 6-set subset:
                                                      # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
+    modal run modal_app.py::bench_prefix_cache       # predict latency, prefix cache off vs on, L4 bf16
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
@@ -668,6 +669,59 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
            "mean_input_tokens": float(np.mean(tokens)), "mean_views_per_image": float(np.mean(views))}
     print(json.dumps(out))
     return out
+
+
+@app.function(image=image, gpu="L4", timeout=25 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+def bench_prefix_cache(run_name: str = "cauldron-score-2ep-bidir-full/best", dtype: str = "bf16", n: int = 20):
+    """``predict`` latency with the prefix cache off (every row runs the whole sequence), forced on (image + state
+    prefilled once, only the question/option suffixes per row) and automatic (``prefix_cache=None``), 3 questions
+    on one image, ``n_permutations`` 1, 4 and 8, with a short and a long state text. Also reports the largest
+    probability gap between the full and the cached path. Nothing is written."""
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from laya.vlm import VLMAgent
+
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda", dtype=dtype)
+    img = Image.new("RGB", (640, 480), (255, 255, 255))
+    img.paste(Image.new("RGB", (200, 160), (220, 20, 20)), (120, 100))
+    states = {"image + short state": {"image": img, "context": "A product photo from the returns desk. " * 3},
+              "image + long state": {"image": img, "context": "A product photo from the returns desk. " * 90}}
+    qs = {"color": {"type": "choice", "instructions": "What color is the box?", "criteria": ["red", "blue", "green", "white"]},
+          "size": {"type": "score", "instructions": "How much of the photo does the box fill?",
+                   "criteria": ["tiny", "a quarter", "about half", "almost all"]},
+          "damaged": {"type": "noul", "instructions": "Does the box look damaged?"}}
+    rows = []
+    for label, state in states.items():
+        for perms in (1, 4, 8):
+            a = agent.predict(state, qs, n_permutations=perms, prefix_cache=False)
+            b = agent.predict(state, qs, n_permutations=perms, prefix_cache=True)
+            gap = 0.0
+            for qid in qs:
+                x, y = a["answers"][qid], b["answers"][qid]
+                pa = list(x.get("probabilities", {"p": x.get("noul")}).values())
+                pb = list(y.get("probabilities", {"p": y.get("noul")}).values())
+                gap = max([gap] + [abs(u - v) for u, v in zip(pa, pb)])
+            med = {}
+            for cache in (False, True, None):
+                for _ in range(3):
+                    agent.predict(state, qs, n_permutations=perms, prefix_cache=cache)
+                ts = []
+                for _ in range(n):
+                    torch.cuda.synchronize()
+                    t0 = time.perf_counter()
+                    agent.predict(state, qs, n_permutations=perms, prefix_cache=cache)
+                    torch.cuda.synchronize()
+                    ts.append((time.perf_counter() - t0) * 1000)
+                med[cache] = float(np.median(ts))
+            r = {"state": label, "n_permutations": perms, "input_tokens": a["usage"]["input_tokens"],
+                 "full_ms": med[False], "cached_ms": med[True], "auto_ms": med[None],
+                 "speedup_cached": med[False] / med[True], "max_prob_gap": gap}
+            print(json.dumps(r))
+            rows.append(r)
+    return {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype,
+            "option_attention": agent.model.option_attention, "rows": rows}
 
 
 SPLIT_BENCH_DATASETS = ("cauldron_ai2d", "cauldron_aokvqa", "cauldron_tqa", "cauldron_ocrvqa", "cauldron_mapqa",
