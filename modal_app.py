@@ -349,10 +349,10 @@ def finetune(
 
 @app.function(
     image=image,
-    gpu="A100",
+    gpu="A100-80GB",  # 80 GB: image splitting multiplies the activations (split1024 is ~4.6 views per image)
     cpu=24,
     memory=65536,
-    timeout=300 * 60,
+    timeout=24 * 60 * 60,  # a full-recipe run with splitting is ~6 h; max_minutes is the real training budget
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
     retries=modal.Retries(max_retries=3, initial_delay=10.0),
 )
