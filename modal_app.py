@@ -11,7 +11,8 @@
     modal run --detach modal_app.py::finetune_long --run-name cauldron-score-2ep --epochs 2 --max-passes 4 \
         --datasets cauldron,score --val-datasets vqa,cauldron,score
                                                      # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
-                                                     # add --backbone ModernVBERT/modernvbert for the bidirectional one
+                                                     # add --backbone ModernVBERT/modernvbert for the bidirectional one,
+                                                     # or --option-attention bidirectional to un-causal SmolVLM's option block
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
@@ -250,6 +251,7 @@ def finetune(
     backbone: str = BACKBONE,
     val_datasets: str = "",
     preprocess: str = "processor",
+    option_attention: str = "causal",
     w_ce_schedule: str = "const",
     mix: str = "",
     mix_alpha: float = 0.0,
@@ -282,7 +284,7 @@ def finetune(
     else:
         train_ex, calib_ex, val_ex = _load_data(datasets, train_split, val_split, n_calib, max_train, max_val, caps, val_datasets)
 
-    agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess)
+    agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention)
     print("backbone %s, readout %s, preprocess %s" % (backbone, agent.model.readout, agent.prep.backend))
     hf_vol.commit()
     model, proc = agent.model, agent.processor
@@ -293,7 +295,8 @@ def finetune(
 
     mix_weights = _parse_mix(mix)
     log = {"run": run_name, "args": dict(backbone=backbone, datasets=datasets, val_datasets=val_datasets or datasets,
-                                         preprocess=preprocess, w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
+                                         preprocess=preprocess, option_attention=agent.model.option_attention,
+                                         w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
                                          minutes=minutes, freeze=freeze, n_last=n_last,
                                          batch_size=batch_size, lr_head=lr_head, lr_backbone=lr_backbone, max_train=max_train,
                                          max_val=max_val, val_caps=caps),
@@ -365,6 +368,7 @@ def finetune_long(
     backbone: str = BACKBONE,
     val_datasets: str = "",
     preprocess: str = "processor",
+    option_attention: str = "causal",
     w_ce_schedule: str = "const",
     mix: str = "",
     mix_alpha: float = 0.0,
@@ -395,6 +399,11 @@ def finetune_long(
       size. The defaults (``""``, 0) are the equal sampling of the earlier runs; ``mix_alpha=1`` samples in
       proportion to size, ``0.5`` by square root. The effective probabilities are printed at the start.
     * ``preprocess``: see ``finetune``.
+    * ``option_attention="bidirectional"`` (SmolVLM only) lets the option block attend to itself in both
+      directions through a 4D mask (``laya.vlm.option_block_mask``), so every option's readout sees every other
+      option, as ModernVBERT's ``[MASK]`` readout does; the state and question stay causal. The pretrained
+      backbone never saw this pattern, so it is only meaningful with the backbone unfrozen, as here. The setting
+      is saved in the checkpoint and applied at inference. Ignored (rejected) for the ``"mask"`` readout.
     * ``w_ce_schedule="anneal"`` holds the soft cross-entropy weight for the first 30% of training and decays it
       to 0 by 80%, so the run ends on the proper scoring rule alone, which keeps the raw model calibrated
       (``laya.vlm_train.train``); ``"const"`` is the released recipe.
@@ -435,7 +444,7 @@ def finetune_long(
         agent = VLMAgent(_ckpt_path(init_from), device="cuda")
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
-        agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess)
+        agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention)
     print("backbone %s, readout %s, preprocess %s" % (agent.cfg["backbone"], agent.model.readout, agent.prep.backend))
     init_temps = list(agent.temperature)
     hf_vol.commit()
@@ -443,6 +452,7 @@ def finetune_long(
     ev_kw = dict(batch_size=64, num_workers=num_workers)
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
+                                         option_attention=agent.model.option_attention,
                                          w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
                                          epochs=epochs, max_minutes=max_minutes, batch_size=batch_size, lr_head=lr_h,
                                          lr_backbone=lr_b, warmup=warmup, steps=steps, eval_every=eval_every,
