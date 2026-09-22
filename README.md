@@ -48,6 +48,31 @@ A `score` question with 4 levels, a `choice` with 5 options and a `noul` are eac
 
 Diagrams of every variant and the shared head are in [docs/architecture.md](docs/architecture.md); the model code is `laya/vlm.py` and the training loop `laya/vlm_train.py`.
 
+## Calibrating on your own data
+
+Each answer's probabilities come from the option scores divided by a **temperature** and turned into percentages. A temperature above 1 flattens them (less sure), below 1 sharpens them (more sure). The checkpoint's temperatures were fitted on its validation sets, so on those sets "80% sure" is right about 80% of the time. On your photos and your questions it may not be: the model can be overconfident on a domain it has not seen. If you act on a probability threshold (auto-approve above 0.9, send to a human below), calibrate on a few hundred of your own labelled questions first.
+
+```python
+cal = agent.calibrate(
+    [
+        {"state": {"image": img, "note": note}, "image_id": "a17",
+         "questions": {"damage": damage_q, "outdoors": outdoors_q},
+         "labels": {"damage": 2, "outdoors": False}},            # level index for score, option name for choice, bool for noul
+        ...
+    ],
+    group_key="image_id",                                        # questions about one image stay together in every split
+)
+print(cal.summary())                                             # fitted temperatures; ECE raw / checkpoint / fitted, with 95% intervals
+cal.save("my-calibration.json")
+
+result = agent.predict(state, questions, calibration=laya.Calibration.load("my-calibration.json"))
+result = agent.predict(state, questions, temperature={"noul": 1.4})   # or set one by hand, for this call only
+```
+
+`calibrate` runs the model once over your rows and fits one temperature per question type (a type with fewer than 30 labelled questions shares one fitted on all rows; with fewer than 30 in total the checkpoint's are kept). It then checks the result honestly: the fitted temperature is scored on rows it was not fitted on (5 folds that never split a group), next to the raw and checkpoint temperatures, each with a 95% interval. `cal.evidence["all"]["ece_improvement"]` gives the paired interval of the gain; if it includes 0, the new temperature is not shown to beat the checkpoint's on your data and you can keep the checkpoint's. Rows without the `group_key` field count as their own group, with a warning. A calibration records which checkpoint it was fitted for and warns (`strict_calibration=True` raises) if used with another; use the same `n_permutations` in `calibrate` and `predict` (the calibration records the value it was fitted with).
+
+**Accuracy does not change.** Dividing every option's score by the same positive number keeps their order, so the chosen option, the `score` level with the highest probability and which side of 0.5 a `noul` falls on stay the same; only how sure the model says it is moves. The `score` field (the expected level) does move a little, since it averages over the probabilities. Neither `temperature=` nor `calibration=` changes the agent: they apply to that one call. The fitting code is plain numpy in `laya/calibration.py`.
+
 ## Data
 
 Everything is a prepared dataset on the `laya-datasets` Modal volume: `/data/vqa/<name>/{train,val}.jsonl` plus `images/`, one record per question with its type, instructions, criteria and label, optionally a soft target.
