@@ -507,8 +507,9 @@ class VLMDecisionModel(nn.Module):
                 # padded image slots must stay exactly zero; get_image_features drops them by that test
                 pixel_values = pixel_values * image_mask[..., None, None, None]
                 pixel_attention_mask = pixel_attention_mask & image_mask[..., None, None]
-        if pixel_values is not None and self._vision_kw:
-            # the backbone's forward would call the vision tower without the interpolation flag
+        if pixel_values is not None:
+            # run the vision tower here rather than in the backbone's forward: ModernVBERT's needs the
+            # interpolation flag, and the cast below must happen before the merge
             image_hidden_states = self._image_features(pixel_values, pixel_attention_mask)
             pixel_values = pixel_attention_mask = None
         if image_hidden_states is not None:
