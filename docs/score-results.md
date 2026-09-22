@@ -128,7 +128,7 @@ The checkpoint is `/ckpt/smolvlm/cauldron-score-2ep-bidir-full/best` on the `lay
 ## Next
 
 - Done above: the completed schedule, VLFeedback x3 and the unbalanced AVA (`prepare_score --names ava --balance 0`). VLFeedback was still improving; a third epoch or `--mix score_vlfeedback=5` is the obvious next lever.
-- Published: `cauldron-score-2ep-bidir-full/best` is [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score), model card in `hf_model_card_score.md`.
+- Published: `cauldron-score-2ep-bidir-full/best` is [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score), model card in `hf_model_card_score.md`; the same weights are also at [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision), the moving "latest recommended" repo.
 - Running: `cauldron-score-3ep-bidir-vlf5`, one more epoch from that checkpoint with VLFeedback drawn 5x.
 - Per-option-count or per-dataset temperatures for `score`.
 - Report `mae` / `xent` in the training-time evals too (they are in `metrics_from` now, so the next run's `metrics.json` will carry them).
