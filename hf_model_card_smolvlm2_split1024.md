@@ -27,11 +27,8 @@ It is the **image-splitting checkpoint from a benchmark**, not a general-purpose
 
 ## Usage
 
-SmolVLM2 and image splitting are not on the repo's `main` branch yet, so install from the branch that adds them:
-
 ```bash
-git clone -b claude/token-encoder-vlm-questions-66ck4u https://github.com/r33drichards/laya-vision
-pip install -e ./laya-vision torchvision
+git clone https://github.com/r33drichards/laya-vision && pip install -e ./laya-vision torchvision
 ```
 
 ```python
