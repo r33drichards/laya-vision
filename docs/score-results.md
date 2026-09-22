@@ -6,9 +6,9 @@ Three runs of `finetune_long` on the 19 closed-form Cauldron subsets plus the fo
 |---|---|---|---|---|---|
 | `smolvlm/cauldron-score-2ep` | SmolVLM-256M | causal | 90 min, 16,408 steps, 1.13 epochs | 14,556 | 73.5% |
 | `modernvbert/cauldron-score-2ep` | ModernVBERT-250M | n/a (bidirectional readout) | 90 min, 19,189 steps, 1.32 epochs | 19,189 | 66.2% |
-| `smolvlm/cauldron-score-2ep-bidir` | SmolVLM-256M | bidirectional option block | see below | | |
+| `smolvlm/cauldron-score-2ep-bidir` | SmolVLM-256M | bidirectional option block | 90 min, 16,692 steps, 1.15 epochs | 14,556 | 74.2% |
 
-All three asked for 2 epochs (29,110 steps of batch 32 over 465,760 examples) but stopped at `finetune_long`'s default `--max-minutes 90`, so the cosine schedule was cut at about 60% of peak learning rate. Equal sampling over 23 sets, `--max-passes 4`, `w_ce_schedule="const"`, the released recipe otherwise. Raw logs: `smolvlm-cauldron-score-metrics.json`, `modernvbert-cauldron-score-metrics.json`.
+All three asked for 2 epochs (29,110 steps of batch 32 over 465,760 examples) but stopped at `finetune_long`'s default `--max-minutes 90`, so the cosine schedule was cut at about 60% of peak learning rate. Equal sampling over 23 sets, `--max-passes 4`, `w_ce_schedule="const"`, the released recipe otherwise. Raw logs: `smolvlm-cauldron-score-metrics.json`, `modernvbert-cauldron-score-metrics.json`, `smolvlm-cauldron-score-bidir-metrics.json`.
 
 ## The `score` head, first time trained
 
@@ -58,7 +58,25 @@ Cauldron holdouts where the backbones differ most (SmolVLM / ModernVBERT): IconQ
 
 `--option-attention bidirectional` passes a 4D mask that lets the option block attend to itself in both directions while the image, state and question stay causal (`laya.vlm.option_block_mask`). Checked on the pretrained weights before the run: changing option C's text moved option A's logit by about 0.001 under the causal mask (only through the head layers) and by about 0.05 under the bidirectional one, and the mask is strictly causal before the block, fully connected inside it and sees everything before it.
 
-_pending: results_
+Same data, schedule and 90-minute cap as the causal SmolVLM run; both have their best checkpoint at step 14,556 (epoch 1.0), so the comparison is at equal steps.
+
+| | Causal SmolVLM | Bidirectional option block |
+|---|---|---|
+| Mean val acc, 26 sets | 73.5% | **74.2%** |
+| A-OKVQA (official) | 60.0% | **61.1%** |
+| A-OKVQA, 4 cyclic option shifts | 60.0 / 60.6 / 61.3 / 61.0, spread 1.3 | 61.1 / 61.0 / 61.9 / 60.8, spread **1.1** |
+| A-OKVQA, 4 permutations averaged | 60.5% | 61.7% |
+| ScienceQA (official) | **83.2%** | 82.5% |
+| VQAv2 yes/no | 72.6% | 72.3% |
+| TQA holdout | 73.9% | **76.9%** |
+| InterGPS holdout | 27.7% | **31.9%** |
+| NLVR2 holdout | 79.6% | **81.8%** |
+| RAVEN / IconQA / VSR holdouts | 80.3 / 92.1 / 90.0 | 80.4 / 91.9 / 90.6 |
+| score_vlfeedback / richhf / crisismmd | 50.0 / 57.1 / 70.5 | 49.4 / 56.7 / 70.5 |
+| Temperatures (choice, score, noul) | 2.09 / 1.69 / 1.75 | 2.27 / **3.77** / 1.83 |
+| Calibrated ECE, all sets | 0.029 | 0.050 |
+
+Letting the options see each other buys a consistent 0.7 points on the mean and 1 to 4 points on the sets where options must be compared (TQA, InterGPS, NLVR2, A-OKVQA), costs nothing on the score sets, and changes the order spread only from 1.3 to 1.1 points: a shared option block does not remove position bias by itself, because the terminator of each option is still at a different position and the pretrained backbone had 90 minutes to adapt to a mask it never saw. ModernVBERT's spread on the same check is 1.4, so all three sit at the same noise level on 1,138 rows. The one clear cost is the `score` head's raw confidence: its fitted temperature is 3.8 against 1.7 for the causal run, and the calibrated ECE over all sets is worse (0.050 vs 0.029). The cheapest follow-up is the same run with the schedule completed; the mask is a free win on accuracy at equal steps.
 
 ## Qualitative check
 
@@ -83,6 +101,6 @@ Both models order the pairs the right way on the trained rubrics: severe over no
 
 - Rerun with `--max-minutes 240` (or continue from `best/` with `--init-from`) so the schedule completes; every score set was still improving.
 - Weight VLFeedback up (`--mix score_vlfeedback=3`): it is the largest and most rubric-like set and got 0.2 passes.
-- Re-prepare AVA without train-only balancing (`prepare_score --names ava --balance 0`); the soft targets carry the level distribution already.
+- AVA has been re-prepared without train-only balancing (`prepare_score --names ava --balance 0`, 20,437 train rows); the three checkpoints above were trained on the balanced version, so the next run picks it up.
 - Per-option-count or per-dataset temperatures for `score`.
 - Report `mae` / `xent` in the training-time evals too (they are in `metrics_from` now, so the next run's `metrics.json` will carry them).
