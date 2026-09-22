@@ -64,6 +64,11 @@ def check_schema(res, questions):
             assert 0.0 <= a["score"] <= len(qdef["criteria"]) - 1
         else:
             assert 0.0 <= a["noul"] <= 1.0
+        if "truncated" in a:  # only present when something was cut
+            t = a["truncated"]
+            assert set(t) == {"options", "indistinguishable", "instructions", "instructions_tokens_dropped",
+                              "state_tokens_dropped"}
+            assert t["options"] or t["indistinguishable"] or t["instructions"] or t["state_tokens_dropped"]
     assert res["usage"]["input_tokens"] > 0
 
 
@@ -77,6 +82,7 @@ def test_predict_image_and_text(agent):
     assert res["usage"]["images"] == 0
     res = agent.predict({"image": square((20, 40, 220))}, QUESTIONS, n_permutations=3)
     check_schema(res, QUESTIONS)
+    assert not any("truncated" in a for a in res["answers"].values())  # nothing is cut for ordinary inputs
 
 
 def test_block_option_attention(agent):
@@ -404,3 +410,81 @@ def test_ragged_image_counts_pad_without_losing_a_frame(agent):
     pv1, pam1 = prep.pixel_values([frames[0]], device=agent.device, dtype=agent.model.encoder.dtype)
     alone = agent.model.encode_images(pv1, pam1)
     assert float((feats[0] - alone[0]).abs().max()) < 1e-3  # batching noise only
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Truncation reporting
+# ---------------------------------------------------------------------------------------------------------
+
+LONG = "a long clause that keeps going with more words so that it needs many tokens " * 8  # ~130 tokens
+TRUNCATION_QUESTIONS = {
+    "long_option": {"type": "choice", "instructions": "Which fits?", "criteria": {"short": "a red square", "long": LONG}},
+    "many_options": {"type": "score", "instructions": "Rate it.",
+                     "criteria": ["%02d is a level with a moderately long description of what it means" % i
+                                  for i in range(30)]},
+    "long_instructions": {"type": "noul", "instructions": "Consider the image carefully. " * 80},
+    "same_after_cut": {"type": "choice", "instructions": "Which one?",
+                       "criteria": [LONG + "alpha", LONG + "beta", "neither"]},
+}
+NO_CUT = {"options": [], "indistinguishable": [], "instructions_tokens_dropped": 0, "state_tokens_dropped": 0}
+
+
+def test_builders_report_what_they_cut(agent):
+    q = VLMAgent._to_internal(QUESTIONS["color"])
+    assert build_vlm_inputs(agent.processor, {"image": square((0, 0, 255)), "note": "x"}, q)["truncation"] == NO_CUT
+
+    q = VLMAgent._to_internal(TRUNCATION_QUESTIONS["long_option"])
+    for order in ([0, 1], [1, 0]):  # label indices, whatever the marker order
+        assert build_vlm_inputs(agent.processor, "x", q, option_order=order)["truncation"] == dict(NO_CUT, options=[1])
+
+    q = VLMAgent._to_internal(TRUNCATION_QUESTIONS["same_after_cut"])
+    t = build_vlm_inputs(agent.processor, "x", q, option_order=[2, 1, 0])["truncation"]
+    assert t["options"] == [0, 1] and t["indistinguishable"] == [[0, 1]]
+
+    q = VLMAgent._to_internal(QUESTIONS["is_red"])
+    state = {"image": square((0, 0, 255)), "note": "word " * 3000}
+    n_state = len(agent.processor.tokenizer(split_state(state)[1], add_special_tokens=False)["input_ids"])
+    for left in (False, True):
+        it = build_vlm_inputs(agent.processor, state, q, truncate_left=left)
+        assert it["truncation"]["state_tokens_dropped"] > 1500 and len(it["ids"]) == 1024
+        # a budget the question alone fills: the state must be dropped, not kept whole
+        n_q = len(it["ids"]) - (n_state - it["truncation"]["state_tokens_dropped"])
+        it = build_vlm_inputs(agent.processor, state, q, max_len=n_q, truncate_left=left)
+        assert it["truncation"]["state_tokens_dropped"] == n_state and len(it["ids"]) == n_q
+
+
+def test_predict_reports_truncation(agent):
+    img = square((220, 20, 20))
+    res = agent.predict({"image": img}, TRUNCATION_QUESTIONS)
+    check_schema(res, TRUNCATION_QUESTIONS)
+    a = res["answers"]
+    assert a["long_option"]["truncated"] == {"options": ["long"], "indistinguishable": [], "instructions": False,
+                                             "instructions_tokens_dropped": 0, "state_tokens_dropped": 0}
+    t = a["many_options"]["truncated"]
+    assert t["options"] == [str(i) for i in range(30)] and t["indistinguishable"] == []  # 30 options share 256 tokens
+    t = a["long_instructions"]["truncated"]
+    assert t["instructions"] and t["instructions_tokens_dropped"] > 100 and not t["options"]
+    t = a["same_after_cut"]["truncated"]
+    assert t["options"] == [LONG + "alpha", LONG + "beta"] and t["indistinguishable"] == [[LONG + "alpha", LONG + "beta"]]
+
+    res = agent.predict({"image": img, "note": "word " * 3000}, QUESTIONS)
+    check_schema(res, QUESTIONS)
+    for ans in res["answers"].values():
+        assert ans["truncated"]["state_tokens_dropped"] > 1500
+        assert not ans["truncated"]["options"] and not ans["truncated"]["instructions"]
+
+    # the cuts do not depend on the option order: reported once, the same as with one order
+    one = {"long_option": TRUNCATION_QUESTIONS["long_option"]}
+    res3 = agent.predict({"image": img}, one, n_permutations=3)
+    assert res3["answers"]["long_option"]["truncated"] == a["long_option"]["truncated"]
+
+
+def test_predict_strict_refuses_to_truncate(agent):
+    img = square((220, 20, 20))
+    check_schema(agent.predict({"image": img, "note": "short"}, QUESTIONS, strict=True), QUESTIONS)
+    for qid, what in (("long_option", r"options \['long'\] cut"), ("many_options", "options"),
+                      ("long_instructions", "instruction tokens dropped"), ("same_after_cut", "identical once cut")):
+        with pytest.raises(ValueError, match="%r would be truncated: .*%s" % (qid, what)):
+            agent.predict({"image": img}, {qid: TRUNCATION_QUESTIONS[qid]}, strict=True)
+    with pytest.raises(ValueError, match=r"'is_red' would be truncated: \d+ state tokens dropped \(max_len=1024\)"):
+        agent.predict({"image": img, "note": "word " * 3000}, {"is_red": QUESTIONS["is_red"]}, strict=True)

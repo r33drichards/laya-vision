@@ -32,6 +32,70 @@ def render_options(q: Dict) -> List[str]:
     ]
 
 
+def option_labels(q: Dict) -> List[str]:
+    """Option labels in label-index order, as the answers name them (choice keys, score levels, false/true)."""
+    if q["t"] == "choice":
+        return list(q["crit"].keys())
+    if q["t"] == "score":
+        return [str(i) for i in range(len(q["crit"]))]
+    return ["false", "true"]
+
+
+def truncation_report(order: List[int], full: List[List[int]], cut: List[List[int]], instructions_dropped: int,
+                      state_dropped: int) -> Dict:
+    """What a sequence builder cut to fit its budgets. ``full`` / ``cut`` are the option token ids (in ``order``,
+    i.e. marker order) before and after cutting.
+
+    ``options``: label indices (ascending) of options whose text was shortened. ``indistinguishable``: label-index
+    pairs ``[i, j]`` (``i < j``) whose cut forms are the same token ids although their full forms differ, so the
+    head cannot tell them apart. ``instructions_tokens_dropped`` / ``state_tokens_dropped``: token counts cut from
+    the question text and from the state.
+    """
+    groups: Dict[tuple, List[int]] = {}
+    for j, c in enumerate(cut):
+        groups.setdefault(tuple(c), []).append(j)
+    pairs = sorted(sorted((order[a], order[b])) for js in groups.values() for x, a in enumerate(js) for b in js[x + 1:]
+                   if full[a] != full[b])
+    return {
+        "options": sorted(order[j] for j in range(len(order)) if len(cut[j]) < len(full[j])),
+        "indistinguishable": pairs,
+        "instructions_tokens_dropped": int(instructions_dropped),
+        "state_tokens_dropped": int(state_dropped),
+    }
+
+
+def truncation_answer(report: Dict, q: Dict) -> Optional[Dict]:
+    """The ``truncated`` field of an answer: ``None`` (the field is left out) when nothing was cut, else
+    ``{"options": [labels], "indistinguishable": [[label, label], ...], "instructions": bool,
+    "instructions_tokens_dropped": n, "state_tokens_dropped": n}``."""
+    if not any(report.values()):
+        return None
+    labels = option_labels(q)
+    return {
+        "options": [labels[i] for i in report["options"]],
+        "indistinguishable": [[labels[i], labels[j]] for i, j in report["indistinguishable"]],
+        "instructions": report["instructions_tokens_dropped"] > 0,
+        "instructions_tokens_dropped": report["instructions_tokens_dropped"],
+        "state_tokens_dropped": report["state_tokens_dropped"],
+    }
+
+
+def truncation_error(qid: str, truncated: Dict, max_len: int, head_max_len: int) -> ValueError:
+    """The error ``predict(..., strict=True)`` raises instead of truncating question ``qid``."""
+    what = []
+    if truncated["options"]:
+        what.append("options %s cut (48 tokens each at most, options + question within head_max_len=%d)"
+                    % (truncated["options"], head_max_len))
+    if truncated["indistinguishable"]:
+        what.append("options %s identical once cut" % truncated["indistinguishable"])
+    if truncated["instructions"]:
+        what.append("%d instruction tokens dropped (head_max_len=%d)" % (truncated["instructions_tokens_dropped"],
+                                                                         head_max_len))
+    if truncated["state_tokens_dropped"]:
+        what.append("%d state tokens dropped (max_len=%d)" % (truncated["state_tokens_dropped"], max_len))
+    return ValueError("question %r would be truncated: %s" % (qid, "; ".join(what)))
+
+
 def build_sequence(
     tok,
     state: Union[str, dict, list],
@@ -40,24 +104,25 @@ def build_sequence(
     head_max_len: int = 192,
     option_order: Optional[List[int]] = None,
     truncate_left: bool = False,
+    report: Optional[Dict] = None,
 ):
-    """Format: [CLS] <type> instructions [SEP] [MASK] opt0 [MASK] opt1 ... [SEP] state [SEP]."""
+    """Format: [CLS] <type> instructions [SEP] [MASK] opt0 [MASK] opt1 ... [SEP] state [SEP].
+
+    Returns ``(ids, markers)``; a ``report`` dict, when given, is filled with ``truncation_report``'s keys."""
     mask_tok = tok.mask_token
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
     ins = str(q["ins"]).replace(mask_tok, " ")
     head_ids = tok("%s question: %s" % (q["t"], ins), add_special_tokens=False)["input_ids"]
-    opt_ids = []
-    for i in order:
-        opt_ids.append(
-            [tok.mask_token_id]
-            + tok(" " + opts[i].replace(mask_tok, " "), add_special_tokens=False)["input_ids"][:48]
-        )
+    full = [[tok.mask_token_id] + tok(" " + opts[i].replace(mask_tok, " "), add_special_tokens=False)["input_ids"]
+            for i in order]
+    opt_ids = [o[:49] for o in full]  # [MASK] + 48 option tokens
     opt_budget = head_max_len - sum(len(o) for o in opt_ids)
     if opt_budget < 16:
         per = max(4, (head_max_len - 16) // max(1, len(opt_ids)))
         opt_ids = [o[:per] for o in opt_ids]
         opt_budget = head_max_len - sum(len(o) for o in opt_ids)
+    n_head = len(head_ids)
     head_ids = head_ids[: max(8, opt_budget)]
     ids = [tok.cls_token_id] + head_ids + [tok.sep_token_id]
     markers = []
@@ -67,8 +132,11 @@ def build_sequence(
     ids.append(tok.sep_token_id)
     room = max(0, max_len - len(ids) - 1)
     st = tok(serialize_state(state).replace(mask_tok, " "), add_special_tokens=False)["input_ids"]
-    st = st[-room:] if truncate_left else st[:room]
+    n_state = len(st)
+    st = st[len(st) - room:] if truncate_left else st[:room]  # not st[-room:]: that keeps all of it at room=0
     ids = ids + st + [tok.sep_token_id]
+    if report is not None:
+        report.update(truncation_report(order, full, opt_ids, n_head - len(head_ids), n_state - len(st)))
     return ids[:max_len], [m for m in markers if m < max_len]
 
 
