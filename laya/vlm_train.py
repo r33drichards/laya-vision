@@ -518,15 +518,16 @@ def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] =
 
 
 class _EvalItems(torch.utils.data.Dataset):
-    def __init__(self, processor, examples, pairs):
-        self.processor, self.examples, self.pairs = processor, examples, pairs
+    def __init__(self, processor, examples, pairs, transform=None):
+        self.processor, self.examples, self.pairs, self.transform = processor, examples, pairs, transform
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, j):
         i, order = self.pairs[j]
-        it = make_item(self.processor, self.examples[i], random.Random(0), shuffle=False, order=order)
+        ex = self.transform(self.examples[i]) if self.transform else self.examples[i]
+        it = make_item(self.processor, ex, random.Random(0), shuffle=False, order=order)
         it["index"] = i
         return it
 
@@ -547,10 +548,13 @@ def collect_logits(
     num_workers: int = 0,
     device=None,
     orders: Optional[Callable[[int], List[List[int]]]] = None,
+    transform: Optional[Callable[[Dict], Dict]] = None,
 ) -> List[Dict]:
     """Label-order logits per example.
 
-    ``orders(k)`` gives the option orders to score each k-option example under (default: identity only).
+    ``orders(k)`` gives the option orders to score each k-option example under (default: the example's own
+    ``"order"`` if it has one, else identity). ``transform(example)`` is applied in the loader just before
+    tokenizing, e.g. ``laya.robustness.realize`` to perturb the images without storing them.
     ``"logits"`` is the mean over orders (as in ``VLMAgent.predict(n_permutations=...)``); ``"logits_per_order"``
     keeps each order's logits (label order), aligned with ``orders(k)``.
     """
@@ -560,10 +564,10 @@ def collect_logits(
     pairs = []
     for i, ex in enumerate(examples):
         k = len(ex["target"])
-        for order in (orders(k) if orders else [list(range(k))]):
+        for order in (orders(k) if orders else [ex.get("order") or list(range(k))]):
             pairs.append((i, order))
     loader = torch.utils.data.DataLoader(
-        _EvalItems(processor, examples, pairs), batch_size=batch_size, num_workers=num_workers,
+        _EvalItems(processor, examples, pairs, transform), batch_size=batch_size, num_workers=num_workers,
         collate_fn=functools.partial(_collate_eval, pad_id=processor.tokenizer.pad_token_id),
         worker_init_fn=_single_thread_worker,
     )
