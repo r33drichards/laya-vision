@@ -79,12 +79,23 @@ def test_predict_image_and_text(agent):
     check_schema(res, QUESTIONS)
 
 
-def test_bidirectional_option_attention(agent):
-    agent.model.option_attention = "bidirectional"
+def test_block_option_attention(agent):
+    agent.model.option_attention = "block"
     try:
         check_schema(agent.predict({"image": square((20, 40, 220))}, QUESTIONS), QUESTIONS)
     finally:
         agent.model.option_attention = "causal"
+
+
+def test_bidirectional_is_a_deprecated_alias_for_block():
+    from laya.vlm import normalize_option_attention
+
+    with pytest.warns(DeprecationWarning):
+        assert normalize_option_attention("bidirectional") == "block"
+    assert normalize_option_attention("block") == "block"
+    assert normalize_option_attention("causal") == "causal"
+    with pytest.raises(ValueError):
+        normalize_option_attention("full")
 
 
 def test_marker_positions(agent):

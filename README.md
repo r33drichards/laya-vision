@@ -44,7 +44,7 @@ The recommended checkpoint is the only one whose `score` answers mean anything. 
 
 A `score` question with 4 levels, a `choice` with 5 options and a `noul` are each rendered as a question followed by their options, one per line, after the image and the state text. The backbone encodes the whole sequence once per image, and a small head reads one logit per option from the hidden state at each option's marker. Softmax over the options, divided by a per-type temperature fitted after training, is the answer. Nothing is generated.
 
-- **Causal backbones (SmolVLM)** can only read an option after everything before it, so the options go last and each is read at its line terminator. That leaves an option-order bias of about a point of accuracy, which random orders in training and permutation averaging at inference reduce. The recommended checkpoint adds a 4D attention mask that lets the option block attend to itself in both directions (`option_attention="bidirectional"`), which is worth about a point on the reasoning-heavy sets.
+- **Causal backbones (SmolVLM)** can only read an option after everything before it, so the options go last and each is read at its line terminator. That leaves an option-order bias of about a point of accuracy, which random orders in training and permutation averaging at inference reduce. The recommended checkpoint adds a 4D attention mask that lets the option block attend to itself in both directions (`option_attention="block"`; the older spelling `"bidirectional"` still loads but is deprecated), which is worth about a point on the reasoning-heavy sets.
 - **Bidirectional backbones (ModernVBERT)** use Laya's original format unchanged: a `[MASK]` in front of each option, read from a marker that sees the whole sequence. No order bias to fix, and the fastest at inference; it trails SmolVLM by about 7 points on the Cauldron holdouts, mostly on reasoning sets like RAVEN and TQA.
 - **Training** is Laya's RLCD objective: Gaussian noise is added to the option logits, several noisy copies are scored with a strictly proper scoring rule (log plus spherical, plus a ranked probability score for `score` questions), and the group-normalised score is the policy-gradient advantage, with a soft cross-entropy term added. The vision tower stays frozen.
 
@@ -73,7 +73,7 @@ modal run modal_app.py::prepare_cauldron                                  # -> /
 modal run modal_app.py::prepare_score                                     # -> /data/vqa/score_<name>
 modal run modal_app.py::prepare_eval                                      # -> /data/vqa/eval_<name>
 modal run --detach modal_app.py::finetune_long --run-name my-run --epochs 2 --max-passes 4 --max-minutes 240 \
-    --option-attention bidirectional --mix score_vlfeedback=3 --datasets cauldron,score --val-datasets vqa,cauldron,score
+    --option-attention block --mix score_vlfeedback=3 --datasets cauldron,score --val-datasets vqa,cauldron,score
 modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name my-run --datasets cauldron
 modal run modal_app.py::full_eval --model my-run/best                   # every eval below at once, one results JSON (no --detach: results are collected locally)
 modal run modal_app.py::evaluate --run-name my-run/best                   # every prepared val set, raw and calibrated

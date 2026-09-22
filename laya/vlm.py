@@ -29,7 +29,7 @@ without seeing the competitors. This introduces option-order bias. Mitigations:
   * train with random ``option_order`` (``vlm_train.py`` does this),
   * average over ``n_permutations`` orders at inference (``VLMAgent.predict(..., n_permutations=K)``),
   * the optional head transformer (``head_layers > 0``) is bidirectional over the whole sequence,
-  * ``option_attention="bidirectional"`` passes a custom 4D mask that lets the option block attend to
+  * ``option_attention="block"`` passes a custom 4D mask that lets the option block attend to
     itself in both directions (the pretrained backbone never saw this pattern; it needs fine-tuning).
 
 ModernVBERT (``readout="mask"``) needs none of that. It is ModernBERT-150M plus a SigLIP2 vision tower behind
@@ -50,6 +50,7 @@ import json
 import math
 import os
 import random
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -64,6 +65,10 @@ DEFAULT_BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 SMOLVLM2_BACKBONE = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
 MODERNVBERT_BACKBONE = "ModernVBERT/modernvbert"
 READOUTS = ("terminator", "mask")
+#: ``"causal"``: plain causal mask. ``"block"``: causal prefix, the option block attends to itself both ways
+OPTION_ATTENTIONS = ("causal", "block")
+#: deprecated spellings still accepted (and found in older ``vlm_agent_config.json`` files)
+OPTION_ATTENTION_ALIASES = {"bidirectional": "block"}
 #: backbone ``model_type`` values that are bidirectional encoders and take the ``"mask"`` readout
 BIDIRECTIONAL_MODEL_TYPES = ("modernvbert",)
 CONFIG_NAME = "vlm_agent_config.json"
@@ -78,6 +83,18 @@ OPTION_END = "\n"
 # tokenizer's ``[CLS] ... [SEP]``; the question and options then follow ``laya.common.build_sequence``
 MASK_PREFIX_TEXT = "[CLS]User:"
 MASK_QUESTION_TEXT = " %s question: %s"
+
+
+def normalize_option_attention(value: str) -> str:
+    """``"causal"`` or ``"block"``; the deprecated ``"bidirectional"`` maps to ``"block"`` with a warning."""
+    if value in OPTION_ATTENTION_ALIASES:
+        new = OPTION_ATTENTION_ALIASES[value]
+        warnings.warn("option_attention=%r is deprecated, use %r (the same mask: causal prefix, the option block "
+                      "attends to itself both ways)" % (value, new), DeprecationWarning, stacklevel=3)
+        return new
+    if value not in OPTION_ATTENTIONS:
+        raise ValueError("option_attention must be one of %s, got %r" % (OPTION_ATTENTIONS, value))
+    return value
 
 
 def readout_for(config) -> str:
@@ -439,8 +456,7 @@ class VLMDecisionModel(nn.Module):
         readout: str = "terminator",
     ):
         super().__init__()
-        if option_attention not in ("causal", "bidirectional"):
-            raise ValueError("option_attention must be 'causal' or 'bidirectional'")
+        option_attention = normalize_option_attention(option_attention)
         if readout not in READOUTS:
             raise ValueError("readout must be one of %s, got %r" % (READOUTS, readout))
         if readout == "mask" and option_attention != "causal":
@@ -519,9 +535,9 @@ class VLMDecisionModel(nn.Module):
         attn, enc_kw = attention_mask, {}
         if self.readout == "terminator":
             enc_kw["use_cache"] = False
-            if self.option_attention == "bidirectional":
+            if self.option_attention == "block":
                 if option_span is None:
-                    raise ValueError("option_attention='bidirectional' requires option_span")
+                    raise ValueError("option_attention='block' requires option_span")
                 attn = option_block_mask(attention_mask, option_span, self.encoder.dtype)
         h = self.encoder(
             input_ids=input_ids,
@@ -603,7 +619,8 @@ def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.
         backbone,
         cfg.get("head_layers", 2),
         cfg.get("n_act", 2),
-        option_attention=cfg.get("option_attention", "causal"),
+        # a saved config may carry the deprecated spelling; that is the file's, not the caller's, so no warning
+        option_attention=OPTION_ATTENTION_ALIASES.get(cfg.get("option_attention"), cfg.get("option_attention", "causal")),
         prep=prep,
         readout=cfg.get("readout") or readout_for(backbone.config),
     )
@@ -662,6 +679,8 @@ class VLMAgent:
         from transformers import AutoProcessor
 
         self.device = _resolve_device(device)
+        if "option_attention" in cfg_overrides:
+            cfg_overrides["option_attention"] = normalize_option_attention(cfg_overrides["option_attention"])
         if model_id_or_path is None:
             self.cfg = {
                 "backbone": backbone or DEFAULT_BACKBONE,
@@ -688,6 +707,7 @@ class VLMAgent:
         # the sequence builders only ever see the processor, so it carries the readout and the sequence cap like
         # it carries the prep (the training loader and ``collect_logits`` follow the checkpoint without being told)
         self.cfg["readout"] = self.processor.laya_readout = self.model.readout
+        self.cfg["option_attention"] = self.model.option_attention
         self.processor.laya_max_len = self.cfg.get("max_len", 1024)
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])

@@ -10,7 +10,7 @@ which token each option is read from.
 |---|---|---|---|---|---|---|
 | BERT (text only) | ModernBERT-large, 28 layers, d=1024 | bidirectional | `laya.common.build_sequence` | `[MASK]` opening each option | `[CLS]` | `laya/common.py`, `laya/agent.py` |
 | SmolVLM | SmolVLM-256M-Instruct (SigLIP-B/16 + SmolLM2-135M, 30 layers, d=576) | causal | `laya.vlm.build_vlm_inputs` | `\n` ending each option line | last real token | `laya/vlm.py` |
-| SmolVLM, bidirectional options | same, `option_attention="bidirectional"` | causal, except the option block | same | same | same | `laya.vlm.option_block_mask` |
+| SmolVLM, block option attention | same, `option_attention="block"` | causal, except the option block | same | same | same | `laya.vlm.option_block_mask` |
 | ModernVBERT | ModernVBERT (SigLIP2 + ModernBERT-150M, 22 layers, d=768) | bidirectional | `laya.vlm._mask_inputs` | `[MASK]` opening each option | `[CLS]` | `laya/vlm.py` (`readout="mask"`) |
 
 All three vision paths use the same Idefics3 image pipeline: one 512-pixel tile per image, patch 16, pixel shuffle
@@ -218,14 +218,14 @@ flowchart LR
     L1 & L2 & L3 --> UN["un-permute to label order, average"] --> OUT["final logits"]
 ```
 
-## Branch 3: SmolVLM with bidirectional options
+## Branch 3: SmolVLM with block option attention
 
-The same SmolVLM model, sequence and terminator readout, with `option_attention="bidirectional"`. Instead of the
+The same SmolVLM model, sequence and terminator readout, with `option_attention="block"` (formerly `"bidirectional"`, still accepted as a deprecated alias). Instead of the
 backbone's default causal mask, `option_block_mask` builds an additive 4D mask that is causal everywhere except
 inside the option span, where every option token attends to every other option token in both directions. Each
 `\n` readout then sees all competitors, as ModernVBERT's `[MASK]` does, while the image, state and question stay
 causal. The pretrained backbone never saw this pattern, so the setting is only meaningful when the language model
-is unfrozen (`finetune_long --option-attention bidirectional`). It is recorded in `vlm_agent_config.json` and
+is unfrozen (`finetune_long --option-attention block`). It is recorded in `vlm_agent_config.json` and
 applied at inference; the `"mask"` readout rejects it.
 
 ```mermaid
@@ -239,7 +239,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    subgraph ROW["what each readout sees with option_attention = bidirectional"]
+    subgraph ROW["what each readout sees with option_attention = block"]
         direction LR
         IMG["image"] --> STA["state"] --> QU["question"] --> OPT["option block:  - opt 0 #92;n  - opt 1 #92;n  - opt 2 #92;n"]
     end
@@ -333,7 +333,7 @@ flowchart LR
     s5 -.-> L4["logit: clothing"]
 ```
 
-| | BERT | SmolVLM causal | SmolVLM bidirectional options | ModernVBERT |
+| | BERT | SmolVLM causal | SmolVLM block option attention | ModernVBERT |
 |---|---|---|---|---|
 | Marker token | `[MASK]` before the option | `\n` after the option | `\n` after the option | `[MASK]` before the option |
 | Marker sees other options | all | earlier ones only | all | all |
@@ -355,7 +355,7 @@ flowchart LR
     subgraph VLM["VLM agent (vlm_agent_config.json)"]
         v1["model.safetensors (full) or head.safetensors (frozen backbone)"]
         v2["processor/, backbone/config.json"]
-        v3["backbone id, readout: terminator | mask,<br/>option_attention: causal | bidirectional,<br/>image_size, preprocess, image_interpolation,<br/>temperature, temperature_by_options, max_len 1024, head_max_len 256"]
+        v3["backbone id, readout: terminator | mask,<br/>option_attention: causal | block,<br/>image_size, preprocess, image_interpolation,<br/>temperature, temperature_by_options, max_len 1024, head_max_len 256"]
     end
     LOAD["laya.load / laya.load_vlm"] --> TXT
     LOAD --> VLM

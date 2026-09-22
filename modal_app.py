@@ -14,7 +14,7 @@
         --datasets cauldron,score --val-datasets vqa,cauldron,score
                                                      # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
                                                      # add --backbone ModernVBERT/modernvbert for the bidirectional one,
-                                                     # or --option-attention bidirectional to un-causal SmolVLM's option block
+                                                     # or --option-attention block to un-causal SmolVLM's option block
     modal run --detach modal_app.py::split_bench      # SmolVLM2, image splitting off vs 1024 vs 2048 on a 6-set subset:
                                                      # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
@@ -429,7 +429,7 @@ def finetune_long(
       size. The defaults (``""``, 0) are the equal sampling of the earlier runs; ``mix_alpha=1`` samples in
       proportion to size, ``0.5`` by square root. The effective probabilities are printed at the start.
     * ``preprocess``: see ``finetune``.
-    * ``option_attention="bidirectional"`` (SmolVLM only) lets the option block attend to itself in both
+    * ``option_attention="block"`` (SmolVLM only; ``"bidirectional"`` is a deprecated alias) lets the option block attend to itself in both
       directions through a 4D mask (``laya.vlm.option_block_mask``), so every option's readout sees every other
       option, as ModernVBERT's ``[MASK]`` readout does; the state and question stay causal. The pretrained
       backbone never saw this pattern, so it is only meaningful with the backbone unfrozen, as here. The setting
@@ -816,7 +816,7 @@ def split_bench(
     max_train: int = 4000,
     batch_size: int = 32,
     max_minutes: float = 240.0,
-    option_attention: str = "bidirectional",
+    option_attention: str = "block",
     train_gpu: str = "A100-80GB",
     latency_n: int = 300,
 ):
