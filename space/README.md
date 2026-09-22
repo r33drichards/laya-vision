@@ -11,7 +11,7 @@ pinned: false
 license: cc-by-nc-sa-4.0
 models:
 - thaitea/laya-vision
-short_description: Calibrated yes/no, multiple-choice and rubric-score answers about images
+short_description: Calibrated yes/no, choice and rubric answers about an image
 ---
 
 # Laya Vision demo
