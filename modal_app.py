@@ -1300,8 +1300,8 @@ bench_image = image.add_local_dir("benchmarks", "/root/benchmarks")
 @app.function(image=bench_image, gpu="L4", timeout=30 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()},
               secrets=[modal.Secret.from_name("huggingface-thaitea")])  # the token only lifts the Hub's download rate limit
 def decision_vs_generation_run(git_sha: str, git_dirty: bool, repeats: int = 5, warmup: int = 2,
-                               max_new_tokens: int = 256, dtype: str = "bf16", run_name: str = "") -> dict:
-    """Run the benchmark on an L4 and return its report. ``run_name`` times a checkpoint on the volume instead of
+                               max_new_tokens: int = 256, dtype: str = "bf16", run_name: str = "") -> str:
+    """Run the benchmark on an L4 and return its report as JSON text. ``run_name`` times a checkpoint on the volume instead of
     the pinned Hub revision of thaitea/laya-vision."""
     import pathlib
 
@@ -1315,7 +1315,7 @@ def decision_vs_generation_run(git_sha: str, git_dirty: bool, repeats: int = 5, 
     hf_vol.commit()
     if run_name:
         report["models"]["typed"]["source"] = "laya-checkpoints:" + run_name
-    return report
+    return json.dumps(report, ensure_ascii=False, allow_nan=False)  # plain JSON: the local side has no torch
 
 
 @app.local_entrypoint()
@@ -1335,7 +1335,7 @@ def decision_vs_generation(output: str = "results/raw/decision-vs-generation-l4.
     dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
     if dirty:
         print("warning: uncommitted changes; the report records git_sha=%s with dirty=true" % sha)
-    report = decision_vs_generation_run.remote(sha, dirty, repeats, warmup, max_new_tokens, dtype, run)
+    report = json.loads(decision_vs_generation_run.remote(sha, dirty, repeats, warmup, max_new_tokens, dtype, run))
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
     with open(output, "w") as f:
         f.write(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
