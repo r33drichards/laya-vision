@@ -468,7 +468,13 @@ def finetune_long(
     init_temps = list(agent.temperature)
     hf_vol.commit()
     model, proc = agent.model, agent.processor
-    ev_kw = dict(batch_size=64, num_workers=num_workers)
+    import shutil
+
+    tr_workers, tr_prefetch = _loader_fit(agent.prep, batch_size, num_workers, 4)
+    ev_workers, _ = _loader_fit(agent.prep, 64, num_workers, 2, min_prefetch=2)  # collect_logits: prefetch 2
+    print("loader: /dev/shm %.1f GB; train %d workers x prefetch %d, eval %d workers" % (
+        shutil.disk_usage("/dev/shm").total / 1e9, tr_workers, tr_prefetch, ev_workers), flush=True)
+    ev_kw = dict(batch_size=64, num_workers=ev_workers)
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
                                          split_edge=agent.prep.split_edge, max_len=agent.cfg["max_len"],
@@ -511,7 +517,8 @@ def finetune_long(
     stats = {}
     losses = train(
         model, proc, train_ex, steps=steps, batch_size=batch_size, freeze="full", lr_head=lr_h, lr_backbone=lr_b,
-        device="cuda", log_every=100, max_minutes=max_minutes, num_workers=num_workers, warmup=warmup,
+        device="cuda", log_every=100, max_minutes=max_minutes, num_workers=tr_workers,
+        prefetch_factor=tr_prefetch, warmup=warmup,
         eval_fn=eval_fn, eval_every=eval_every, max_passes=max_passes or None, stats=stats,
         w_ce_schedule=w_ce_schedule, mix_weights=mix_weights, mix_alpha=mix_alpha,
     )
@@ -665,6 +672,20 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
 
 SPLIT_BENCH_DATASETS = ("cauldron_ai2d", "cauldron_aokvqa", "cauldron_tqa", "cauldron_ocrvqa", "cauldron_mapqa",
                         "cauldron_vqav2")  # diagrams, photos, textbook figures, book-cover text, maps, photos
+
+
+def _loader_fit(prep, batch_size: int, num_workers: int, prefetch: int, min_prefetch: int = 1) -> tuple:
+    """(workers, prefetch) so the batches a DataLoader keeps in flight fit in half of /dev/shm. Each one holds
+    float32 pixels, up to ``ceil(split_edge / image_size)^2 + 1`` tiles per image with splitting, so 22 workers x
+    prefetch 4 that fit unsplit run the split settings out of shared memory (and a lost batch hangs the loop)."""
+    import shutil
+
+    side = -(-prep.split_edge // prep.image_size) if prep.split_edge else 0
+    per_batch = batch_size * (side * side + 1) * 3 * prep.image_size ** 2 * 4
+    fit = int(shutil.disk_usage("/dev/shm").total * 0.5 // per_batch)
+    while prefetch > min_prefetch and num_workers * prefetch > fit:
+        prefetch //= 2
+    return max(2, min(num_workers, fit // prefetch)), prefetch
 
 
 def _split_label(edge: int) -> str:

@@ -294,6 +294,7 @@ def train(
     log_every: int = 1,
     max_minutes: Optional[float] = None,
     num_workers: int = 0,
+    prefetch_factor: int = 4,
     warmup: int = 0,
     eval_fn: Optional[Callable[[int], object]] = None,
     eval_every: int = 0,
@@ -365,7 +366,7 @@ def train(
         pin_memory=amp,
         persistent_workers=num_workers > 0,
         worker_init_fn=_single_thread_worker,
-        prefetch_factor=4 if num_workers > 0 else None,
+        prefetch_factor=prefetch_factor if num_workers > 0 else None,
     )
     print("training %d params (freeze=%s) on %s, batch %d, amp=%s" % (n_train, freeze, device, batch_size, amp))
     losses, t0, step, wait, t_eval = [], time.time(), 0, 0.0, 0.0
