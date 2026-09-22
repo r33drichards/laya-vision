@@ -70,6 +70,8 @@ Laya's text model reads each option at a bidirectional `[MASK]` marker. SmolVLM 
 [CLS]User:<image tokens> choice question: What kind of item is this?[SEP][MASK] electronics[MASK] clothing ...[SEP]{"note": "..."}[SEP]
 ```
 
+Architecture diagrams of every branch (the text model, causal SmolVLM, SmolVLM with bidirectional options, ModernVBERT) and of the shared head are in [docs/architecture.md](docs/architecture.md).
+
 Both backbones run through the same `VLMAgent`, training loop, evaluation and checkpoint format. The checkpoint records which it is (`"readout": "mask"` or `"terminator"` in `vlm_agent_config.json`), and `laya.load_vlm` picks the right sequence builder from it.
 
 ```python
