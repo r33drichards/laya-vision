@@ -974,8 +974,8 @@ class VLMAgent:
                 "backbone": {"id": self.cfg.get("backbone"), "revision": self.cfg.get("backbone_revision")},
                 "dtype": str(self.model.encoder.dtype).replace("torch.", ""),
                 "device": self.device.type,
-                "torch": torch.__version__,
-                "transformers": transformers.__version__,
+                "torch": str(torch.__version__),
+                "transformers": str(transformers.__version__),
                 "readout": self.model.readout,
                 "option_attention": self.model.option_attention,
             }
