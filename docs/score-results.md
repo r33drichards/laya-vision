@@ -7,8 +7,9 @@ Three runs of `finetune_long` on the 19 closed-form Cauldron subsets plus the fo
 | `smolvlm/cauldron-score-2ep` | SmolVLM-256M | causal | 90 min, 16,408 steps, 1.13 epochs | 14,556 | 73.5% |
 | `modernvbert/cauldron-score-2ep` | ModernVBERT-250M | n/a (bidirectional readout) | 90 min, 19,189 steps, 1.32 epochs | 19,189 | 66.2% |
 | `smolvlm/cauldron-score-2ep-bidir` | SmolVLM-256M | bidirectional option block | 90 min, 16,692 steps, 1.15 epochs | 14,556 | 74.2% |
+| `smolvlm/cauldron-score-2ep-bidir-full` | SmolVLM-256M | bidirectional option block | 180 min, 30,080 steps, 2.0 epochs (`--max-minutes 240 --mix score_vlfeedback=3`, unbalanced AVA) | 30,080 | **75.1%** |
 
-All three asked for 2 epochs (29,110 steps of batch 32 over 465,760 examples) but stopped at `finetune_long`'s default `--max-minutes 90`, so the cosine schedule was cut at about 60% of peak learning rate. Equal sampling over 23 sets, `--max-passes 4`, `w_ce_schedule="const"`, the released recipe otherwise. Raw logs: `smolvlm-cauldron-score-metrics.json`, `modernvbert-cauldron-score-metrics.json`, `smolvlm-cauldron-score-bidir-metrics.json`.
+The first three asked for 2 epochs (29,110 steps of batch 32 over 465,760 examples) but stopped at `finetune_long`'s default `--max-minutes 90`, so the cosine schedule was cut at about 60% of peak learning rate; the fourth run completed its schedule (see the last section). Equal sampling over 23 sets, `--max-passes 4`, `w_ce_schedule="const"`, the released recipe otherwise. Raw logs: `smolvlm-cauldron-score-metrics.json`, `modernvbert-cauldron-score-metrics.json`, `smolvlm-cauldron-score-bidir-metrics.json`, `smolvlm-cauldron-score-bidir-full-metrics.json`.
 
 ## The `score` head, first time trained
 
@@ -97,10 +98,36 @@ Letting the options see each other buys a consistent 0.7 points on the mean and 
 
 Both models order the pairs the right way on the trained rubrics: severe over no damage, the 7.0 photo over the 3.5 photo, and near-zero damage on the ordinary photos. The AVA gap is small (about half a level), consistent with the soft targets and the val majority sitting at "average". On the untrained urgency rubric ModernVBERT transfers the damage signal (3.4 for the wildfire vs 1.9 for the calm photo, 1.1 to 1.3 for the AVA photos) while SmolVLM gives the two disaster photos the same 2.6 and only separates them from the ordinary photos. Confidences on 5-level questions are low (0.05 to 0.33) because a spread over adjacent levels is what the ranked probability score rewards; the expected level is the number to use.
 
+## The full-schedule run
+
+`cauldron-score-2ep-bidir-full`: the bidirectional SmolVLM recipe with the cap raised to 240 minutes, VLFeedback drawn 3x as often (12% of batches, 1.07 passes instead of 0.2) and the re-prepared, unbalanced AVA (20,137 train rows, 2.8 passes). 30,080 steps in 180 minutes, the cosine schedule completed; the best checkpoint is the last one. Temperatures (choice, score, noul): 2.20 / **1.37** / 2.13.
+
+| | Causal SmolVLM, 90 min | Bidir, 90 min | **Bidir, full** | Prior only |
+|---|---|---|---|---|
+| Mean of per-set val acc, 26 sets | 73.5% | 74.2% | **75.1%** | |
+| Pooled val acc, 28,405 rows | 73.1% | 73.0% | **74.1%** | |
+| A-OKVQA (official) | 60.0% | 61.1% | 60.0% | 25% |
+| A-OKVQA cyclic-shift spread | 1.3 | 1.1 | 1.4 | |
+| ScienceQA (official) | 83.2% | 82.5% | 82.8% | |
+| VQAv2 yes/no | 72.6% | 72.3% | 72.4% | |
+| IconQA / RAVEN / TQA / InterGPS holdouts | 92.1 / 80.3 / 73.9 / 27.7 | 91.9 / 80.4 / 76.9 / 31.9 | **93.7** / 77.1 / 73.1 / **34.0** | |
+| score_vlfeedback acc / mae / xent | 50.0% / 0.920 / 1.281 | 49.4% | **53.9% / 0.796 / 1.147** | 27.5% / 1.369 / 1.560 |
+| score_richhf acc / mae / xent | 57.1% / 0.508 / 0.973 | 56.7% | 57.3% / 0.497 / 0.966 | 44% / 0.663 / 1.168 |
+| score_crisismmd acc / mae / xent | 70.5% / 0.357 / 0.881 | 70.5% | 69.0% / 0.376 / 0.914 | 62.8% / 0.636 / 0.904 |
+| score_ava acc / mae / xent | 67.6% / 0.366 / 1.364 | 62.8% | 84.7% / **0.253** / **1.212** | 84.8% / 0.293 / 1.233 |
+| Calibrated ECE, all sets | 0.029 | 0.050 | 0.034 | |
+
+- **VLFeedback, the rubric set closest to how `predict` is used, gained the most**: 54% over 5 levels and 0.80 levels of expected error, from 50% and 0.92, with raw ECE 0.042 before any temperature. Five times the passes bought about 4 points; it was still rising at the last eval.
+- **AVA now beats the prior** on expected level (0.253 vs 0.293) and on cross-entropy against the vote histogram (1.212 vs 1.233, with 1.098 the floor), which confirms the diagnosis above: the train-only balancing, not the head, was the problem. Its raw ECE looks terrible (0.31) because ECE is computed on the argmax label of a soft target; ignore it for this set.
+- **RichHF and CrisisMMD are flat** within noise; CrisisMMD has 529 val rows and 4 passes over 2,168 train rows either way.
+- **The `score` temperature came down to 1.37** from 3.8 in the 90-minute bidirectional run: the completed schedule, not the mask, was behind that overconfidence. Calibrated ECE over all sets (0.034) sits between the causal run and the truncated bidirectional one.
+- **The official VQA splits did not move** (A-OKVQA 60.0%, ScienceQA 82.8%, VQAv2 72.4%) and the option-order spread is still 1.4 points: the bidirectional option block is worth about a point on the reasoning holdouts and nothing on order robustness. The mean gain of the full run over the causal one (+1.6) is mostly the score sets and IconQA, DVQA, FigureQA finishing their schedule.
+
+The checkpoint is `/ckpt/smolvlm/cauldron-score-2ep-bidir-full/best` on the `laya-checkpoints` volume; it is the first Laya Vision checkpoint whose `score` answers mean something.
+
 ## Next
 
-- Rerun with `--max-minutes 240` (or continue from `best/` with `--init-from`) so the schedule completes; every score set was still improving.
-- Weight VLFeedback up (`--mix score_vlfeedback=3`): it is the largest and most rubric-like set and got 0.2 passes.
-- AVA has been re-prepared without train-only balancing (`prepare_score --names ava --balance 0`, 20,437 train rows); the three checkpoints above were trained on the balanced version, so the next run picks it up.
+- Done above: the completed schedule, VLFeedback x3 and the unbalanced AVA (`prepare_score --names ava --balance 0`). VLFeedback was still improving; a third epoch or `--mix score_vlfeedback=5` is the obvious next lever.
+- Publish `cauldron-score-2ep-bidir-full/best` to the Hub with a model card that drops the "`score` is untrained" caveat (`modal run modal_app.py::publish --run cauldron-score-2ep-bidir-full/best --metrics cauldron-score-2ep-bidir-full/metrics.json`).
 - Per-option-count or per-dataset temperatures for `score`.
 - Report `mae` / `xent` in the training-time evals too (they are in `metrics_from` now, so the next run's `metrics.json` will carry them).
