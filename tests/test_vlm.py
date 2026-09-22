@@ -11,7 +11,8 @@ from PIL import Image
 
 from laya.common import render_options
 from laya.preprocess import FrameFeatureCache, ImagePrep, _axis_weights, prefix_ids, stage1_size
-from laya.vlm import OPTION_BULLET, OPTION_END, PREFIX_TEXT, VLMAgent, build_vlm_inputs, collate_vlm, split_state, vlm_prefix
+from laya.vlm import (OPTION_BULLET, OPTION_END, PREFIX_TEXT, PROMPT_FORMAT_VERSION, VLMAgent, build_vlm_inputs, collate_vlm,
+                      input_ids_sha256, snapshot_revision, split_state, vlm_prefix)
 from laya.vlm_train import collect_logits, fit_temperatures_from, load_jsonl_examples, metrics_from, synthetic_examples, train
 
 DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -65,6 +66,13 @@ def check_schema(res, questions):
         else:
             assert 0.0 <= a["noul"] <= 1.0
     assert res["usage"]["input_tokens"] > 0
+    prov = res["provenance"]
+    assert prov["prompt_format_version"] == PROMPT_FORMAT_VERSION
+    assert len(prov["input_ids_sha256"]) == 64 and prov["n_rows"] >= len(questions)
+    assert set(prov["temperatures"]) == set(questions)
+    assert prov["backbone"]["id"] and prov["dtype"] and prov["device"] and prov["torch"] and prov["transformers"]
+    assert prov["option_attention"] in ("causal", "block") and prov["n_permutations"] >= 1
+    json.dumps(prov)
 
 
 def test_predict_image_and_text(agent):
@@ -147,9 +155,42 @@ def test_save_load_roundtrip(agent, tmp_path, include_backbone):
     agent.save(str(tmp_path), include_backbone=include_backbone)
     loaded = VLMAgent(str(tmp_path), device=DEVICE)
     after = [loaded.predict(state, QUESTIONS), loaded.predict("plain text", QUESTIONS)]
-    assert after == before
+    assert [r["answers"] for r in after] == [r["answers"] for r in before]
+    assert [r["usage"] for r in after] == [r["usage"] for r in before]
+    # same inputs, same backbone commit; only the checkpoint id differs (fresh agent -> the saved directory)
+    for b, a in zip(before, after):
+        assert a["provenance"]["input_ids_sha256"] == b["provenance"]["input_ids_sha256"]
+        assert a["provenance"]["backbone"] == b["provenance"]["backbone"]
+        assert a["provenance"]["checkpoint"] == {"id": str(tmp_path), "revision": None}
     assert loaded.cfg["temperature"] == [1.3, 0.8, 1.1]
     del loaded
+
+
+def test_revisions_are_recorded(agent, tmp_path):
+    # the fresh agent resolved the backbone commit it loaded and saves it; a head-only reload pins to it
+    rev = agent.cfg["backbone_revision"]
+    assert rev and len(rev) == 40
+    agent.save(str(tmp_path), include_backbone=False)
+    with open(tmp_path / "vlm_agent_config.json") as f:
+        assert json.load(f)["backbone_revision"] == rev
+    loaded = VLMAgent(str(tmp_path), device=DEVICE)
+    assert loaded.cfg["backbone_revision"] == rev
+    assert loaded.predict("plain text", QUESTIONS)["provenance"]["backbone"]["revision"] == rev
+    assert snapshot_revision("/cache/hub/models--a--b/snapshots/" + rev) == rev
+    assert snapshot_revision(str(tmp_path)) is None
+
+
+def test_provenance_hash_follows_the_input_ids(agent):
+    q = {"is_red": QUESTIONS["is_red"]}
+    a, b = agent.predict("one state", q), agent.predict("one state", q)
+    c = agent.predict("another state", q)
+    assert a["provenance"]["input_ids_sha256"] == b["provenance"]["input_ids_sha256"]
+    assert a["provenance"]["input_ids_sha256"] != c["provenance"]["input_ids_sha256"]
+    it = build_vlm_inputs(agent.processor, "one state", VLMAgent._to_internal(q["is_red"]))
+    assert a["provenance"]["input_ids_sha256"] == input_ids_sha256([it["ids"]])
+    p4 = agent.predict("one state", q, n_permutations=4)["provenance"]
+    assert p4["n_permutations"] == 4 and p4["n_rows"] == 2  # a 2-option question has two distinct orders
+    assert p4["temperatures"] == {"is_red": float(agent.temperature[2])}
 
 
 def test_latency(agent):
@@ -191,6 +232,7 @@ def test_jsonl_dataset_and_eval(agent, tmp_path):
 
     records = collect_logits(agent.model, agent.processor, examples, batch_size=2)
     assert len(records) == len(examples)
+    assert all(len(r["input_ids_sha256"]) == 1 and len(r["input_ids_sha256"][0]) == 64 for r in records)
     m = metrics_from(records, fit_temperatures_from(records))
     assert m["all"]["n"] == m["toyvqa"]["n"] == len(examples)
     assert 0.0 <= m["all"]["acc"] <= 1.0 and 0.0 <= m["all"]["ece"] <= 1.0 and math.isfinite(m["all"]["nll"])
