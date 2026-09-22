@@ -34,7 +34,7 @@ Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/la
 | [thaitea/laya-vision-modernvbert-250m](https://huggingface.co/thaitea/laya-vision-modernvbert-250m) | ModernVBERT-250M, bidirectional | 19 Cauldron subsets | 65.2% | 79.0% | 71.8% | untrained | 32 ms |
 | [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m), the original | SmolVLM-256M | A-OKVQA, ScienceQA, VQAv2 yes/no | 61.8% | 86.6% | 73.4% | untrained | 41 ms |
 
-Accuracies are on the official validation splits (VQAv2 yes/no is a re-split of the official val set by image, so not comparable to published VQAv2 numbers). Calibrated ECE is 0.02 to 0.03 for all three over their full validation sets. The original checkpoint is ahead on ScienceQA because it made 12 passes over that one train split; the others made 3 to 4 as one of 19 to 23 sets, and are far broader: the recommended one averages 75% over 26 validation sets, and 93.7% on IconQA, 91.8% on DVQA, 89.9% on Hateful Memes.
+Accuracies are on the official validation splits (VQAv2 yes/no is a re-split of the official val set by image, so not comparable to published VQAv2 numbers). Calibrated ECE pooled over all of a checkpoint's validation sets is 0.02 to 0.035, but it varies by set: for the recommended checkpoint it is 0.16 on A-OKVQA, 0.035 on ScienceQA and 0.077 on VQAv2 yes/no ([row-level evidence](results/raw/README.md)). The original checkpoint is ahead on ScienceQA because it made 12 passes over that one train split; the others made 3 to 4 as one of 19 to 23 sets, and are far broader: the recommended one averages 75% over 26 validation sets, and 93.7% on IconQA, 91.8% on DVQA, 89.9% on Hateful Memes.
 
 The full scorecard for the recommended checkpoint covers 34 validation sets, human-vote calibration, the games suite and latency: [docs/evals/laya-vision.md](docs/evals/laya-vision.md).
 
@@ -51,6 +51,22 @@ A `score` question with 4 levels, a `choice` with 5 options and a `noul` are eac
 - **Training** is Laya's RLCD objective: Gaussian noise is added to the option logits, several noisy copies are scored with a strictly proper scoring rule (log plus spherical, plus a ranked probability score for `score` questions), and the group-normalised score is the policy-gradient advantage, with a soft cross-entropy term added. The vision tower stays frozen.
 
 Diagrams of every variant and the shared head are in [docs/architecture.md](docs/architecture.md); the model code is `laya/vlm.py` and the training loop `laya/vlm_train.py`.
+
+## Speed: typed answers versus generated JSON
+
+Fifteen questions (6 `choice`, 5 `noul`, 4 `score`) about one image and a short state text, on one L4 in bf16, the median of 5 runs after 2 warm-up rounds, with the clock synchronized with CUDA. Every path starts from a decoded image, so every time includes the CPU preprocessing:
+
+| Path | Time | Output tokens | Result |
+|---|---:|---:|---|
+| `predict`, thaitea/laya-vision, default `batch_size=8` (2 forward passes) | **0.144 s** | **0** | 15 typed answers with probabilities |
+| `predict`, `batch_size=15` (1 forward pass) | **0.098 s** | **0** | the same answers |
+| Base SmolVLM-256M-Instruct asked for one compact JSON array, same 512-pixel view | 3.216 s (22x) | 89 | prose, no JSON array; 0/15 usable |
+| The same with the base model's shipped image splitting (17 views) | 0.613 s (4.3x) | 9 | "The image does not contain any text."; 0/15 usable |
+| The base model asked one question per `generate` call, 15 calls | 4.489 s (31x) | 105 | 1/15 strictly valid; 3/15 agree with `predict` after lenient parsing |
+
+This is a systems comparison, like [SemIf's](https://github.com/r33drichards/SemIf), not a quality one. The two paths do not share weights: the checkpoint's backbone was fine-tuned with its head, and the base model it started from cannot follow the compact-array instruction at this size, so its time is the time to say whatever it said. A valid array of the checkpoint's own answers is 41 tokens in this tokenizer; at the 36 ms per token the base model decoded here it would take about 1.6 s, or 11x `predict`, an estimate, not a measurement. Generation also grows with every token of output, where `predict` costs one forward pass per batch of questions whatever their answers. Agreement is with `predict`'s argmax, not with the truth: `predict` itself says the circle is the largest shape on this card. The image is drawn by the script, so the fixture is owned by this repo.
+
+Rerun with `modal run modal_app.py::decision_vs_generation --output results/raw/<new>.json`. The [raw report](results/raw/decision-vs-generation-l4.json) has the prompts, every run's timings, the generated text and token timeline, the pinned revisions of both models, the torch and transformers versions and the git sha of the code measured; the script is [benchmarks/decision_vs_generation.py](benchmarks/decision_vs_generation.py).
 
 ## Calibrating on your own data
 

@@ -1876,6 +1876,59 @@ def doom_eval(models: str = "all3-3ep/best", episodes: int = 50):
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Typed readout versus generated JSON (benchmarks/decision_vs_generation.py)
+# ---------------------------------------------------------------------------------------------------------
+
+bench_image = image.add_local_dir("benchmarks", "/root/benchmarks")
+
+
+@app.function(image=bench_image, gpu="L4", timeout=30 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])  # the token only lifts the Hub's download rate limit
+def decision_vs_generation_run(git_sha: str, git_dirty: bool, repeats: int = 5, warmup: int = 2,
+                               max_new_tokens: int = 256, dtype: str = "bf16", run_name: str = "") -> str:
+    """Run the benchmark on an L4 and return its report as JSON text. ``run_name`` times a checkpoint on the volume instead of
+    the pinned Hub revision of thaitea/laya-vision."""
+    import pathlib
+
+    os.environ["LAYA_GIT_SHA"], os.environ["LAYA_GIT_DIRTY"] = git_sha, str(git_dirty)
+    sys.path.insert(0, "/root")
+    from benchmarks.decision_vs_generation import run
+
+    out = pathlib.Path("/tmp/decision-vs-generation.json")
+    report = run(out, repeats=repeats, warmup=warmup, max_new_tokens=max_new_tokens, device="cuda", dtype=dtype,
+                 typed_path=_ckpt_path(run_name) if run_name else "")
+    hf_vol.commit()
+    if run_name:
+        report["models"]["typed"]["source"] = "laya-checkpoints:" + run_name
+    return json.dumps(report, ensure_ascii=False, allow_nan=False)  # plain JSON: the local side has no torch
+
+
+@app.local_entrypoint()
+def decision_vs_generation(output: str = "results/raw/decision-vs-generation-l4.json", repeats: int = 5, warmup: int = 2,
+                           max_new_tokens: int = 256, dtype: str = "bf16", run: str = ""):
+    """modal run modal_app.py::decision_vs_generation [--output results/raw/<new>.json] [--run <ckpt>/best]
+
+    Times ``predict`` against the base backbone generating a compact JSON array on an L4 and writes the raw report
+    (per-run timings, outputs, token timelines, revisions, versions and the git sha of the code measured) to
+    ``--output``, which must not exist yet."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from benchmarks.decision_vs_generation import summary
+
+    if os.path.exists(output):
+        raise SystemExit("%s exists; pass a new --output" % output)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+    if dirty:
+        print("warning: uncommitted changes; the report records git_sha=%s with dirty=true" % sha)
+    report = json.loads(decision_vs_generation_run.remote(sha, dirty, repeats, warmup, max_new_tokens, dtype, run))
+    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+    with open(output, "w") as f:
+        f.write(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+    print(json.dumps(summary(report), indent=2))
+    print("wrote", output)
+
+
+# ---------------------------------------------------------------------------------------------------------
 # Maze and Snake (laya.gridgames), and the games suite: Atari, ViZDoom, Maze and Snake on one checkpoint
 # ---------------------------------------------------------------------------------------------------------
 
