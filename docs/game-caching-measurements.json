@@ -1,0 +1,1284 @@
+{
+ "causal_bf16": {
+  "device": "cuda",
+  "hardware": "NVIDIA L4",
+  "cpus": 20,
+  "torch_threads": 4,
+  "dtype": "bf16",
+  "image_size": 512,
+  "option_attention": "causal",
+  "torch": "2.14.0+cu130",
+  "workloads": [
+   {
+    "workload": "Breakout (4 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 152,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 46,
+     "options": 36,
+     "question_plus_options": 82,
+     "n_options": 4
+    },
+    "ms": {
+     "build_inputs_cpu": 0.626,
+     "resize_on_device": 0.409,
+     "vision_tower": 6.596,
+     "lm_full": 23.693,
+     "head": 1.416,
+     "predict_end_to_end": 36.164,
+     "text_embedding_lookup": 0.046,
+     "lm_image_prefix": 26.523,
+     "lm_question_options_on_cache": 28.653,
+     "qfirst_lm_per_frame": 30.634,
+     "qfirst_lm_question_once": 25.812,
+     "qfirst_head_per_frame": 1.491,
+     "sum_of_parts": 32.114,
+     "qfirst_sum": 39.13
+    },
+    "split_parity_max_abs": 1.25,
+    "qfirst_tokens_per_frame": 71,
+    "max_saving_frac_of_model_time": 0.892,
+    "max_saving_frac_of_predict": 0.792
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 176,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.703,
+     "resize_on_device": 0.419,
+     "vision_tower": 6.533,
+     "lm_full": 24.532,
+     "head": 1.443,
+     "predict_end_to_end": 36.711,
+     "text_embedding_lookup": 0.045,
+     "lm_image_prefix": 27.247,
+     "lm_question_options_on_cache": 29.015,
+     "qfirst_lm_per_frame": 29.003,
+     "qfirst_lm_question_once": 26.878,
+     "qfirst_head_per_frame": 1.54,
+     "sum_of_parts": 32.927,
+     "qfirst_sum": 37.495
+    },
+    "split_parity_max_abs": 2.03125,
+    "qfirst_tokens_per_frame": 73,
+    "max_saving_frac_of_model_time": 0.881,
+    "max_saving_frac_of_predict": 0.79
+   },
+   {
+    "workload": "Boxing (18 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 303,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 48,
+     "options": 185,
+     "question_plus_options": 233,
+     "n_options": 18
+    },
+    "ms": {
+     "build_inputs_cpu": 1.663,
+     "resize_on_device": 0.417,
+     "vision_tower": 6.618,
+     "lm_full": 24.713,
+     "head": 1.464,
+     "predict_end_to_end": 38.647,
+     "text_embedding_lookup": 0.044,
+     "lm_image_prefix": 26.681,
+     "lm_question_options_on_cache": 29.947,
+     "qfirst_lm_per_frame": 29.676,
+     "qfirst_lm_question_once": 27.449,
+     "qfirst_head_per_frame": 1.619,
+     "sum_of_parts": 33.212,
+     "qfirst_sum": 38.33
+    },
+    "split_parity_max_abs": 1.25,
+    "qfirst_tokens_per_frame": 85,
+    "max_saving_frac_of_model_time": 0.902,
+    "max_saving_frac_of_predict": 0.775
+   },
+   {
+    "workload": "Doom basic (3 buttons)",
+    "frame": "240x320",
+    "frames": 1,
+    "tokens": {
+     "total": 152,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 56,
+     "options": 26,
+     "question_plus_options": 82,
+     "n_options": 3
+    },
+    "ms": {
+     "build_inputs_cpu": 0.683,
+     "resize_on_device": 0.453,
+     "vision_tower": 6.859,
+     "lm_full": 25.259,
+     "head": 1.465,
+     "predict_end_to_end": 38.794,
+     "text_embedding_lookup": 0.046,
+     "lm_image_prefix": 26.501,
+     "lm_question_options_on_cache": 28.541,
+     "qfirst_lm_per_frame": 29.394,
+     "qfirst_lm_question_once": 25.719,
+     "qfirst_head_per_frame": 1.454,
+     "sum_of_parts": 34.036,
+     "qfirst_sum": 38.16
+    },
+    "split_parity_max_abs": 1.125,
+    "qfirst_tokens_per_frame": 70,
+    "max_saving_frac_of_model_time": 0.839,
+    "max_saving_frac_of_predict": 0.736
+   },
+   {
+    "workload": "Doom deadly_corridor (7 buttons)",
+    "frame": "240x320",
+    "frames": 1,
+    "tokens": {
+     "total": 181,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 45,
+     "options": 66,
+     "question_plus_options": 111,
+     "n_options": 7
+    },
+    "ms": {
+     "build_inputs_cpu": 0.774,
+     "resize_on_device": 0.425,
+     "vision_tower": 6.645,
+     "lm_full": 25.455,
+     "head": 1.531,
+     "predict_end_to_end": 37.181,
+     "text_embedding_lookup": 0.044,
+     "lm_image_prefix": 25.99,
+     "lm_question_options_on_cache": 28.887,
+     "qfirst_lm_per_frame": 29.382,
+     "qfirst_lm_question_once": 25.805,
+     "qfirst_head_per_frame": 1.479,
+     "sum_of_parts": 34.056,
+     "qfirst_sum": 37.931
+    },
+    "split_parity_max_abs": 1.375,
+    "qfirst_tokens_per_frame": 74,
+    "max_saving_frac_of_model_time": 0.848,
+    "max_saving_frac_of_predict": 0.777
+   },
+   {
+    "workload": "Pong (6 actions), 2 frames",
+    "frame": "210x160",
+    "frames": 2,
+    "tokens": {
+     "total": 243,
+     "text_before_image": 3,
+     "image_run": 134,
+     "image_tokens": 128,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.816,
+     "resize_on_device": 0.419,
+     "vision_tower": 12.611,
+     "lm_full": 24.358,
+     "head": 1.538,
+     "predict_end_to_end": 40.321,
+     "text_embedding_lookup": 0.045,
+     "lm_image_prefix": 26.243,
+     "lm_question_options_on_cache": 29.427,
+     "qfirst_lm_per_frame": 29.343,
+     "qfirst_lm_question_once": 26.522,
+     "qfirst_head_per_frame": 1.523,
+     "sum_of_parts": 38.926,
+     "qfirst_sum": 43.896
+    },
+    "split_parity_max_abs": 1.375,
+    "qfirst_tokens_per_frame": 140,
+    "max_saving_frac_of_model_time": 0.756,
+    "max_saving_frac_of_predict": 0.73
+   }
+  ],
+  "batching": {
+   "1": {
+    "ms_per_step": 36.816,
+    "ms_per_frame": 36.816,
+    "frames_per_s": 27.2
+   },
+   "4": {
+    "ms_per_step": 54.377,
+    "ms_per_frame": 13.594,
+    "frames_per_s": 73.6
+   },
+   "16": {
+    "ms_per_step": 151.51,
+    "ms_per_frame": 9.469,
+    "frames_per_s": 105.6
+   }
+  }
+ },
+ "causal_fp32": {
+  "device": "cuda",
+  "hardware": "NVIDIA L4",
+  "cpus": 20,
+  "torch_threads": 4,
+  "dtype": "fp32",
+  "image_size": 512,
+  "option_attention": "causal",
+  "torch": "2.14.0+cu130",
+  "workloads": [
+   {
+    "workload": "Breakout (4 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 152,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 46,
+     "options": 36,
+     "question_plus_options": 82,
+     "n_options": 4
+    },
+    "ms": {
+     "build_inputs_cpu": 0.63,
+     "resize_on_device": 0.418,
+     "vision_tower": 30.657,
+     "lm_full": 23.366,
+     "head": 1.398,
+     "predict_end_to_end": 52.246,
+     "text_embedding_lookup": 0.044,
+     "lm_image_prefix": 24.38,
+     "lm_question_options_on_cache": 27.246,
+     "qfirst_lm_per_frame": 28.229,
+     "qfirst_lm_question_once": 24.07,
+     "qfirst_head_per_frame": 1.482,
+     "sum_of_parts": 55.839,
+     "qfirst_sum": 60.786
+    },
+    "split_parity_max_abs": 6.914138793945312e-05,
+    "qfirst_tokens_per_frame": 71,
+    "max_saving_frac_of_model_time": 0.488,
+    "max_saving_frac_of_predict": 0.521
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 176,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.704,
+     "resize_on_device": 0.426,
+     "vision_tower": 30.751,
+     "lm_full": 23.688,
+     "head": 1.418,
+     "predict_end_to_end": 52.212,
+     "text_embedding_lookup": 0.045,
+     "lm_image_prefix": 23.971,
+     "lm_question_options_on_cache": 27.063,
+     "qfirst_lm_per_frame": 27.687,
+     "qfirst_lm_question_once": 25.418,
+     "qfirst_head_per_frame": 1.526,
+     "sum_of_parts": 56.283,
+     "qfirst_sum": 60.39
+    },
+    "split_parity_max_abs": 4.291534423828125e-05,
+    "qfirst_tokens_per_frame": 73,
+    "max_saving_frac_of_model_time": 0.481,
+    "max_saving_frac_of_predict": 0.518
+   },
+   {
+    "workload": "Boxing (18 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 303,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 48,
+     "options": 185,
+     "question_plus_options": 233,
+     "n_options": 18
+    },
+    "ms": {
+     "build_inputs_cpu": 1.254,
+     "resize_on_device": 0.405,
+     "vision_tower": 30.726,
+     "lm_full": 23.23,
+     "head": 1.464,
+     "predict_end_to_end": 54.426,
+     "text_embedding_lookup": 0.046,
+     "lm_image_prefix": 24.403,
+     "lm_question_options_on_cache": 27.815,
+     "qfirst_lm_per_frame": 28.884,
+     "qfirst_lm_question_once": 25.371,
+     "qfirst_head_per_frame": 1.546,
+     "sum_of_parts": 55.825,
+     "qfirst_sum": 61.561
+    },
+    "split_parity_max_abs": 0.00011348724365234375,
+    "qfirst_tokens_per_frame": 85,
+    "max_saving_frac_of_model_time": 0.498,
+    "max_saving_frac_of_predict": 0.511
+   },
+   {
+    "workload": "Doom basic (3 buttons)",
+    "frame": "240x320",
+    "frames": 1,
+    "tokens": {
+     "total": 152,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 56,
+     "options": 26,
+     "question_plus_options": 82,
+     "n_options": 3
+    },
+    "ms": {
+     "build_inputs_cpu": 0.642,
+     "resize_on_device": 0.444,
+     "vision_tower": 30.95,
+     "lm_full": 23.408,
+     "head": 1.414,
+     "predict_end_to_end": 52.704,
+     "text_embedding_lookup": 0.044,
+     "lm_image_prefix": 24.161,
+     "lm_question_options_on_cache": 26.837,
+     "qfirst_lm_per_frame": 27.364,
+     "qfirst_lm_question_once": 25.859,
+     "qfirst_head_per_frame": 1.613,
+     "sum_of_parts": 56.216,
+     "qfirst_sum": 60.371
+    },
+    "split_parity_max_abs": 9.822845458984375e-05,
+    "qfirst_tokens_per_frame": 70,
+    "max_saving_frac_of_model_time": 0.477,
+    "max_saving_frac_of_predict": 0.509
+   },
+   {
+    "workload": "Doom deadly_corridor (7 buttons)",
+    "frame": "240x320",
+    "frames": 1,
+    "tokens": {
+     "total": 181,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 45,
+     "options": 66,
+     "question_plus_options": 111,
+     "n_options": 7
+    },
+    "ms": {
+     "build_inputs_cpu": 0.748,
+     "resize_on_device": 0.421,
+     "vision_tower": 31.118,
+     "lm_full": 23.842,
+     "head": 1.436,
+     "predict_end_to_end": 53.215,
+     "text_embedding_lookup": 0.044,
+     "lm_image_prefix": 25.189,
+     "lm_question_options_on_cache": 28.765,
+     "qfirst_lm_per_frame": 28.418,
+     "qfirst_lm_question_once": 25.484,
+     "qfirst_head_per_frame": 1.548,
+     "sum_of_parts": 56.817,
+     "qfirst_sum": 61.505
+    },
+    "split_parity_max_abs": 6.103515625e-05,
+    "qfirst_tokens_per_frame": 74,
+    "max_saving_frac_of_model_time": 0.506,
+    "max_saving_frac_of_predict": 0.541
+   },
+   {
+    "workload": "Pong (6 actions), 2 frames",
+    "frame": "210x160",
+    "frames": 2,
+    "tokens": {
+     "total": 243,
+     "text_before_image": 3,
+     "image_run": 134,
+     "image_tokens": 128,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.83,
+     "resize_on_device": 0.434,
+     "vision_tower": 57.263,
+     "lm_full": 23.685,
+     "head": 1.456,
+     "predict_end_to_end": 78.36,
+     "text_embedding_lookup": 0.046,
+     "lm_image_prefix": 25.696,
+     "lm_question_options_on_cache": 28.699,
+     "qfirst_lm_per_frame": 29.345,
+     "qfirst_lm_question_once": 25.956,
+     "qfirst_head_per_frame": 1.551,
+     "sum_of_parts": 82.838,
+     "qfirst_sum": 88.593
+    },
+    "split_parity_max_abs": 0.00015544891357421875,
+    "qfirst_tokens_per_frame": 140,
+    "max_saving_frac_of_model_time": 0.346,
+    "max_saving_frac_of_predict": 0.366
+   }
+  ],
+  "batching": {
+   "1": {
+    "ms_per_step": 54.843,
+    "ms_per_frame": 54.843,
+    "frames_per_s": 18.2
+   },
+   "4": {
+    "ms_per_step": 144.168,
+    "ms_per_frame": 36.042,
+    "frames_per_s": 27.7
+   },
+   "16": {
+    "ms_per_step": 586.0,
+    "ms_per_frame": 36.625,
+    "frames_per_s": 27.3
+   }
+  }
+ },
+ "block_bf16": {
+  "device": "cuda",
+  "hardware": "NVIDIA L4",
+  "cpus": 20,
+  "torch_threads": 4,
+  "dtype": "bf16",
+  "image_size": 512,
+  "option_attention": "block",
+  "torch": "2.14.0+cu130",
+  "workloads": [
+   {
+    "workload": "Pong (6 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 176,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.759,
+     "resize_on_device": 0.425,
+     "vision_tower": 6.629,
+     "lm_full": 26.225,
+     "head": 1.425,
+     "predict_end_to_end": 38.545,
+     "text_embedding_lookup": 0.047,
+     "lm_image_prefix": 26.235,
+     "lm_question_options_on_cache": 28.457,
+     "qfirst_lm_per_frame": 29.464,
+     "qfirst_lm_question_once": 26.576,
+     "qfirst_head_per_frame": 1.549,
+     "sum_of_parts": 34.704,
+     "qfirst_sum": 38.067
+    },
+    "split_parity_max_abs": 2.03125,
+    "qfirst_tokens_per_frame": 73,
+    "max_saving_frac_of_model_time": 0.82,
+    "max_saving_frac_of_predict": 0.738
+   },
+   {
+    "workload": "Boxing (18 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 303,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 48,
+     "options": 185,
+     "question_plus_options": 233,
+     "n_options": 18
+    },
+    "ms": {
+     "build_inputs_cpu": 1.191,
+     "resize_on_device": 0.414,
+     "vision_tower": 6.734,
+     "lm_full": 26.331,
+     "head": 1.482,
+     "predict_end_to_end": 40.979,
+     "text_embedding_lookup": 0.047,
+     "lm_image_prefix": 26.51,
+     "lm_question_options_on_cache": 29.382,
+     "qfirst_lm_per_frame": 29.222,
+     "qfirst_lm_question_once": 25.201,
+     "qfirst_head_per_frame": 1.492,
+     "sum_of_parts": 34.961,
+     "qfirst_sum": 37.862
+    },
+    "split_parity_max_abs": 1.25,
+    "qfirst_tokens_per_frame": 85,
+    "max_saving_frac_of_model_time": 0.84,
+    "max_saving_frac_of_predict": 0.717
+   },
+   {
+    "workload": "Pong (6 actions), 2 frames",
+    "frame": "210x160",
+    "frames": 2,
+    "tokens": {
+     "total": 243,
+     "text_before_image": 3,
+     "image_run": 134,
+     "image_tokens": 128,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.814,
+     "resize_on_device": 0.435,
+     "vision_tower": 12.892,
+     "lm_full": 26.185,
+     "head": 1.456,
+     "predict_end_to_end": 42.835,
+     "text_embedding_lookup": 0.046,
+     "lm_image_prefix": 25.569,
+     "lm_question_options_on_cache": 29.715,
+     "qfirst_lm_per_frame": 29.641,
+     "qfirst_lm_question_once": 26.51,
+     "qfirst_head_per_frame": 1.52,
+     "sum_of_parts": 40.968,
+     "qfirst_sum": 44.488
+    },
+    "split_parity_max_abs": 1.375,
+    "qfirst_tokens_per_frame": 140,
+    "max_saving_frac_of_model_time": 0.725,
+    "max_saving_frac_of_predict": 0.694
+   }
+  ]
+ },
+ "cpu4_fp32": {
+  "device": "cpu",
+  "hardware": "x86_64",
+  "cpus": 20,
+  "torch_threads": 4,
+  "dtype": "fp32",
+  "image_size": 512,
+  "option_attention": "causal",
+  "torch": "2.14.0+cu130",
+  "workloads": [
+   {
+    "workload": "Pong (6 actions)",
+    "frame": "210x160",
+    "frames": 1,
+    "tokens": {
+     "total": 176,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.731,
+     "resize_on_device": 2.594,
+     "vision_tower": 978.869,
+     "lm_full": 285.878,
+     "head": 20.911,
+     "predict_end_to_end": 1331.912,
+     "text_embedding_lookup": 0.193,
+     "lm_image_prefix": 161.143,
+     "lm_question_options_on_cache": 201.078,
+     "qfirst_lm_per_frame": 162.878,
+     "qfirst_lm_question_once": 195.435,
+     "qfirst_head_per_frame": 9.229,
+     "sum_of_parts": 1288.252,
+     "qfirst_sum": 1153.57
+    },
+    "split_parity_max_abs": 0.00010776519775390625,
+    "qfirst_tokens_per_frame": 73,
+    "max_saving_frac_of_model_time": 0.156,
+    "max_saving_frac_of_predict": 0.151
+   },
+   {
+    "workload": "Doom basic (3 buttons)",
+    "frame": "240x320",
+    "frames": 1,
+    "tokens": {
+     "total": 152,
+     "text_before_image": 3,
+     "image_run": 67,
+     "image_tokens": 64,
+     "question": 56,
+     "options": 26,
+     "question_plus_options": 82,
+     "n_options": 3
+    },
+    "ms": {
+     "build_inputs_cpu": 0.618,
+     "resize_on_device": 5.565,
+     "vision_tower": 966.71,
+     "lm_full": 235.837,
+     "head": 18.468,
+     "predict_end_to_end": 1262.654,
+     "text_embedding_lookup": 0.046,
+     "lm_image_prefix": 147.505,
+     "lm_question_options_on_cache": 166.388,
+     "qfirst_lm_per_frame": 177.923,
+     "qfirst_lm_question_once": 161.588,
+     "qfirst_head_per_frame": 9.389,
+     "sum_of_parts": 1226.58,
+     "qfirst_sum": 1159.587
+    },
+    "split_parity_max_abs": 5.1975250244140625e-05,
+    "qfirst_tokens_per_frame": 70,
+    "max_saving_frac_of_model_time": 0.136,
+    "max_saving_frac_of_predict": 0.132
+   },
+   {
+    "workload": "Pong (6 actions), 2 frames",
+    "frame": "210x160",
+    "frames": 2,
+    "tokens": {
+     "total": 243,
+     "text_before_image": 3,
+     "image_run": 134,
+     "image_tokens": 128,
+     "question": 47,
+     "options": 59,
+     "question_plus_options": 106,
+     "n_options": 6
+    },
+    "ms": {
+     "build_inputs_cpu": 0.755,
+     "resize_on_device": 6.027,
+     "vision_tower": 1915.495,
+     "lm_full": 401.025,
+     "head": 27.432,
+     "predict_end_to_end": 2545.37,
+     "text_embedding_lookup": 0.083,
+     "lm_image_prefix": 235.339,
+     "lm_question_options_on_cache": 213.571,
+     "qfirst_lm_per_frame": 248.954,
+     "qfirst_lm_question_once": 188.786,
+     "qfirst_head_per_frame": 18.417,
+     "sum_of_parts": 2349.979,
+     "qfirst_sum": 2188.893
+    },
+    "split_parity_max_abs": 0.00010013580322265625,
+    "qfirst_tokens_per_frame": 140,
+    "max_saving_frac_of_model_time": 0.091,
+    "max_saving_frac_of_predict": 0.084
+   }
+  ]
+ },
+ "atari_duplicates_random_policy": {
+  "Breakout": {
+   "steps": 2000,
+   "identical_to_previous": 0.0715,
+   "median_frac_pixels_changed": 0.00095
+  },
+  "Pong": {
+   "steps": 2000,
+   "identical_to_previous": 0.0125,
+   "median_frac_pixels_changed": 0.00286
+  },
+  "Boxing": {
+   "steps": 2000,
+   "identical_to_previous": 0.014,
+   "median_frac_pixels_changed": 0.01655
+  },
+  "Freeway": {
+   "steps": 2000,
+   "identical_to_previous": 0.0,
+   "median_frac_pixels_changed": 0.01613
+  },
+  "SpaceInvaders": {
+   "steps": 2000,
+   "identical_to_previous": 0.089,
+   "median_frac_pixels_changed": 0.00119
+  }
+ },
+ "vizdoom_duplicates_random_policy": {
+  "basic": {
+   "steps": 1000,
+   "identical_to_previous": 0.008,
+   "median_frac_pixels_changed": 0.72982
+  },
+  "defend_the_center": {
+   "steps": 1000,
+   "identical_to_previous": 0.016,
+   "median_frac_pixels_changed": 0.56888
+  },
+  "deadly_corridor": {
+   "steps": 1000,
+   "identical_to_previous": 0.008,
+   "median_frac_pixels_changed": 0.6459
+  }
+ },
+ "graphs": {
+  "graphs_bf16": [
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "eager_model_ms": 51.089,
+    "unrolled_eager_ms": 49.277,
+    "unrolled_vs_model_max_abs_logit": 0.0,
+    "graph_ms": 11.102,
+    "graph_vs_model_max_abs_logit": 0.012852072715759277,
+    "graph_follows_new_frame": true
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "eager_model_ms": 51.867,
+    "unrolled_eager_ms": 48.607,
+    "unrolled_vs_model_max_abs_logit": 0.0,
+    "graph_ms": 18.383,
+    "graph_vs_model_max_abs_logit": 0.0054297298192977905,
+    "graph_follows_new_frame": true
+   }
+  ],
+  "graphs_fp32": [
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "eager_model_ms": 63.326,
+    "unrolled_eager_ms": 63.142,
+    "unrolled_vs_model_max_abs_logit": 0.0,
+    "graph_ms": 41.167,
+    "graph_vs_model_max_abs_logit": 0.0,
+    "graph_follows_new_frame": true
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "eager_model_ms": 87.923,
+    "unrolled_eager_ms": 86.893,
+    "unrolled_vs_model_max_abs_logit": 0.0,
+    "graph_ms": 71.174,
+    "graph_vs_model_max_abs_logit": 0.0,
+    "graph_follows_new_frame": true
+   }
+  ],
+  "graphs_block_bf16": [
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "eager_model_ms": 54.954,
+    "unrolled_eager_ms": 51.607,
+    "unrolled_vs_model_max_abs_logit": 0.0,
+    "graph_ms": 11.203,
+    "graph_vs_model_max_abs_logit": 0.0,
+    "graph_follows_new_frame": true
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "eager_model_ms": 54.018,
+    "unrolled_eager_ms": 52.848,
+    "unrolled_vs_model_max_abs_logit": 0.0,
+    "graph_ms": 18.555,
+    "graph_vs_model_max_abs_logit": 0.0,
+    "graph_follows_new_frame": true
+   }
+  ]
+ },
+ "static_step_L4": {
+  "pytest_returncode": 0,
+  "rows": [
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 55.597,
+    "static_step_ms": 11.173,
+    "speedup": 4.98,
+    "ms_per_frame_static": 11.173,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 53.441,
+    "answer_ms": 11.374
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 56.292,
+    "static_step_ms": 18.564,
+    "speedup": 3.03,
+    "ms_per_frame_static": 18.564,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 57.386,
+    "static_step_ms": 37.281,
+    "speedup": 1.54,
+    "ms_per_frame_static": 9.32,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 159.364,
+    "static_step_ms": 147.208,
+    "speedup": 1.08,
+    "ms_per_frame_static": 9.2,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 54.481,
+    "static_step_ms": 11.377,
+    "speedup": 4.79,
+    "ms_per_frame_static": 11.377,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 52.769,
+    "answer_ms": 11.558
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 55.794,
+    "static_step_ms": 18.722,
+    "speedup": 2.98,
+    "ms_per_frame_static": 18.722,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 57.158,
+    "static_step_ms": 37.221,
+    "speedup": 1.54,
+    "ms_per_frame_static": 9.305,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 159.106,
+    "static_step_ms": 147.543,
+    "speedup": 1.08,
+    "ms_per_frame_static": 9.221,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 52.375,
+    "static_step_ms": 42.069,
+    "speedup": 1.24,
+    "ms_per_frame_static": 42.069,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 67.009,
+    "answer_ms": 42.138
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 76.476,
+    "static_step_ms": 72.85,
+    "speedup": 1.05,
+    "ms_per_frame_static": 72.85,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 154.412,
+    "static_step_ms": 149.845,
+    "speedup": 1.03,
+    "ms_per_frame_static": 37.461,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 618.915,
+    "static_step_ms": 599.896,
+    "speedup": 1.03,
+    "ms_per_frame_static": 37.493,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 51.218,
+    "static_step_ms": 41.334,
+    "speedup": 1.24,
+    "ms_per_frame_static": 41.334,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 65.827,
+    "answer_ms": 41.389
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 75.199,
+    "static_step_ms": 70.999,
+    "speedup": 1.06,
+    "ms_per_frame_static": 70.999,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 148.995,
+    "static_step_ms": 145.206,
+    "speedup": 1.03,
+    "ms_per_frame_static": 36.301,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 590.158,
+    "static_step_ms": 579.469,
+    "speedup": 1.02,
+    "ms_per_frame_static": 36.217,
+    "max_abs_prob_diff": 0.0
+   }
+  ]
+ },
+ "static_step_L4_run2": {
+  "pytest_returncode": 0,
+  "rows": [
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 38.382,
+    "static_step_ms": 10.944,
+    "speedup": 3.51,
+    "ms_per_frame_static": 10.944,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 39.022,
+    "answer_ms": 11.019
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 39.725,
+    "static_step_ms": 17.973,
+    "speedup": 2.21,
+    "ms_per_frame_static": 17.973,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 41.002,
+    "static_step_ms": 36.337,
+    "speedup": 1.13,
+    "ms_per_frame_static": 9.084,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 151.953,
+    "static_step_ms": 142.568,
+    "speedup": 1.07,
+    "ms_per_frame_static": 8.911,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 36.942,
+    "static_step_ms": 11.028,
+    "speedup": 3.35,
+    "ms_per_frame_static": 11.028,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 38.058,
+    "answer_ms": 11.147
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 40.011,
+    "static_step_ms": 18.103,
+    "speedup": 2.21,
+    "ms_per_frame_static": 18.103,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 41.961,
+    "static_step_ms": 36.222,
+    "speedup": 1.16,
+    "ms_per_frame_static": 9.056,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "bf16",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 149.416,
+    "static_step_ms": 141.065,
+    "speedup": 1.06,
+    "ms_per_frame_static": 8.817,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 43.651,
+    "static_step_ms": 40.865,
+    "speedup": 1.07,
+    "ms_per_frame_static": 40.865,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 55.781,
+    "answer_ms": 40.995
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 73.439,
+    "static_step_ms": 71.192,
+    "speedup": 1.03,
+    "ms_per_frame_static": 71.192,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 146.972,
+    "static_step_ms": 142.978,
+    "speedup": 1.03,
+    "ms_per_frame_static": 35.745,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 599.618,
+    "static_step_ms": 599.811,
+    "speedup": 1.0,
+    "ms_per_frame_static": 37.488,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 1,
+    "action_probs_ms": 44.641,
+    "static_step_ms": 41.474,
+    "speedup": 1.08,
+    "ms_per_frame_static": 41.474,
+    "max_abs_prob_diff": 0.0,
+    "predict_ms": 54.701,
+    "answer_ms": 41.22
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 2,
+    "batch": 1,
+    "action_probs_ms": 76.076,
+    "static_step_ms": 72.717,
+    "speedup": 1.05,
+    "ms_per_frame_static": 72.717,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 4,
+    "action_probs_ms": 150.358,
+    "static_step_ms": 145.538,
+    "speedup": 1.03,
+    "ms_per_frame_static": 36.385,
+    "max_abs_prob_diff": 0.0
+   },
+   {
+    "dtype": "fp32",
+    "workload": "Doom basic (3 buttons)",
+    "frames": 1,
+    "batch": 16,
+    "action_probs_ms": 582.707,
+    "static_step_ms": 579.892,
+    "speedup": 1.0,
+    "ms_per_frame_static": 36.243,
+    "max_abs_prob_diff": 0.0
+   }
+  ]
+ },
+ "graphs_static_step": {
+  "graphs_bf16": [
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "eager_model_ms": 54.483,
+    "unrolled_eager_ms": 50.561,
+    "unrolled_vs_model_max_abs_prob": 0.0,
+    "graph_ms": 11.675,
+    "graph_vs_model_max_abs_prob": 0.0010544955730438232
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "eager_model_ms": 55.966,
+    "unrolled_eager_ms": 51.283,
+    "unrolled_vs_model_max_abs_prob": 0.0,
+    "graph_ms": 19.436,
+    "graph_vs_model_max_abs_prob": 0.0004456937313079834
+   }
+  ],
+  "graphs_fp32": [
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "eager_model_ms": 66.008,
+    "unrolled_eager_ms": 63.279,
+    "unrolled_vs_model_max_abs_prob": 0.0,
+    "graph_ms": 42.418,
+    "graph_vs_model_max_abs_prob": 0.0
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "eager_model_ms": 91.372,
+    "unrolled_eager_ms": 88.191,
+    "unrolled_vs_model_max_abs_prob": 0.0,
+    "graph_ms": 73.181,
+    "graph_vs_model_max_abs_prob": 0.0
+   }
+  ],
+  "graphs_block_bf16": [
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 1,
+    "eager_model_ms": 56.656,
+    "unrolled_eager_ms": 51.308,
+    "unrolled_vs_model_max_abs_prob": 0.0,
+    "graph_ms": 12.14,
+    "graph_vs_model_max_abs_prob": 0.0
+   },
+   {
+    "workload": "Pong (6 actions)",
+    "frames": 2,
+    "eager_model_ms": 58.627,
+    "unrolled_eager_ms": 53.432,
+    "unrolled_vs_model_max_abs_prob": 0.0,
+    "graph_ms": 19.488,
+    "graph_vs_model_max_abs_prob": 0.0
+   }
+  ]
+ },
+ "vizdoom_duplicates_random_policy_run2": {
+  "basic": {
+   "steps": 1000,
+   "identical_to_previous": 0.008,
+   "median_frac_pixels_changed": 0.72982
+  },
+  "defend_the_center": {
+   "steps": 1000,
+   "identical_to_previous": 0.016,
+   "median_frac_pixels_changed": 0.56888
+  },
+  "deadly_corridor": {
+   "steps": 1000,
+   "identical_to_previous": 0.008,
+   "median_frac_pixels_changed": 0.6459
+  }
+ },
+ "_note": "graphs: first version of the benchmark (a hand-built graph, logit diffs); graphs_static_step: the same comparison through laya.static_step.StaticStep (probability diffs). static_step_L4 and _run2 are two containers of modal_game_cache.py::verify; eager times differ between them, StaticStep does not."
+}

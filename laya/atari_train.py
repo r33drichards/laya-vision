@@ -334,7 +334,7 @@ def play(game: str, policy: Callable[[List[np.ndarray], List[np.ndarray], List[i
 
 def model_policy(agent: VLMAgent, game: str, actions: Sequence[str], sample: bool = False, seed: int = 0,
                  frames: int = 1, gate: bool = False, stats: Optional[Dict] = None,
-                 cache_features: Optional[bool] = None) -> Callable:
+                 cache_features: Optional[bool] = None, cuda_graph: bool = False) -> Callable:
     """Greedy (the most likely action, as ``predict``'s ``choice``) or sampled from the calibrated probabilities.
 
     ``frames=2`` gives the model ``[previous, current]``, and reuses the encoder output each frame already earned
@@ -346,20 +346,32 @@ def model_policy(agent: VLMAgent, game: str, actions: Sequence[str], sample: boo
     Hugging Face processor path: caching means preprocessing frames one at a time, and the processor costs ~33 ms
     of CPU per frame either way, so the lost batching outweighs the halved encoder work (measured on an L4:
     11.2 decisions/s uncached against 8.7 cached, versus 38.4 against 53.1 on the device-side path).
+
+    ``cuda_graph`` runs each decision as one captured CUDA graph (``laya.static_step.StaticStep``, one per number
+    of episodes still running) instead of eager ``action_probs``; it replaces the feature cache. See
+    docs/game-caching.md.
     """
     q = atari_question(game, actions)["action"]
     rng = np.random.default_rng(seed)
     last: Dict[int, int] = {}
     if cache_features is None:
         cache_features = agent.prep.on_gpu
-    cache = FrameFeatureCache() if frames == 2 and cache_features else None
+    cache = FrameFeatureCache() if frames == 2 and cache_features and not cuda_graph else None
+    steps: Dict[int, "StaticStep"] = {}
 
     def pick(row):
         return int(row.argmax()) if not sample else int(rng.choice(len(row), p=row / row.sum()))
 
     def policy(obs, prevs, ids=None):
         ids = list(range(len(obs))) if ids is None else ids
-        out = action_probs(agent, obs, q, prevs if frames == 2 else None, return_act=gate, cache=cache)
+        if cuda_graph:
+            if len(obs) not in steps:
+                from .static_step import StaticStep
+
+                steps[len(obs)] = StaticStep(agent, q, frames=frames, batch=len(obs))
+            out = steps[len(obs)].probs(obs, prevs if frames == 2 else None, return_act=gate)
+        else:
+            out = action_probs(agent, obs, q, prevs if frames == 2 else None, return_act=gate, cache=cache)
         p, act = out if gate else (out, None)
         acts = []
         for j, (row, i) in enumerate(zip(p, ids)):
