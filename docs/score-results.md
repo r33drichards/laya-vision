@@ -123,11 +123,12 @@ Both models order the pairs the right way on the trained rubrics: severe over no
 - **The `score` temperature came down to 1.37** from 3.8 in the 90-minute bidirectional run: the completed schedule, not the mask, was behind that overconfidence. Calibrated ECE over all sets (0.034) sits between the causal run and the truncated bidirectional one.
 - **The official VQA splits did not move** (A-OKVQA 60.0%, ScienceQA 82.8%, VQAv2 72.4%) and the option-order spread is still 1.4 points: the bidirectional option block is worth about a point on the reasoning holdouts and nothing on order robustness. The mean gain of the full run over the causal one (+1.6) is mostly the score sets and IconQA, DVQA, FigureQA finishing their schedule.
 
-The checkpoint is `/ckpt/smolvlm/cauldron-score-2ep-bidir-full/best` on the `laya-checkpoints` volume; it is the first Laya Vision checkpoint whose `score` answers mean something.
+The checkpoint is `/ckpt/smolvlm/cauldron-score-2ep-bidir-full/best` on the `laya-checkpoints` volume and is published as [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score); it is the first Laya Vision checkpoint whose `score` answers mean something.
 
 ## Next
 
 - Done above: the completed schedule, VLFeedback x3 and the unbalanced AVA (`prepare_score --names ava --balance 0`). VLFeedback was still improving; a third epoch or `--mix score_vlfeedback=5` is the obvious next lever.
-- Publish `cauldron-score-2ep-bidir-full/best` to the Hub with a model card that drops the "`score` is untrained" caveat (`modal run modal_app.py::publish --run cauldron-score-2ep-bidir-full/best --metrics cauldron-score-2ep-bidir-full/metrics.json`).
+- Published: `cauldron-score-2ep-bidir-full/best` is [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score), model card in `hf_model_card_score.md`.
+- Running: `cauldron-score-3ep-bidir-vlf5`, one more epoch from that checkpoint with VLFeedback drawn 5x.
 - Per-option-count or per-dataset temperatures for `score`.
 - Report `mae` / `xent` in the training-time evals too (they are in `metrics_from` now, so the next run's `metrics.json` will carry them).

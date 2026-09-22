@@ -4,7 +4,7 @@ Image inputs for [Laya](https://github.com/NandhaKishorM/laya): typed, calibrate
 
 Laya Vision swaps Laya's ModernBERT text encoder for [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct), which already understands images. It keeps Laya's `predict(state, questions)` API, output schema, proper-scoring-rule training and temperature calibration.
 
-- **Models:** [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m) (the results below) and [thaitea/laya-vision-modernvbert-250m](https://huggingface.co/thaitea/laya-vision-modernvbert-250m) (bidirectional backbone, trained on The Cauldron; see the ModernVBERT section)
+- **Models:** [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m) (the results below), [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score) (trained on The Cauldron plus four rubric-scored sets, the first checkpoint with a working `score` head; see [docs/score-results.md](docs/score-results.md)) and [thaitea/laya-vision-modernvbert-250m](https://huggingface.co/thaitea/laya-vision-modernvbert-250m) (bidirectional backbone, trained on The Cauldron; see the ModernVBERT section)
 - **Try it in the browser:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Hugging Face Space on free CPU at about 3 s per image. Its source is in `space/`.
 - **Status:** experimental research fork. It is not affiliated with Convai Innovations, the authors of Laya.
 
@@ -21,7 +21,7 @@ This is the fine-tuned checkpoint `all3-3ep/best`: 3 passes over 72k training ex
 
 - **Latency:** about 71 ms for one image question on an NVIDIA L4 (bf16). The image is encoded once and reused for every question in the call.
 - **Option-order sensitivity:** across 4 rotations of the A-OKVQA option order, accuracy varies by 0.7 points.
-- **`score` questions are not trained yet** in this checkpoint: there was no ordinal image data, so treat its `score` outputs as meaningless. Four rubric-scored sets (response grading, aesthetics votes, generated-image ratings, damage severity) now train it; the first runs on both backbones are in [docs/score-results.md](docs/score-results.md) and the data in [docs/score-data.md](docs/score-data.md).
+- **`score` questions are not trained in this checkpoint**, so treat its `score` outputs as meaningless. Use [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score) for rubric scoring: it is trained on four rubric-scored sets (response grading, aesthetics votes, generated-image ratings, damage severity), reaching 54% over 5 levels on VLFeedback against a 27.5% majority baseline. Data in [docs/score-data.md](docs/score-data.md), runs in [docs/score-results.md](docs/score-results.md).
 
 ## Usage
 
