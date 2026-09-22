@@ -722,7 +722,7 @@ def split_bench(
     batch_size: int = 32,
     max_minutes: float = 240.0,
     option_attention: str = "bidirectional",
-    train_gpu: str = "H100",
+    train_gpu: str = "A100-80GB",
     latency_n: int = 300,
 ):
     """Image splitting off vs on, with everything else equal: one ``finetune_long`` per ``split_edges`` value
