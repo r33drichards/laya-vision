@@ -259,6 +259,58 @@ opt1           x    x    x    x     x     x
 opt2           x    x    x    x     x     x
 ```
 
+### Inference: the shared-prefix cache (Branches 2 and 3)
+
+Every row `VLMAgent.predict` scores for one state (each question, times each option order with
+`n_permutations`) begins with the same tokens: the image run and the state text. Under the causal readout those
+tokens' hidden states and keys/values do not depend on anything after them, so `predict` computes them once
+(`VLMDecisionModel.encode_prefix`: one batch-1 pass through the full backbone, the only pass the image features
+are merged into), replicates the key/value cache across the batch, and runs only each row's suffix through the
+text model (`forward_prefixed`), with explicit positions `P..` and a 4D mask `[B, 1, S, P + S]` over the prefix
+plus suffix keys (`option_block_mask(..., query_start=P)`: every suffix token sees the whole prefix, causal within
+the suffix, the option span fully connected under `"block"`, padding keys masked). The cached prefix hidden
+states are put back in front of the suffix ones before the head transformer, which is bidirectional over the
+whole row, so the head, scorer and act head see exactly the sequence the full path builds.
+
+The shared prefix is the longest common token prefix of all rows (`shared_prefix_len`), not a fixed boundary:
+`build_vlm_inputs` cuts the state to the room each question's tail leaves, so with a long state and questions of
+different lengths the rows carry different amounts of state and the cache stops where the shortest cut does.
+Under causal attention it may also run past the state (one question under several option orders shares its whole
+question text); under `"block"` it stops at the first option span, whose tokens attend forward. The image run
+must lie inside it, otherwise `predict` takes the full path. The `"mask"` readout (ModernVBERT) always takes the
+full path: a bidirectional prefix depends on what follows it.
+
+`predict(..., prefix_cache=None)` decides per call: on a CPU the cache is used whenever there are two or more
+rows (the backbone is compute-bound there), on CUDA only when there are more rows than `batch_size`, because a
+backbone pass of this size costs about the same at any batch size up to a few thousand tokens and the cache adds
+one. `True` forces the cache, `False` the full path. In fp32 the two paths agree to about 1e-6 in the option
+logits (`tests/test_vlm.py::test_prefix_cache_matches_full_path`); in bf16 the probabilities differ by up to
+0.004, bf16 rounding of a different summation order.
+
+Latency, `modal run modal_app.py::bench_prefix_cache`: NVIDIA L4, bf16, the published checkpoint
+(`cauldron-score-2ep-bidir-full/best`, `option_attention="block"`, 512-pixel processor preprocessing), one
+640x480 image, 3 questions (a 4-option choice, a 4-level score and a noul, so `n_permutations` 1 / 4 / 8 gives 3 /
+10 / 18 rows), `batch_size=8`, median of 20 calls after 3 warm-ups, end to end including preprocessing. "Short
+state" is about 30 state tokens (about 140 tokens per row), "long state" about 740 (about 830 per row). Single
+runs on a shared cloud GPU; absolute times move by +-30% between containers, the ratios within a run are stable.
+
+| State | `n_permutations` | Rows | Full path | Cache forced | Speedup | Default (`None`) |
+|---|---|---|---|---|---|---|
+| image + short state | 1 | 3 | 80 ms | 122 ms | 0.66x | 80 ms (full) |
+| image + short state | 4 | 10 | 131 ms | 126 ms | 1.04x | 126 ms (cache) |
+| image + short state | 8 | 18 | 195 ms | 135 ms | 1.45x | 135 ms (cache) |
+| image + long state | 1 | 3 | 87 ms | 130 ms | 0.67x | 88 ms (full) |
+| image + long state | 4 | 10 | 207 ms | 161 ms | 1.28x | 158 ms (cache) |
+| image + long state | 8 | 18 | 338 ms | 197 ms | 1.72x | 205 ms (cache) |
+
+On the GPU the saving is in backbone passes (the full path runs `ceil(rows / 8)` of them, the cached path one
+prefill plus `ceil(rows / 32)` suffix passes) and in tokens once rows are long; at three rows the extra prefill
+pass makes the cache a loss, which is why the default skips it there. On a CPU the time follows the token count,
+and the cache pays from two rows on: `tests/test_vlm.py::test_prefix_cache_speed` (SmolVLM-256M, fp32, a Modal
+container with 4 vCPUs, one 96x96 image with a 5-token caption, the 3 test questions, median of 3) gave 1316 ms
+full vs 1182 ms cached (1.11x) at `n_permutations=1` and 2234 ms vs 1566 ms (1.43x) at 4; the prefix there is
+only 79 tokens, so a longer state gains more.
+
 ## Branch 4: ModernVBERT (bidirectional readout)
 
 `VLMDecisionModel` with `readout="mask"`, picked automatically from the backbone's `model_type`. ModernVBERT is a

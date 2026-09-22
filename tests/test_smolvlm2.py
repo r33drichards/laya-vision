@@ -41,6 +41,23 @@ def test_smolvlm2_is_a_causal_terminator_backbone(agent):
     check_schema(agent.predict({"image": square((220, 20, 20))}, QUESTIONS), QUESTIONS)
 
 
+def test_smolvlm2_prefix_cache_matches_full_path(agent):
+    """The shared-prefix path goes through SmolVLM2's model for the image prefill and its text model after."""
+    state = {"image": square((220, 20, 20)), "caption": "a test card"}
+    for attention in ("causal", "block"):
+        agent.model.option_attention = attention
+        try:
+            ref = agent.predict(state, QUESTIONS, n_permutations=2, prefix_cache=False)
+            got = agent.predict(state, QUESTIONS, n_permutations=2, prefix_cache=True)
+        finally:
+            agent.model.option_attention = "causal"
+        for qid, a in ref["answers"].items():
+            b = got["answers"][qid]
+            pa, pb = a.get("probabilities", {"p": a.get("noul")}), b.get("probabilities", {"p": b.get("noul")})
+            assert all(abs(pa[k] - pb[k]) <= 2e-4 for k in pa), (attention, qid, a, b)
+            assert abs(a["action"]["act_probability"] - b["action"]["act_probability"]) <= 2e-4
+
+
 def test_smolvlm2_fast_path_ids_match_the_processor(agent):
     """``prefix_ids`` rebuilds SmolVLMProcessor's unsplit image run (its global tag is ``global_image_token``)."""
     proc = agent.processor

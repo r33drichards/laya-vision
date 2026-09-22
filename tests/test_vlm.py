@@ -11,7 +11,8 @@ from PIL import Image
 
 from laya.common import render_options
 from laya.preprocess import FrameFeatureCache, ImagePrep, _axis_weights, prefix_ids, stage1_size
-from laya.vlm import OPTION_BULLET, OPTION_END, PREFIX_TEXT, VLMAgent, build_vlm_inputs, collate_vlm, split_state, vlm_prefix
+from laya.vlm import (OPTION_BULLET, OPTION_END, PREFIX_TEXT, VLMAgent, build_vlm_inputs, collate_vlm, shared_prefix_len,
+                      split_state, vlm_prefix)
 from laya.vlm_train import collect_logits, fit_temperatures_from, load_jsonl_examples, metrics_from, synthetic_examples, train
 
 DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
@@ -96,6 +97,120 @@ def test_bidirectional_is_a_deprecated_alias_for_block():
     assert normalize_option_attention("causal") == "causal"
     with pytest.raises(ValueError):
         normalize_option_attention("full")
+
+
+LONG_STATE = {"image": square((220, 20, 20)), "log": " ".join("event %d: the square moved" % i for i in range(400))}
+LONG_QUESTIONS = dict(QUESTIONS, why={"type": "choice", "instructions": "Explain which of the following is most "
+                                      "likely given everything in the image and the log. " * 6,
+                                      "criteria": ["the log", "the image", "neither of them", "both"]})
+
+
+def _answers_close(a, b, atol):
+    for qid, x in a["answers"].items():
+        y = b["answers"][qid]
+        vals = [(x["action"]["act_probability"], y["action"]["act_probability"])]
+        vals += [(x["noul"], y["noul"])] if x["type"] == "noul" else list(zip(x["probabilities"].values(), y["probabilities"].values()))
+        for u, v in vals:
+            assert abs(u - v) <= atol, (qid, x, y)
+    assert a["usage"] == b["usage"]
+
+
+@pytest.mark.parametrize("attention", ["causal", "block"])
+@pytest.mark.parametrize("case", ["image", "text", "perms", "long", "multi_image"])
+def test_prefix_cache_matches_full_path(agent, attention, case):
+    """The cached-prefix path computes the same row logits as running every row in full (fp32).
+
+    ``long`` has a state cut to fit ``max_len`` differently per question (``LONG_QUESTIONS`` has one long
+    question), so the shared prefix ends where the shortest cut does; the other cases share the whole state.
+    """
+    state, questions, perms = {
+        "image": ({"image": square((220, 20, 20)), "caption": "a test card"}, QUESTIONS, 1),
+        "text": ("Customer: I was billed twice, please refund.", QUESTIONS, 1),
+        "perms": ({"image": square((20, 40, 220))}, QUESTIONS, 4),
+        "long": (LONG_STATE, LONG_QUESTIONS, 2),
+        "multi_image": ({"images": [square((220, 20, 20)), square((20, 40, 220))], "note": "two views"}, LONG_QUESTIONS, 1),
+    }[case]
+    model = agent.model
+    readout, prefill = model._readout, model.encode_prefix
+    logits, prefixes = [], []
+    model._readout = lambda *a, **k: logits.append(readout(*a, **k)) or logits[-1]
+    model.encode_prefix = lambda ids, *a: prefixes.append(ids.shape[1]) or prefill(ids, *a)
+    model.option_attention = attention
+    max_len = agent.cfg["max_len"]
+    if case == "long":
+        agent.cfg["max_len"] = 400  # the state is cut either way; a shorter cap keeps this cheap on a CPU
+    try:
+        rows = [build_vlm_inputs(agent.processor, state, VLMAgent._to_internal(q), agent.cfg["max_len"])
+                for q in questions.values()]
+        if case == "long":  # every row is filled to the cap by a state cut to the room its question leaves
+            assert {len(r["ids"]) for r in rows} == {agent.cfg["max_len"]}
+        ref = agent.predict(state, questions, n_permutations=perms, batch_size=4, prefix_cache=False)
+        n_ref = len(logits)
+        t0 = time.perf_counter()
+        # "perms" (10 rows) also runs the cached path in two suffix chunks, each with its own copy of the cache
+        got = agent.predict(state, questions, n_permutations=perms, batch_size=2 if case == "perms" else 4, prefix_cache=True)
+        dt = time.perf_counter() - t0
+    finally:
+        model.option_attention = "causal"
+        agent.cfg["max_len"] = max_len
+        del model._readout, model.encode_prefix
+    assert len(prefixes) == 1  # the cached path ran, one prefill for all its chunks
+    images, text = split_state(state)
+    n_image_run = len(vlm_prefix(agent.processor, images, agent.prep)["ids"])
+    assert prefixes[0] > n_image_run  # it cached the state text too, not just the image run
+    if case == "long":  # but only as much of it as the row with the longest question kept
+        assert prefixes[0] <= min(r["option_span"][0] for r in rows) - 20
+    per_row = lambda outs: [(z[z > -1e3], a) for zs, acts in outs for z, a in zip(zs, acts)]  # noqa: E731
+    full, part = per_row(logits[:n_ref]), per_row(logits[n_ref:])  # chunked differently, so compare row by row
+    assert len(full) == len(part) >= len(questions)
+    for (za, aa), (zb, ab) in zip(full, part):
+        assert torch.allclose(za, zb, atol=1e-4, rtol=0), float((za - zb).abs().max())
+        assert torch.allclose(aa, ab, atol=1e-4, rtol=0)
+    _answers_close(ref, got, 2e-4)  # 1e-4 plus the 4-decimal rounding
+    print("\nprefix cache %s/%s: %d-token prefix, cached predict %.2f s (%s)" % (attention, case, prefixes[0], dt, DEVICE))
+
+
+def test_shared_prefix_len():
+    rows = [{"ids": [1, 2, 3, 4, 5, 6], "option_span": (4, 6)}, {"ids": [1, 2, 3, 9, 5], "option_span": (3, 5)}]
+    assert shared_prefix_len(rows, 2) == 3
+    assert shared_prefix_len(rows, 2, block=True) == 3
+    assert shared_prefix_len(rows, 4) == 0  # the image run must be inside the shared prefix
+    same = [{"ids": [1, 2, 3], "option_span": (1, 3)}] * 2
+    assert shared_prefix_len(same, 1) == 2  # at least one suffix token per row
+    assert shared_prefix_len(same, 1, block=True) == 1  # stops at the option span
+
+
+def test_prefix_cache_auto_choice(agent):
+    """``prefix_cache=None`` skips the cache for a single row (nothing to share); on a CPU two rows are enough."""
+    calls, prefill = [], agent.model.encode_prefix
+    agent.model.encode_prefix = lambda *a: calls.append(1) or prefill(*a)
+    try:
+        agent.predict("plain text", {"is_red": QUESTIONS["is_red"]})
+        assert calls == []
+        agent.predict("plain text", {"is_red": QUESTIONS["is_red"]}, prefix_cache=False, n_permutations=2)
+        assert calls == []
+        agent.predict("plain text", {"is_red": QUESTIONS["is_red"]}, n_permutations=2)
+        assert calls == ([] if DEVICE == "cuda" else [1])
+    finally:
+        del agent.model.encode_prefix
+
+
+def test_prefix_cache_speed(agent):
+    """Informational: full vs cached predict on this device, 3 questions on one image."""
+    state = {"image": square((220, 20, 20)), "caption": "a test card"}
+    for perms in (1, 4):
+        res = {}
+        for cache in (False, True):  # forced either way: the automatic choice would take the cache here on a CPU
+            agent.predict(state, QUESTIONS, n_permutations=perms, prefix_cache=cache)  # warm-up
+            ts = []
+            for _ in range(3):
+                t0 = time.perf_counter()
+                agent.predict(state, QUESTIONS, n_permutations=perms, prefix_cache=cache)
+                sync()
+                ts.append((time.perf_counter() - t0) * 1000)
+            res[cache] = sorted(ts)[1]
+        print("\nprefix cache, 3 questions, n_permutations=%d, %s: full %.0f ms, cached %.0f ms (x%.2f)"
+              % (perms, DEVICE, res[False], res[True], res[False] / res[True]))
 
 
 def test_marker_positions(agent):

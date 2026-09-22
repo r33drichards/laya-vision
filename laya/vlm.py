@@ -417,16 +417,24 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
     return res
 
 
-def option_block_mask(attention_mask: torch.Tensor, option_span: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    """Additive 4D mask: causal everywhere, bidirectional inside each row's option span, padding keys masked."""
+def option_block_mask(attention_mask: torch.Tensor, option_span: Optional[torch.Tensor], dtype: torch.dtype,
+                      query_start: int = 0) -> torch.Tensor:
+    """Additive 4D mask: causal everywhere, bidirectional inside each row's option span, padding keys masked.
+
+    ``option_span=None`` gives the plain causal mask. ``query_start`` keeps only the query rows from that position
+    on (``[B, 1, L - query_start, L]``): the mask for a suffix run over a cached prefix of that length, whose keys
+    are the prefix plus the suffix (``VLMDecisionModel.forward_prefixed``).
+    """
     B, L = attention_mask.shape
     pos = torch.arange(L, device=attention_mask.device)
-    allowed = pos[None, :, None] >= pos[None, None, :]
-    s, e = option_span[:, 0, None], option_span[:, 1, None]
-    in_span = (pos[None] >= s) & (pos[None] < e)
-    allowed = allowed | (in_span[:, :, None] & in_span[:, None, :])
+    qpos = pos[query_start:]
+    allowed = (qpos[None, :, None] >= pos[None, None, :]).expand(B, -1, -1)
+    if option_span is not None:
+        s, e = option_span[:, 0, None], option_span[:, 1, None]
+        in_q, in_k = (qpos[None] >= s) & (qpos[None] < e), (pos[None] >= s) & (pos[None] < e)
+        allowed = allowed | (in_q[:, :, None] & in_k[:, None, :])
     allowed = allowed & attention_mask.bool()[:, None, :]
-    mask = torch.zeros((B, 1, L, L), dtype=dtype, device=attention_mask.device)
+    mask = torch.zeros((B, 1, L - query_start, L), dtype=dtype, device=attention_mask.device)
     return mask.masked_fill(~allowed[:, None], torch.finfo(dtype).min)
 
 
@@ -549,6 +557,53 @@ class VLMDecisionModel(nn.Module):
         ).last_hidden_state
         if detach_encoder:
             h = h.detach()
+        return self._readout(h, attention_mask, marker_pos, marker_mask, qtype)
+
+    def encode_prefix(self, input_ids: torch.Tensor, image_hidden_states: Optional[torch.Tensor] = None) -> Dict:
+        """Prefill a prefix shared by every row (``input_ids`` ``[1, P]``: the image run and the state) once.
+
+        Returns ``{"h": last_hidden_state [1, P, d], "kv": [(keys, values)] per layer}`` for ``forward_prefixed``.
+        The images are merged here and only here; the suffixes are text. Causal readout only: the prefix's hidden
+        states must not depend on what follows it.
+        """
+        if self.readout != "terminator":
+            raise ValueError("prefix caching needs the causal 'terminator' readout")
+        if image_hidden_states is not None:
+            image_hidden_states = image_hidden_states.to(self.encoder.get_input_embeddings().weight.dtype)
+        out = self.encoder(input_ids=input_ids, attention_mask=torch.ones_like(input_ids),
+                           image_hidden_states=image_hidden_states, use_cache=True)
+        return {"h": out.last_hidden_state, "kv": [(lay.keys, lay.values) for lay in out.past_key_values.layers]}
+
+    def forward_prefixed(self, prefix: Dict, input_ids, attention_mask, marker_pos, marker_mask, qtype, option_span=None):
+        """``forward`` for rows that all start with the prefix ``encode_prefix`` cached, computing only the suffixes.
+
+        Takes the same full-row batch as ``forward`` (``input_ids[:, :P]`` must be the prefix; markers, spans and
+        the padding mask stay in full-row coordinates). The cache is replicated across the batch, the suffixes run
+        through the text model with explicit positions ``P..`` and a 4D mask over prefix + suffix keys (causal, or
+        ``option_block_mask`` for ``"block"``: the option span must lie wholly in the suffix), and the cached
+        prefix hidden states are put back in front so the head sees the same sequence ``forward`` would build.
+        """
+        from transformers import DynamicCache
+
+        B, P = input_ids.size(0), prefix["h"].size(1)
+        span = None
+        if self.option_attention == "block":
+            if option_span is None:
+                raise ValueError("option_attention='block' requires option_span")
+            if int(option_span[:, 0].min()) < P:
+                raise ValueError("the option span must start after the cached prefix")
+            span = option_span
+        cache = DynamicCache(ddp_cache_data=[(k.expand(B, -1, -1, -1), v.expand(B, -1, -1, -1)) for k, v in prefix["kv"]])
+        suffix = input_ids[:, P:]
+        pos = torch.arange(P, input_ids.size(1), device=input_ids.device)[None].expand(B, -1)
+        mask = option_block_mask(attention_mask, span, self.encoder.dtype, query_start=P)
+        h = self.encoder.text_model(input_ids=suffix, attention_mask=mask, position_ids=pos, past_key_values=cache,
+                                    use_cache=True).last_hidden_state
+        h = torch.cat([prefix["h"].expand(B, -1, -1), h], 1)
+        return self._readout(h, attention_mask, marker_pos, marker_mask, qtype)
+
+    def _readout(self, h, attention_mask, marker_pos, marker_mask, qtype):
+        """Backbone hidden states ``[B, L, d]`` -> ``(option logits, act logits)``: head transformer, scorer, act head."""
         h = h.float()
         h = h + self.type_emb(qtype)[:, None, :]
         if self.head is not None:
@@ -655,6 +710,32 @@ def _permutations(k: int, n: int) -> List[List[int]]:
         if p not in perms:
             perms.append(p)
     return perms[:n]
+
+
+#: with a cached prefix, ``VLMAgent.predict`` runs this many times ``batch_size`` suffix rows per pass
+SUFFIX_BATCH_FACTOR = 4
+
+
+def shared_prefix_len(rows: List[Dict], n_min: int, block: bool = False) -> int:
+    """Length of the token prefix every row's ``ids`` share, for ``VLMAgent.predict``'s prefix cache; 0 if none.
+
+    Not simply the image run plus the state text: ``build_vlm_inputs`` cuts the state to the room its question's
+    tail leaves, so rows with long questions may carry less of it. The longest common prefix handles that (it
+    stops where the shortest cut ends) and, with causal attention, also takes in whatever the rows share past the
+    state (one question under several option orders shares its whole question text). With ``block`` attention
+    it stops at the first option span, whose tokens see forward. At least one token of every row is left to the
+    suffix; a prefix shorter than ``n_min`` (the image run, which only the prefix pass can merge) returns 0, and
+    the caller takes the full path.
+    """
+    ref = rows[0]["ids"]
+    n = min(len(r["ids"]) for r in rows) - 1
+    for r in rows[1:]:
+        ids = r["ids"]
+        if ids[:n] != ref[:n]:
+            n = next(i for i in range(n) if ids[i] != ref[i])
+    if block:
+        n = min([n] + [r["option_span"][0] for r in rows])
+    return n if n >= max(1, n_min) else 0
 
 
 class VLMAgent:
@@ -796,12 +877,24 @@ class VLMAgent:
         questions: Dict[str, Dict[str, Any]],
         n_permutations: int = 1,
         batch_size: int = 8,
+        prefix_cache: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Evaluate typed questions over a text / JSON / image state. Same output schema as ``Agent.predict``.
 
         Images are encoded once and their features reused for every question row. ``n_permutations > 1``
         scores each question under several option orders and averages the logits (in label order) to
         reduce the causal option-order bias (pointless with the ``"mask"`` readout, which has none).
+
+        ``prefix_cache`` (causal ``"terminator"`` readout only): every row (question x option order) starts with
+        the same image run and state text, so that shared prefix is run through the backbone once, its key/value
+        cache is replicated across the batch, and only each row's suffix is computed
+        (``VLMDecisionModel.encode_prefix`` / ``forward_prefixed``). The suffix rows are short, so up to
+        ``SUFFIX_BATCH_FACTOR * batch_size`` of them go in one pass. The result matches the full path to float
+        rounding. ``True`` forces it, ``False`` forces the full path (every row runs the whole sequence, as the
+        ``"mask"`` readout always does), and ``None`` picks: the cache costs one extra backbone pass, which pays on
+        a CPU as soon as two rows share the prefix (compute-bound), but on CUDA a small backbone pass takes about
+        the same time at any batch size up to a few thousand tokens (launch-bound), so there it is used only when
+        the full path would need more than one pass (more than ``batch_size`` rows). See docs/architecture.md.
         """
         images, _ = split_state(state)
         prefix = vlm_prefix(self.processor, images, self.prep)
@@ -829,22 +922,27 @@ class VLMAgent:
                 it.update(qtype=QTYPES[q["t"]], qid=qid, order=order)
                 rows.append(it)
 
+        cached, step = None, batch_size
+        if prefix_cache is None:
+            prefix_cache = len(rows) > (batch_size if self.device.type == "cuda" else 1)
+        if prefix_cache and self.model.readout == "terminator":
+            n = shared_prefix_len(rows, len(prefix["ids"]), self.model.option_attention == "block")
+            if n:
+                cached = self.model.encode_prefix(torch.tensor([rows[0]["ids"][:n]], device=self.device), img_feats)
+                step = SUFFIX_BATCH_FACTOR * batch_size
+
         row_logits = []
         n_tokens = 0
-        for s in range(0, len(rows), batch_size):
-            chunk = rows[s : s + batch_size]
+        for s in range(0, len(rows), step):
+            chunk = rows[s : s + step]
             b = collate_vlm(chunk, self.processor.tokenizer.pad_token_id, with_pixels=False)
             n_tokens += int(b["attention_mask"].sum())
-            feats = img_feats.repeat(len(chunk), 1, 1) if img_feats is not None else None
-            logits, act = self.model(
-                b["input_ids"].to(self.device),
-                b["attention_mask"].to(self.device),
-                b["marker_pos"].to(self.device),
-                b["marker_mask"].to(self.device),
-                b["qtype"].to(self.device),
-                image_hidden_states=feats,
-                option_span=b["option_span"].to(self.device),
-            )
+            args = [b[k].to(self.device) for k in ("input_ids", "attention_mask", "marker_pos", "marker_mask", "qtype")]
+            if cached is not None:
+                logits, act = self.model.forward_prefixed(cached, *args, option_span=b["option_span"].to(self.device))
+            else:
+                feats = img_feats.repeat(len(chunk), 1, 1) if img_feats is not None else None
+                logits, act = self.model(*args, image_hidden_states=feats, option_span=b["option_span"].to(self.device))
             act = torch.softmax(act.float(), -1).cpu().numpy()
             logits = logits.float().cpu().numpy()
             for r in range(len(chunk)):
