@@ -47,7 +47,7 @@ def test_readout_follows_the_backbone(agent):
     assert agent.model.readout == agent.cfg["readout"] == processor_readout(agent.processor) == "mask"
     assert agent.model.encoder.config.model_type == "modernvbert"
     with pytest.raises(ValueError):
-        VLMDecisionModel(agent.model.encoder, readout="mask", option_attention="bidirectional")
+        VLMDecisionModel(agent.model.encoder, readout="mask", option_attention="block")
     with pytest.raises(ValueError):
         VLMDecisionModel(agent.model.encoder, readout="eos")
 
