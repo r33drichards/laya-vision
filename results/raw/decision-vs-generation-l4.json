@@ -1,0 +1,3290 @@
+{
+  "version": "laya-decision-vs-generation-v1",
+  "code": {
+    "git_sha": "6878f88dc786803a76bc7ab6162755e3c0c25bb0",
+    "dirty": false
+  },
+  "hardware": {
+    "gpu": "NVIDIA L4",
+    "device": "cuda",
+    "cpu": "x86_64"
+  },
+  "software": {
+    "torch": "2.14.0+cu130",
+    "transformers": "5.17.0",
+    "python": "3.12.10",
+    "cuda": "13.0"
+  },
+  "dtype": "bf16",
+  "models": {
+    "typed": {
+      "source": "thaitea/laya-vision",
+      "revision": "d1fbdc0612fbe3b3d8ec6f54d328b195d35bb338",
+      "option_attention": "block",
+      "temperature": [
+        2.2027783393859863,
+        1.365213394165039,
+        2.133272647857666
+      ]
+    },
+    "generation": {
+      "source": "HuggingFaceTB/SmolVLM-256M-Instruct",
+      "revision": "7e3e67edbbed1bf9888184d9df282b700a323964"
+    }
+  },
+  "input": {
+    "image": "dvg_card.png",
+    "image_sha256": "a22ee12e3949404ebe3dd360f6d8ac6ad0992747a9798b54f90b33bec5d50450",
+    "image_size": [
+      512,
+      512
+    ],
+    "questions": "dvg_questions.json",
+    "questions_sha256": "2c884a55befc11af21415df66c2a808bd6793c3d5118d146264c11798d30addd",
+    "n_questions": 15,
+    "types": {
+      "choice": 6,
+      "noul": 5,
+      "score": 4
+    },
+    "state_text": "{\"context\": \"Test card from a signage checker. Describe only what is drawn in the image.\"}"
+  },
+  "protocol": {
+    "repeats": 5,
+    "warmup_rounds": 2,
+    "max_new_tokens": 256,
+    "per_question_max_new_tokens": 16,
+    "decoding": "greedy",
+    "timer": "perf_counter around the call with torch.cuda.synchronize before and after; runs interleaved across paths; includes CPU preprocessing from a decoded PIL image"
+  },
+  "scope": "Systems comparison. Path A is the fine-tuned checkpoint's typed readout; path B is its frozen base backbone generating a compact JSON array from the same image, state text and questions. They do not share weights, so agreement is agreement with path A's argmax, not a correctness measure, and nothing here says the generated answers are what the trained head would produce.",
+  "reference_argmax": [
+    "red",
+    "circle",
+    "4",
+    "blue",
+    "circle",
+    "EXIT",
+    true,
+    true,
+    false,
+    true,
+    false,
+    1,
+    2,
+    2,
+    1
+  ],
+  "paths": {
+    "typed_default_batch": {
+      "median_total_seconds": 0.1443519569999978,
+      "runs": [
+        {
+          "total_seconds": 0.1443709699999971,
+          "peak_cuda_bytes": 1058182656,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.1443519569999978,
+          "peak_cuda_bytes": 1058182656,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.14197492499999953,
+          "peak_cuda_bytes": 1058182656,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.14534328999999957,
+          "peak_cuda_bytes": 1058182656,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.14353889100000572,
+          "peak_cuda_bytes": 1058182656,
+          "input_tokens": 1998
+        }
+      ],
+      "answers": {
+        "circle_color": {
+          "type": "choice",
+          "choice": "red",
+          "probabilities": {
+            "red": 0.899,
+            "blue": 0.0337,
+            "green": 0.0537,
+            "yellow": 0.0101,
+            "purple": 0.0035
+          },
+          "confidence": 0.7307,
+          "action": {
+            "act_probability": 0.9953
+          }
+        },
+        "largest_shape": {
+          "type": "choice",
+          "choice": "circle",
+          "probabilities": {
+            "circle": 0.9717,
+            "square": 0.0089,
+            "triangle": 0.0194
+          },
+          "confidence": 0.8666,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "shape_count": {
+          "type": "choice",
+          "choice": "4",
+          "probabilities": {
+            "2": 0.0178,
+            "3": 0.0215,
+            "4": 0.9367,
+            "5": 0.0134,
+            "6": 0.0106
+          },
+          "confidence": 0.8003,
+          "action": {
+            "act_probability": 0.997
+          }
+        },
+        "background": {
+          "type": "choice",
+          "choice": "blue",
+          "probabilities": {
+            "white": 0.0394,
+            "light gray": 0.121,
+            "black": 0.0213,
+            "blue": 0.8183
+          },
+          "confidence": 0.5463,
+          "action": {
+            "act_probability": 0.9996
+          }
+        },
+        "top_left": {
+          "type": "choice",
+          "choice": "circle",
+          "probabilities": {
+            "circle": 0.8637,
+            "square": 0.0347,
+            "triangle": 0.0631,
+            "sign": 0.0384
+          },
+          "confidence": 0.6083,
+          "action": {
+            "act_probability": 0.9999
+          }
+        },
+        "sign_word": {
+          "type": "choice",
+          "choice": "EXIT",
+          "probabilities": {
+            "STOP": 0.0189,
+            "EXIT": 0.9676,
+            "OPEN": 0.0099,
+            "SALE": 0.0035
+          },
+          "confidence": 0.8756,
+          "action": {
+            "act_probability": 0.9862
+          }
+        },
+        "red_circle": {
+          "type": "noul",
+          "noul": 0.8984,
+          "confidence": 0.8984,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "triangle": {
+          "type": "noul",
+          "noul": 0.8116,
+          "confidence": 0.8116,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "person": {
+          "type": "noul",
+          "noul": 0.0798,
+          "confidence": 0.9202,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "square_blue": {
+          "type": "noul",
+          "noul": 0.5031,
+          "confidence": 0.5031,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "photograph": {
+          "type": "noul",
+          "noul": 0.165,
+          "confidence": 0.835,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "clutter": {
+          "type": "score",
+          "score": 1.2627,
+          "legend": {
+            "0": "empty: nothing drawn",
+            "1": "sparse: a few separate objects",
+            "2": "busy: many objects",
+            "3": "cluttered: objects overlap everywhere"
+          },
+          "probabilities": {
+            "0": 0.2948,
+            "1": 0.3545,
+            "2": 0.1439,
+            "3": 0.2068
+          },
+          "confidence": 0.0387,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "brightness": {
+          "type": "score",
+          "score": 2.05,
+          "legend": {
+            "0": "very dark",
+            "1": "dim",
+            "2": "moderately bright",
+            "3": "very bright"
+          },
+          "probabilities": {
+            "0": 0.0794,
+            "1": 0.1606,
+            "2": 0.3906,
+            "3": 0.3694
+          },
+          "confidence": 0.1128,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "realism": {
+          "type": "score",
+          "score": 1.6208,
+          "legend": {
+            "0": "clearly synthetic: flat shapes",
+            "1": "stylized illustration",
+            "2": "somewhat realistic",
+            "3": "photorealistic"
+          },
+          "probabilities": {
+            "0": 0.2283,
+            "1": 0.086,
+            "2": 0.5223,
+            "3": 0.1634
+          },
+          "confidence": 0.1463,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "legibility": {
+          "type": "score",
+          "score": 1.3433,
+          "legend": {
+            "0": "no readable text",
+            "1": "hard to read",
+            "2": "readable",
+            "3": "large and very clear"
+          },
+          "probabilities": {
+            "0": 0.2195,
+            "1": 0.3345,
+            "2": 0.3293,
+            "3": 0.1167
+          },
+          "confidence": 0.051,
+          "action": {
+            "act_probability": 1.0
+          }
+        }
+      },
+      "argmax": [
+        "red",
+        "circle",
+        "4",
+        "blue",
+        "circle",
+        "EXIT",
+        true,
+        true,
+        false,
+        true,
+        false,
+        1,
+        2,
+        2,
+        1
+      ],
+      "output_tokens": 0
+    },
+    "typed_one_batch": {
+      "median_total_seconds": 0.09779033600000275,
+      "runs": [
+        {
+          "total_seconds": 0.0996774529999982,
+          "peak_cuda_bytes": 1090327040,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.09731628600000164,
+          "peak_cuda_bytes": 1090327040,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.09774884200000145,
+          "peak_cuda_bytes": 1090327040,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.0986227629999945,
+          "peak_cuda_bytes": 1090327040,
+          "input_tokens": 1998
+        },
+        {
+          "total_seconds": 0.09779033600000275,
+          "peak_cuda_bytes": 1090327040,
+          "input_tokens": 1998
+        }
+      ],
+      "answers": {
+        "circle_color": {
+          "type": "choice",
+          "choice": "red",
+          "probabilities": {
+            "red": 0.899,
+            "blue": 0.0337,
+            "green": 0.0537,
+            "yellow": 0.0101,
+            "purple": 0.0035
+          },
+          "confidence": 0.7307,
+          "action": {
+            "act_probability": 0.9953
+          }
+        },
+        "largest_shape": {
+          "type": "choice",
+          "choice": "circle",
+          "probabilities": {
+            "circle": 0.9717,
+            "square": 0.0089,
+            "triangle": 0.0194
+          },
+          "confidence": 0.8666,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "shape_count": {
+          "type": "choice",
+          "choice": "4",
+          "probabilities": {
+            "2": 0.0178,
+            "3": 0.0215,
+            "4": 0.9367,
+            "5": 0.0134,
+            "6": 0.0106
+          },
+          "confidence": 0.8003,
+          "action": {
+            "act_probability": 0.997
+          }
+        },
+        "background": {
+          "type": "choice",
+          "choice": "blue",
+          "probabilities": {
+            "white": 0.0394,
+            "light gray": 0.121,
+            "black": 0.0213,
+            "blue": 0.8183
+          },
+          "confidence": 0.5463,
+          "action": {
+            "act_probability": 0.9996
+          }
+        },
+        "top_left": {
+          "type": "choice",
+          "choice": "circle",
+          "probabilities": {
+            "circle": 0.8637,
+            "square": 0.0347,
+            "triangle": 0.0631,
+            "sign": 0.0384
+          },
+          "confidence": 0.6083,
+          "action": {
+            "act_probability": 0.9999
+          }
+        },
+        "sign_word": {
+          "type": "choice",
+          "choice": "EXIT",
+          "probabilities": {
+            "STOP": 0.0189,
+            "EXIT": 0.9676,
+            "OPEN": 0.0099,
+            "SALE": 0.0035
+          },
+          "confidence": 0.8756,
+          "action": {
+            "act_probability": 0.9862
+          }
+        },
+        "red_circle": {
+          "type": "noul",
+          "noul": 0.8984,
+          "confidence": 0.8984,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "triangle": {
+          "type": "noul",
+          "noul": 0.8116,
+          "confidence": 0.8116,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "person": {
+          "type": "noul",
+          "noul": 0.0798,
+          "confidence": 0.9202,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "square_blue": {
+          "type": "noul",
+          "noul": 0.5031,
+          "confidence": 0.5031,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "photograph": {
+          "type": "noul",
+          "noul": 0.165,
+          "confidence": 0.835,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "clutter": {
+          "type": "score",
+          "score": 1.2627,
+          "legend": {
+            "0": "empty: nothing drawn",
+            "1": "sparse: a few separate objects",
+            "2": "busy: many objects",
+            "3": "cluttered: objects overlap everywhere"
+          },
+          "probabilities": {
+            "0": 0.2948,
+            "1": 0.3545,
+            "2": 0.1439,
+            "3": 0.2068
+          },
+          "confidence": 0.0387,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "brightness": {
+          "type": "score",
+          "score": 2.05,
+          "legend": {
+            "0": "very dark",
+            "1": "dim",
+            "2": "moderately bright",
+            "3": "very bright"
+          },
+          "probabilities": {
+            "0": 0.0794,
+            "1": 0.1606,
+            "2": 0.3906,
+            "3": 0.3694
+          },
+          "confidence": 0.1128,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "realism": {
+          "type": "score",
+          "score": 1.6208,
+          "legend": {
+            "0": "clearly synthetic: flat shapes",
+            "1": "stylized illustration",
+            "2": "somewhat realistic",
+            "3": "photorealistic"
+          },
+          "probabilities": {
+            "0": 0.2283,
+            "1": 0.086,
+            "2": 0.5223,
+            "3": 0.1634
+          },
+          "confidence": 0.1463,
+          "action": {
+            "act_probability": 1.0
+          }
+        },
+        "legibility": {
+          "type": "score",
+          "score": 1.3433,
+          "legend": {
+            "0": "no readable text",
+            "1": "hard to read",
+            "2": "readable",
+            "3": "large and very clear"
+          },
+          "probabilities": {
+            "0": 0.2195,
+            "1": 0.3345,
+            "2": 0.3293,
+            "3": 0.1167
+          },
+          "confidence": 0.051,
+          "action": {
+            "act_probability": 1.0
+          }
+        }
+      },
+      "argmax": [
+        "red",
+        "circle",
+        "4",
+        "blue",
+        "circle",
+        "EXIT",
+        true,
+        true,
+        false,
+        true,
+        false,
+        1,
+        2,
+        2,
+        1
+      ],
+      "output_tokens": 0
+    },
+    "compact_array": {
+      "median_total_seconds": 3.2157956799999994,
+      "runs": [
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 736,
+          "image_views": 1,
+          "output_tokens": 89,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.08787899699999713,
+          "total_seconds": 3.2301876049999976,
+          "output_text": " The image contains a sign with the word \"EXIT\" written on it. The sign is green and has a yellow rectangle with the word \"EXIT\" written on it. The background of the sign is white, and the text is in black. The sign is placed on a flat surface, which is likely a wall or a table. The image does not contain any other objects, such as people, animals, or additional signs.",
+          "timeline": [
+            {
+              "seconds": 0.08787899699999713,
+              "token_id": 378,
+              "text": " The"
+            },
+            {
+              "seconds": 0.12507599899999633,
+              "token_id": 2443,
+              "text": " image"
+            },
+            {
+              "seconds": 0.16102725399999684,
+              "token_id": 3593,
+              "text": " contains"
+            },
+            {
+              "seconds": 0.19684407299999407,
+              "token_id": 253,
+              "text": " a"
+            },
+            {
+              "seconds": 0.23230262499999554,
+              "token_id": 914,
+              "text": " sign"
+            },
+            {
+              "seconds": 0.2676087189999947,
+              "token_id": 351,
+              "text": " with"
+            },
+            {
+              "seconds": 0.3028888529999989,
+              "token_id": 260,
+              "text": " the"
+            },
+            {
+              "seconds": 0.3384751949999938,
+              "token_id": 2229,
+              "text": " word"
+            },
+            {
+              "seconds": 0.37370560899999816,
+              "token_id": 476,
+              "text": " \""
+            },
+            {
+              "seconds": 0.4090735029999948,
+              "token_id": 9324,
+              "text": "EX"
+            },
+            {
+              "seconds": 0.44392792600000064,
+              "token_id": 2901,
+              "text": "IT"
+            },
+            {
+              "seconds": 0.47854131499999397,
+              "token_id": 18,
+              "text": "\""
+            },
+            {
+              "seconds": 0.5132999749999954,
+              "token_id": 2855,
+              "text": " written"
+            },
+            {
+              "seconds": 0.548222146999997,
+              "token_id": 335,
+              "text": " on"
+            },
+            {
+              "seconds": 0.5832802219999991,
+              "token_id": 357,
+              "text": " it"
+            },
+            {
+              "seconds": 0.6180876769999983,
+              "token_id": 30,
+              "text": "."
+            },
+            {
+              "seconds": 0.652653254999997,
+              "token_id": 378,
+              "text": " The"
+            },
+            {
+              "seconds": 0.687377343999998,
+              "token_id": 914,
+              "text": " sign"
+            },
+            {
+              "seconds": 0.7226290750000004,
+              "token_id": 314,
+              "text": " is"
+            },
+            {
+              "seconds": 0.7578273999999965,
+              "token_id": 2654,
+              "text": " green"
+            },
+            {
+              "seconds": 0.7934568619999993,
+              "token_id": 284,
+              "text": " and"
+            },
+            {
+              "seconds": 0.8294077229999957,
+              "token_id": 553,
+              "text": " has"
+            },
+            {
+              "seconds": 0.8651377999999994,
+              "token_id": 253,
+              "text": " a"
+            },
+            {
+              "seconds": 0.9011361019999953,
+              "token_id": 5724,
+              "text": " yellow"
+            },
+            {
+              "seconds": 0.9370543459999965,
+              "token_id": 23710,
+              "text": " rectangle"
+            },
+            {
+              "seconds": 0.9728514259999983,
+              "token_id": 351,
+              "text": " with"
+            },
+            {
+              "seconds": 1.0083897179999965,
+              "token_id": 260,
+              "text": " the"
+            },
+            {
+              "seconds": 1.0440625429999955,
+              "token_id": 2229,
+              "text": " word"
+            },
+            {
+              "seconds": 1.0801210829999945,
+              "token_id": 476,
+              "text": " \""
+            },
+            {
+              "seconds": 1.1155723179999981,
+              "token_id": 9324,
+              "text": "EX"
+            },
+            {
+              "seconds": 1.1508653909999964,
+              "token_id": 2901,
+              "text": "IT"
+            },
+            {
+              "seconds": 1.1864639739999987,
+              "token_id": 18,
+              "text": "\""
+            },
+            {
+              "seconds": 1.2218904120000005,
+              "token_id": 2855,
+              "text": " written"
+            },
+            {
+              "seconds": 1.257213797999995,
+              "token_id": 335,
+              "text": " on"
+            },
+            {
+              "seconds": 1.2921527879999957,
+              "token_id": 357,
+              "text": " it"
+            },
+            {
+              "seconds": 1.3272599999999954,
+              "token_id": 30,
+              "text": "."
+            },
+            {
+              "seconds": 1.3623091589999987,
+              "token_id": 378,
+              "text": " The"
+            },
+            {
+              "seconds": 1.3974965649999973,
+              "token_id": 3969,
+              "text": " background"
+            },
+            {
+              "seconds": 1.4329496000000006,
+              "token_id": 282,
+              "text": " of"
+            },
+            {
+              "seconds": 1.4686859400000003,
+              "token_id": 260,
+              "text": " the"
+            },
+            {
+              "seconds": 1.5040862849999996,
+              "token_id": 914,
+              "text": " sign"
+            },
+            {
+              "seconds": 1.539165183999998,
+              "token_id": 314,
+              "text": " is"
+            },
+            {
+              "seconds": 1.5741532849999942,
+              "token_id": 2537,
+              "text": " white"
+            },
+            {
+              "seconds": 1.608881646999997,
+              "token_id": 28,
+              "text": ","
+            },
+            {
+              "seconds": 1.6438123419999968,
+              "token_id": 284,
+              "text": " and"
+            },
+            {
+              "seconds": 1.6801476759999971,
+              "token_id": 260,
+              "text": " the"
+            },
+            {
+              "seconds": 1.7157997459999947,
+              "token_id": 1694,
+              "text": " text"
+            },
+            {
+              "seconds": 1.7513744019999962,
+              "token_id": 314,
+              "text": " is"
+            },
+            {
+              "seconds": 1.787015500999999,
+              "token_id": 281,
+              "text": " in"
+            },
+            {
+              "seconds": 1.8227940029999985,
+              "token_id": 2632,
+              "text": " black"
+            },
+            {
+              "seconds": 1.858764936,
+              "token_id": 30,
+              "text": "."
+            },
+            {
+              "seconds": 1.8942560639999968,
+              "token_id": 378,
+              "text": " The"
+            },
+            {
+              "seconds": 1.9304152689999938,
+              "token_id": 914,
+              "text": " sign"
+            },
+            {
+              "seconds": 1.9656870869999992,
+              "token_id": 314,
+              "text": " is"
+            },
+            {
+              "seconds": 2.0001856099999955,
+              "token_id": 4294,
+              "text": " placed"
+            },
+            {
+              "seconds": 2.034724219999994,
+              "token_id": 335,
+              "text": " on"
+            },
+            {
+              "seconds": 2.0707372949999936,
+              "token_id": 253,
+              "text": " a"
+            },
+            {
+              "seconds": 2.1065956859999986,
+              "token_id": 5562,
+              "text": " flat"
+            },
+            {
+              "seconds": 2.141925263999994,
+              "token_id": 2376,
+              "text": " surface"
+            },
+            {
+              "seconds": 2.177007876999994,
+              "token_id": 28,
+              "text": ","
+            },
+            {
+              "seconds": 2.211845642,
+              "token_id": 527,
+              "text": " which"
+            },
+            {
+              "seconds": 2.246772245999999,
+              "token_id": 314,
+              "text": " is"
+            },
+            {
+              "seconds": 2.281948450999998,
+              "token_id": 2003,
+              "text": " likely"
+            },
+            {
+              "seconds": 2.3172085189999976,
+              "token_id": 253,
+              "text": " a"
+            },
+            {
+              "seconds": 2.352290359999998,
+              "token_id": 4923,
+              "text": " wall"
+            },
+            {
+              "seconds": 2.388177272,
+              "token_id": 355,
+              "text": " or"
+            },
+            {
+              "seconds": 2.4230671519999945,
+              "token_id": 253,
+              "text": " a"
+            },
+            {
+              "seconds": 2.4577501569999995,
+              "token_id": 3252,
+              "text": " table"
+            },
+            {
+              "seconds": 2.4926392779999986,
+              "token_id": 30,
+              "text": "."
+            },
+            {
+              "seconds": 2.527373853999997,
+              "token_id": 378,
+              "text": " The"
+            },
+            {
+              "seconds": 2.5621843809999945,
+              "token_id": 2443,
+              "text": " image"
+            },
+            {
+              "seconds": 2.5990194919999965,
+              "token_id": 1072,
+              "text": " does"
+            },
+            {
+              "seconds": 2.6345853359999936,
+              "token_id": 441,
+              "text": " not"
+            },
+            {
+              "seconds": 2.671011926999995,
+              "token_id": 2127,
+              "text": " contain"
+            },
+            {
+              "seconds": 2.707132150999996,
+              "token_id": 750,
+              "text": " any"
+            },
+            {
+              "seconds": 2.743613947,
+              "token_id": 550,
+              "text": " other"
+            },
+            {
+              "seconds": 2.780459354999998,
+              "token_id": 3401,
+              "text": " objects"
+            },
+            {
+              "seconds": 2.817604156999998,
+              "token_id": 28,
+              "text": ","
+            },
+            {
+              "seconds": 2.8551462939999936,
+              "token_id": 715,
+              "text": " such"
+            },
+            {
+              "seconds": 2.8924225079999957,
+              "token_id": 347,
+              "text": " as"
+            },
+            {
+              "seconds": 2.929523202999995,
+              "token_id": 701,
+              "text": " people"
+            },
+            {
+              "seconds": 2.9667969569999997,
+              "token_id": 28,
+              "text": ","
+            },
+            {
+              "seconds": 3.004000923999996,
+              "token_id": 2355,
+              "text": " animals"
+            },
+            {
+              "seconds": 3.041175912,
+              "token_id": 28,
+              "text": ","
+            },
+            {
+              "seconds": 3.078843329999998,
+              "token_id": 355,
+              "text": " or"
+            },
+            {
+              "seconds": 3.1163118729999937,
+              "token_id": 3171,
+              "text": " additional"
+            },
+            {
+              "seconds": 3.1541553189999973,
+              "token_id": 4120,
+              "text": " signs"
+            },
+            {
+              "seconds": 3.1910932719999963,
+              "token_id": 30,
+              "text": "."
+            },
+            {
+              "seconds": 3.2280410879999977,
+              "token_id": 49279,
+              "text": "<end_of_utterance>"
+            }
+          ],
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1060249088
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 736,
+          "image_views": 1,
+          "output_tokens": 89,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.08732129599999894,
+          "total_seconds": 3.2157956799999994,
+          "output_text": " The image contains a sign with the word \"EXIT\" written on it. The sign is green and has a yellow rectangle with the word \"EXIT\" written on it. The background of the sign is white, and the text is in black. The sign is placed on a flat surface, which is likely a wall or a table. The image does not contain any other objects, such as people, animals, or additional signs.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1060249088
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 736,
+          "image_views": 1,
+          "output_tokens": 89,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.08727397599999165,
+          "total_seconds": 3.250602753999999,
+          "output_text": " The image contains a sign with the word \"EXIT\" written on it. The sign is green and has a yellow rectangle with the word \"EXIT\" written on it. The background of the sign is white, and the text is in black. The sign is placed on a flat surface, which is likely a wall or a table. The image does not contain any other objects, such as people, animals, or additional signs.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1060249088
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 736,
+          "image_views": 1,
+          "output_tokens": 89,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.09331355399999097,
+          "total_seconds": 3.2026748279999993,
+          "output_text": " The image contains a sign with the word \"EXIT\" written on it. The sign is green and has a yellow rectangle with the word \"EXIT\" written on it. The background of the sign is white, and the text is in black. The sign is placed on a flat surface, which is likely a wall or a table. The image does not contain any other objects, such as people, animals, or additional signs.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1060249088
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 736,
+          "image_views": 1,
+          "output_tokens": 89,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.08699678000000688,
+          "total_seconds": 3.167110629000007,
+          "output_text": " The image contains a sign with the word \"EXIT\" written on it. The sign is green and has a yellow rectangle with the word \"EXIT\" written on it. The background of the sign is white, and the text is in black. The sign is placed on a flat surface, which is likely a wall or a table. The image does not contain any other objects, such as people, animals, or additional signs.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1060249088
+        }
+      ],
+      "prompt_text": "Answer each question about the image independently. Return exactly one JSON array with one value per question, in the order given. For a choice question the value is one of its option ids as a string, for a true/false question it is true or false, for a level question it is the level number. Emit no keys, confidence values, markdown or explanation.\n{\"state\": \"{\\\"context\\\": \\\"Test card from a signage checker. Describe only what is drawn in the image.\\\"}\", \"questions_in_output_order\": [{\"question\": \"What color is the circle?\", \"kind\": \"choice\", \"option_ids\": [\"red\", \"blue\", \"green\", \"yellow\", \"purple\"]}, {\"question\": \"Which shape is the largest?\", \"kind\": \"choice\", \"option_ids\": [\"circle\", \"square\", \"triangle\"]}, {\"question\": \"How many separate shapes and signs are drawn in the image?\", \"kind\": \"choice\", \"option_ids\": [\"2\", \"3\", \"4\", \"5\", \"6\"]}, {\"question\": \"What color is the background?\", \"kind\": \"choice\", \"option_ids\": [\"white\", \"light gray\", \"black\", \"blue\"]}, {\"question\": \"Which object is in the top left corner?\", \"kind\": \"choice\", \"option_ids\": [\"circle\", \"square\", \"triangle\", \"sign\"]}, {\"question\": \"What word is written on the sign?\", \"kind\": \"choice\", \"option_ids\": [\"STOP\", \"EXIT\", \"OPEN\", \"SALE\"]}, {\"question\": \"Is there a red circle in the image?\", \"kind\": \"true/false\"}, {\"question\": \"Is there a triangle in the image?\", \"kind\": \"true/false\"}, {\"question\": \"Is there a person in the image?\", \"kind\": \"true/false\"}, {\"question\": \"Is the square blue?\", \"kind\": \"true/false\"}, {\"question\": \"Is this a photograph of a real scene?\", \"kind\": \"true/false\"}, {\"question\": \"How cluttered is the image?\", \"kind\": \"level\", \"levels\": {\"0\": \"empty: nothing drawn\", \"1\": \"sparse: a few separate objects\", \"2\": \"busy: many objects\", \"3\": \"cluttered: objects overlap everywhere\"}}, {\"question\": \"How bright is the image overall?\", \"kind\": \"level\", \"levels\": {\"0\": \"very dark\", \"1\": \"dim\", \"2\": \"moderately bright\", \"3\": \"very bright\"}}, {\"question\": \"How realistic does the image look?\", \"kind\": \"level\", \"levels\": {\"0\": \"clearly synthetic: flat shapes\", \"1\": \"stylized illustration\", \"2\": \"somewhat realistic\", \"3\": \"photorealistic\"}}, {\"question\": \"How legible is the text in the image?\", \"kind\": \"level\", \"levels\": {\"0\": \"no readable text\", \"1\": \"hard to read\", \"2\": \"readable\", \"3\": \"large and very clear\"}}]}",
+      "median_output_tokens": 89,
+      "median_time_to_first_token_seconds": 0.08732129599999894,
+      "all_runs_strict_valid": false,
+      "agreement_strict": {
+        "per_question": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "matches": 0,
+        "n": 15,
+        "rate": 0.0
+      },
+      "agreement_lenient": {
+        "per_question": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "matches": 0,
+        "n": 15,
+        "rate": 0.0
+      },
+      "outputs_identical_across_runs": true
+    },
+    "compact_array_shipped": {
+      "median_total_seconds": 0.6133597359999996,
+      "runs": [
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 1796,
+          "image_views": 17,
+          "output_tokens": 9,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.314505539999999,
+          "total_seconds": 0.6133597359999996,
+          "output_text": " The image does not contain any text.",
+          "timeline": [
+            {
+              "seconds": 0.314505539999999,
+              "token_id": 378,
+              "text": " The"
+            },
+            {
+              "seconds": 0.3514242900000042,
+              "token_id": 2443,
+              "text": " image"
+            },
+            {
+              "seconds": 0.38843843499999764,
+              "token_id": 1072,
+              "text": " does"
+            },
+            {
+              "seconds": 0.42538120500000076,
+              "token_id": 441,
+              "text": " not"
+            },
+            {
+              "seconds": 0.46301250300000163,
+              "token_id": 2127,
+              "text": " contain"
+            },
+            {
+              "seconds": 0.5005913700000022,
+              "token_id": 750,
+              "text": " any"
+            },
+            {
+              "seconds": 0.5379667839999982,
+              "token_id": 1694,
+              "text": " text"
+            },
+            {
+              "seconds": 0.5753168640000013,
+              "token_id": 30,
+              "text": "."
+            },
+            {
+              "seconds": 0.6122777360000029,
+              "token_id": 49279,
+              "text": "<end_of_utterance>"
+            }
+          ],
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1444593152
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 1796,
+          "image_views": 17,
+          "output_tokens": 9,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.32218978800000286,
+          "total_seconds": 0.613833163999999,
+          "output_text": " The image does not contain any text.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1444593152
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 1796,
+          "image_views": 17,
+          "output_tokens": 9,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.32871565599999997,
+          "total_seconds": 0.6200243529999909,
+          "output_text": " The image does not contain any text.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1444593152
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 1796,
+          "image_views": 17,
+          "output_tokens": 9,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.3177571020000016,
+          "total_seconds": 0.6047252369999967,
+          "output_text": " The image does not contain any text.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1444593152
+        },
+        {
+          "prompt_sha256": "a2a90e9672a80a0a6030479f97c75f1a3fbaebe8411be9cc0e3136c01e93770e",
+          "input_tokens": 1796,
+          "image_views": 17,
+          "output_tokens": 9,
+          "hit_token_budget": false,
+          "time_to_first_token_seconds": 0.31246883600000785,
+          "total_seconds": 0.6028604739999963,
+          "output_text": " The image does not contain any text.",
+          "parsed": {
+            "strict_valid": false,
+            "strict": null,
+            "json_found": false,
+            "length": null,
+            "lenient": [
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null
+            ]
+          },
+          "peak_cuda_bytes": 1444593152
+        }
+      ],
+      "prompt_text": "Answer each question about the image independently. Return exactly one JSON array with one value per question, in the order given. For a choice question the value is one of its option ids as a string, for a true/false question it is true or false, for a level question it is the level number. Emit no keys, confidence values, markdown or explanation.\n{\"state\": \"{\\\"context\\\": \\\"Test card from a signage checker. Describe only what is drawn in the image.\\\"}\", \"questions_in_output_order\": [{\"question\": \"What color is the circle?\", \"kind\": \"choice\", \"option_ids\": [\"red\", \"blue\", \"green\", \"yellow\", \"purple\"]}, {\"question\": \"Which shape is the largest?\", \"kind\": \"choice\", \"option_ids\": [\"circle\", \"square\", \"triangle\"]}, {\"question\": \"How many separate shapes and signs are drawn in the image?\", \"kind\": \"choice\", \"option_ids\": [\"2\", \"3\", \"4\", \"5\", \"6\"]}, {\"question\": \"What color is the background?\", \"kind\": \"choice\", \"option_ids\": [\"white\", \"light gray\", \"black\", \"blue\"]}, {\"question\": \"Which object is in the top left corner?\", \"kind\": \"choice\", \"option_ids\": [\"circle\", \"square\", \"triangle\", \"sign\"]}, {\"question\": \"What word is written on the sign?\", \"kind\": \"choice\", \"option_ids\": [\"STOP\", \"EXIT\", \"OPEN\", \"SALE\"]}, {\"question\": \"Is there a red circle in the image?\", \"kind\": \"true/false\"}, {\"question\": \"Is there a triangle in the image?\", \"kind\": \"true/false\"}, {\"question\": \"Is there a person in the image?\", \"kind\": \"true/false\"}, {\"question\": \"Is the square blue?\", \"kind\": \"true/false\"}, {\"question\": \"Is this a photograph of a real scene?\", \"kind\": \"true/false\"}, {\"question\": \"How cluttered is the image?\", \"kind\": \"level\", \"levels\": {\"0\": \"empty: nothing drawn\", \"1\": \"sparse: a few separate objects\", \"2\": \"busy: many objects\", \"3\": \"cluttered: objects overlap everywhere\"}}, {\"question\": \"How bright is the image overall?\", \"kind\": \"level\", \"levels\": {\"0\": \"very dark\", \"1\": \"dim\", \"2\": \"moderately bright\", \"3\": \"very bright\"}}, {\"question\": \"How realistic does the image look?\", \"kind\": \"level\", \"levels\": {\"0\": \"clearly synthetic: flat shapes\", \"1\": \"stylized illustration\", \"2\": \"somewhat realistic\", \"3\": \"photorealistic\"}}, {\"question\": \"How legible is the text in the image?\", \"kind\": \"level\", \"levels\": {\"0\": \"no readable text\", \"1\": \"hard to read\", \"2\": \"readable\", \"3\": \"large and very clear\"}}]}",
+      "median_output_tokens": 9,
+      "median_time_to_first_token_seconds": 0.3177571020000016,
+      "all_runs_strict_valid": false,
+      "agreement_strict": {
+        "per_question": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "matches": 0,
+        "n": 15,
+        "rate": 0.0
+      },
+      "agreement_lenient": {
+        "per_question": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "matches": 0,
+        "n": 15,
+        "rate": 0.0
+      },
+      "outputs_identical_across_runs": true
+    },
+    "per_question": {
+      "median_total_seconds": 4.489222878999996,
+      "runs": [
+        {
+          "total_seconds": 4.517136534999999,
+          "peak_cuda_bytes": 1054592000,
+          "output_tokens": 105,
+          "time_to_first_token_seconds": 0.09504834399999851,
+          "calls": [
+            {
+              "prompt_sha256": "80498a2c95640b72a09bd44eeeb6ca9266f39564002189f6e21fa81bedbb6087",
+              "input_tokens": 195,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.09504834399999851,
+              "total_seconds": 0.24116666999999836,
+              "output_text": " \"EXIT\"",
+              "timeline": [
+                {
+                  "seconds": 0.09504834399999851,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.13175472399999677,
+                  "token_id": 9324,
+                  "text": "EX"
+                },
+                {
+                  "seconds": 0.1684747850000008,
+                  "token_id": 2901,
+                  "text": "IT"
+                },
+                {
+                  "seconds": 0.20528363199999689,
+                  "token_id": 18,
+                  "text": "\""
+                },
+                {
+                  "seconds": 0.24071957799999666,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "039c9f9fa5fa7a43f99e7d5ac0e474f9e63f17f7109e46f450d8c43d7a48e0e7",
+              "input_tokens": 190,
+              "image_views": 1,
+              "output_tokens": 4,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08577049800000225,
+              "total_seconds": 0.19612351800000027,
+              "output_text": " Answer: square",
+              "timeline": [
+                {
+                  "seconds": 0.08577049800000225,
+                  "token_id": 19842,
+                  "text": " Answer"
+                },
+                {
+                  "seconds": 0.12291537000000119,
+                  "token_id": 42,
+                  "text": ":"
+                },
+                {
+                  "seconds": 0.159283791,
+                  "token_id": 5222,
+                  "text": " square"
+                },
+                {
+                  "seconds": 0.1956534170000026,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "square"
+              }
+            },
+            {
+              "prompt_sha256": "963892ea00f550263f9d82e9714b2cbfbe51d456c325009230244dfcfe00814b",
+              "input_tokens": 201,
+              "image_views": 1,
+              "output_tokens": 13,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08505295400000534,
+              "total_seconds": 0.5161196000000032,
+              "output_text": " \"For a true/false question true or false: \"",
+              "timeline": [
+                {
+                  "seconds": 0.08505295400000534,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.12139371000000665,
+                  "token_id": 2193,
+                  "text": "For"
+                },
+                {
+                  "seconds": 0.15758837200000642,
+                  "token_id": 253,
+                  "text": " a"
+                },
+                {
+                  "seconds": 0.19375103200000154,
+                  "token_id": 2629,
+                  "text": " true"
+                },
+                {
+                  "seconds": 0.22960845100000427,
+                  "token_id": 31,
+                  "text": "/"
+                },
+                {
+                  "seconds": 0.26553903600000694,
+                  "token_id": 21642,
+                  "text": "false"
+                },
+                {
+                  "seconds": 0.3013187470000034,
+                  "token_id": 1962,
+                  "text": " question"
+                },
+                {
+                  "seconds": 0.337020907000003,
+                  "token_id": 2629,
+                  "text": " true"
+                },
+                {
+                  "seconds": 0.3723333250000067,
+                  "token_id": 355,
+                  "text": " or"
+                },
+                {
+                  "seconds": 0.40849675900000193,
+                  "token_id": 7065,
+                  "text": " false"
+                },
+                {
+                  "seconds": 0.443731501000002,
+                  "token_id": 42,
+                  "text": ":"
+                },
+                {
+                  "seconds": 0.479520425000004,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.5156552030000014,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "9f11f0b2650ba75b4b5120e4b5513c353447fabffa05e91444c03175996ee7f6",
+              "input_tokens": 193,
+              "image_views": 1,
+              "output_tokens": 11,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08457134400000399,
+              "total_seconds": 0.44644244900000274,
+              "output_text": " {\n    \"answer\": \"white\"\n}",
+              "timeline": [
+                {
+                  "seconds": 0.08457134400000399,
+                  "token_id": 1662,
+                  "text": " {"
+                },
+                {
+                  "seconds": 0.12023283500000304,
+                  "token_id": 472,
+                  "text": "\n   "
+                },
+                {
+                  "seconds": 0.15702172600000353,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.19309312900000464,
+                  "token_id": 11247,
+                  "text": "answer"
+                },
+                {
+                  "seconds": 0.23011244800000696,
+                  "token_id": 1799,
+                  "text": "\":"
+                },
+                {
+                  "seconds": 0.2677583340000069,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.3047657870000009,
+                  "token_id": 11575,
+                  "text": "white"
+                },
+                {
+                  "seconds": 0.3399637730000009,
+                  "token_id": 18,
+                  "text": "\""
+                },
+                {
+                  "seconds": 0.3752122280000023,
+                  "token_id": 198,
+                  "text": "\n"
+                },
+                {
+                  "seconds": 0.4103557260000059,
+                  "token_id": 109,
+                  "text": "}"
+                },
+                {
+                  "seconds": 0.4459819180000011,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "white"
+              }
+            },
+            {
+              "prompt_sha256": "32ab8cd7eb59fee7f933466bb9fa0c40081a1195d96fc9910edd59a37ed49901",
+              "input_tokens": 196,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08513827000000163,
+              "total_seconds": 0.6087812960000036,
+              "output_text": " {\n    \"question\": {\n        \"type\": \"choice\",\n        \"option",
+              "timeline": [
+                {
+                  "seconds": 0.08513827000000163,
+                  "token_id": 1662,
+                  "text": " {"
+                },
+                {
+                  "seconds": 0.1205850890000022,
+                  "token_id": 472,
+                  "text": "\n   "
+                },
+                {
+                  "seconds": 0.155825219999997,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.1905195300000031,
+                  "token_id": 19945,
+                  "text": "question"
+                },
+                {
+                  "seconds": 0.22479868599999975,
+                  "token_id": 1799,
+                  "text": "\":"
+                },
+                {
+                  "seconds": 0.25938496300000224,
+                  "token_id": 1662,
+                  "text": " {"
+                },
+                {
+                  "seconds": 0.2941040959999981,
+                  "token_id": 448,
+                  "text": "\n       "
+                },
+                {
+                  "seconds": 0.3285992489999998,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.36333687799999836,
+                  "token_id": 2058,
+                  "text": "type"
+                },
+                {
+                  "seconds": 0.3981786550000024,
+                  "token_id": 1799,
+                  "text": "\":"
+                },
+                {
+                  "seconds": 0.43284750899999835,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.46759757299999904,
+                  "token_id": 17207,
+                  "text": "choice"
+                },
+                {
+                  "seconds": 0.5021886370000033,
+                  "token_id": 1002,
+                  "text": "\","
+                },
+                {
+                  "seconds": 0.5375034810000017,
+                  "token_id": 448,
+                  "text": "\n       "
+                },
+                {
+                  "seconds": 0.572937183999997,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.6083557350000035,
+                  "token_id": 12650,
+                  "text": "option"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "59cfe352a6ff85b0fb72b2bea4159e898d31b8fdfae4c92c943c512a10eea65f",
+              "input_tokens": 197,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08484145999999981,
+              "total_seconds": 0.23098361200000284,
+              "output_text": " \"OPEN\"",
+              "timeline": [
+                {
+                  "seconds": 0.08484145999999981,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.12140865700000347,
+                  "token_id": 7627,
+                  "text": "OP"
+                },
+                {
+                  "seconds": 0.15842674200000317,
+                  "token_id": 2680,
+                  "text": "EN"
+                },
+                {
+                  "seconds": 0.19447201900000266,
+                  "token_id": 18,
+                  "text": "\""
+                },
+                {
+                  "seconds": 0.23054859999999877,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": true,
+                "strict": "OPEN",
+                "lenient": "OPEN"
+              }
+            },
+            {
+              "prompt_sha256": "5434e1d95fad0b0e48cf7c198033b5e90a5922fbe228e53b516071f5e926d55f",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08489662500000605,
+              "total_seconds": 0.12095484300000692,
+              "output_text": " True",
+              "timeline": [
+                {
+                  "seconds": 0.08489662500000605,
+                  "token_id": 3635,
+                  "text": " True"
+                },
+                {
+                  "seconds": 0.12057212800000627,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "5f8e09af9289c319be1bad68458f636a3d40a6720bc9758e7c9bfc2bc1928fec",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08510710600000237,
+              "total_seconds": 0.12085732400000637,
+              "output_text": " True",
+              "timeline": [
+                {
+                  "seconds": 0.08510710600000237,
+                  "token_id": 3635,
+                  "text": " True"
+                },
+                {
+                  "seconds": 0.12052373800000282,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "bffd30f8d7b95f03d1a203944cad8ff005afab93fa2efe7866bd4280c068cb79",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08439167499999911,
+              "total_seconds": 0.12043601199999898,
+              "output_text": " True",
+              "timeline": [
+                {
+                  "seconds": 0.08439167499999911,
+                  "token_id": 3635,
+                  "text": " True"
+                },
+                {
+                  "seconds": 0.12007662599999946,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "0d0302a1c358ff6cbc3fe85a7f3eb6ec8b532d0be704866fa636f4fa669ecd42",
+              "input_tokens": 176,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08413349300000306,
+              "total_seconds": 0.11997948700000194,
+              "output_text": " True",
+              "timeline": [
+                {
+                  "seconds": 0.08413349300000306,
+                  "token_id": 3635,
+                  "text": " True"
+                },
+                {
+                  "seconds": 0.11964529100000476,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "3ff5ee9dc7d66b26a1e24e3b0f033dcd6b919333dbf2ec2152415d999e68a335",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08473644499999722,
+              "total_seconds": 0.12042572499999693,
+              "output_text": " True",
+              "timeline": [
+                {
+                  "seconds": 0.08473644499999722,
+                  "token_id": 3635,
+                  "text": " True"
+                },
+                {
+                  "seconds": 0.12006791499999991,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "013708aa4e577a0d20121e0deb86da0e2e81cb4ce88e712b698cf9223bdf1a71",
+              "input_tokens": 222,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08621935400000069,
+              "total_seconds": 0.4108734149999975,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "timeline": [
+                {
+                  "seconds": 0.08621935400000069,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.1224290890000006,
+                  "token_id": 53,
+                  "text": "E"
+                },
+                {
+                  "seconds": 0.1583269089999959,
+                  "token_id": 1713,
+                  "text": "mit"
+                },
+                {
+                  "seconds": 0.1943837199999976,
+                  "token_id": 787,
+                  "text": " no"
+                },
+                {
+                  "seconds": 0.23074045500000295,
+                  "token_id": 1489,
+                  "text": " mark"
+                },
+                {
+                  "seconds": 0.2673552689999994,
+                  "token_id": 4488,
+                  "text": "down"
+                },
+                {
+                  "seconds": 0.30347748599999846,
+                  "token_id": 355,
+                  "text": " or"
+                },
+                {
+                  "seconds": 0.33893114800000035,
+                  "token_id": 7718,
+                  "text": " explanation"
+                },
+                {
+                  "seconds": 0.3746976210000028,
+                  "token_id": 2227,
+                  "text": "\"."
+                },
+                {
+                  "seconds": 0.4105058459999995,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "a1d041f2d324cd6c3f25217d4ddc377a7bf8fa1225f5f289366bf1b2bb3dc72b",
+              "input_tokens": 208,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08610132599999787,
+              "total_seconds": 0.23425371500000125,
+              "output_text": " \"Very dark\"",
+              "timeline": [
+                {
+                  "seconds": 0.08610132599999787,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.12308333400000038,
+                  "token_id": 26111,
+                  "text": "Very"
+                },
+                {
+                  "seconds": 0.1598459719999994,
+                  "token_id": 3605,
+                  "text": " dark"
+                },
+                {
+                  "seconds": 0.19736275800000413,
+                  "token_id": 18,
+                  "text": "\""
+                },
+                {
+                  "seconds": 0.2338511200000042,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "95b99f077fdb0c90f7f43e848273e87357c9cacb7ac483d852ed5dafc85e9c3d",
+              "input_tokens": 216,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08545647500000086,
+              "total_seconds": 0.4010520570000011,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "timeline": [
+                {
+                  "seconds": 0.08545647500000086,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.12011679200000458,
+                  "token_id": 53,
+                  "text": "E"
+                },
+                {
+                  "seconds": 0.1548502400000018,
+                  "token_id": 1713,
+                  "text": "mit"
+                },
+                {
+                  "seconds": 0.18982306899999912,
+                  "token_id": 787,
+                  "text": " no"
+                },
+                {
+                  "seconds": 0.22463209900000436,
+                  "token_id": 1489,
+                  "text": " mark"
+                },
+                {
+                  "seconds": 0.25950281000000075,
+                  "token_id": 4488,
+                  "text": "down"
+                },
+                {
+                  "seconds": 0.2945022669999986,
+                  "token_id": 355,
+                  "text": " or"
+                },
+                {
+                  "seconds": 0.3296449569999993,
+                  "token_id": 7718,
+                  "text": " explanation"
+                },
+                {
+                  "seconds": 0.3652119549999995,
+                  "token_id": 2227,
+                  "text": "\"."
+                },
+                {
+                  "seconds": 0.4005840869999986,
+                  "token_id": 49279,
+                  "text": "<end_of_utterance>"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "cd7b30d47b4902cbde2c2b72169f623ed732503c999c1854cbe2d55b987c0d57",
+              "input_tokens": 214,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.0847451780000057,
+              "total_seconds": 0.6222092460000042,
+              "output_text": " \"The text in the image is legible. The text is written in a",
+              "timeline": [
+                {
+                  "seconds": 0.0847451780000057,
+                  "token_id": 476,
+                  "text": " \""
+                },
+                {
+                  "seconds": 0.1199066520000045,
+                  "token_id": 504,
+                  "text": "The"
+                },
+                {
+                  "seconds": 0.15473062800000292,
+                  "token_id": 1694,
+                  "text": " text"
+                },
+                {
+                  "seconds": 0.18938330000000292,
+                  "token_id": 281,
+                  "text": " in"
+                },
+                {
+                  "seconds": 0.22389679100000137,
+                  "token_id": 260,
+                  "text": " the"
+                },
+                {
+                  "seconds": 0.2587839430000045,
+                  "token_id": 2443,
+                  "text": " image"
+                },
+                {
+                  "seconds": 0.2938927010000043,
+                  "token_id": 314,
+                  "text": " is"
+                },
+                {
+                  "seconds": 0.32966048600000164,
+                  "token_id": 1475,
+                  "text": " leg"
+                },
+                {
+                  "seconds": 0.36546405700000406,
+                  "token_id": 812,
+                  "text": "ible"
+                },
+                {
+                  "seconds": 0.4009920260000044,
+                  "token_id": 30,
+                  "text": "."
+                },
+                {
+                  "seconds": 0.4365238360000063,
+                  "token_id": 378,
+                  "text": " The"
+                },
+                {
+                  "seconds": 0.4722369240000006,
+                  "token_id": 1694,
+                  "text": " text"
+                },
+                {
+                  "seconds": 0.5078255200000044,
+                  "token_id": 314,
+                  "text": " is"
+                },
+                {
+                  "seconds": 0.5433168580000043,
+                  "token_id": 2855,
+                  "text": " written"
+                },
+                {
+                  "seconds": 0.5863794320000011,
+                  "token_id": 281,
+                  "text": " in"
+                },
+                {
+                  "seconds": 0.6218557130000022,
+                  "token_id": 253,
+                  "text": " a"
+                }
+              ],
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            }
+          ]
+        },
+        {
+          "total_seconds": 4.489222878999996,
+          "peak_cuda_bytes": 1054592000,
+          "output_tokens": 105,
+          "time_to_first_token_seconds": 0.09155011899999721,
+          "calls": [
+            {
+              "prompt_sha256": "80498a2c95640b72a09bd44eeeb6ca9266f39564002189f6e21fa81bedbb6087",
+              "input_tokens": 195,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.09155011899999721,
+              "total_seconds": 0.23485346399999685,
+              "output_text": " \"EXIT\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "039c9f9fa5fa7a43f99e7d5ac0e474f9e63f17f7109e46f450d8c43d7a48e0e7",
+              "input_tokens": 190,
+              "image_views": 1,
+              "output_tokens": 4,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.0852276649999979,
+              "total_seconds": 0.19072437100000172,
+              "output_text": " Answer: square",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "square"
+              }
+            },
+            {
+              "prompt_sha256": "963892ea00f550263f9d82e9714b2cbfbe51d456c325009230244dfcfe00814b",
+              "input_tokens": 201,
+              "image_views": 1,
+              "output_tokens": 13,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08607711500000192,
+              "total_seconds": 0.5125575389999995,
+              "output_text": " \"For a true/false question true or false: \"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "9f11f0b2650ba75b4b5120e4b5513c353447fabffa05e91444c03175996ee7f6",
+              "input_tokens": 193,
+              "image_views": 1,
+              "output_tokens": 11,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08496303299999397,
+              "total_seconds": 0.43813549099999705,
+              "output_text": " {\n    \"answer\": \"white\"\n}",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "white"
+              }
+            },
+            {
+              "prompt_sha256": "32ab8cd7eb59fee7f933466bb9fa0c40081a1195d96fc9910edd59a37ed49901",
+              "input_tokens": 196,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08505875300001264,
+              "total_seconds": 0.6133659850000015,
+              "output_text": " {\n    \"question\": {\n        \"type\": \"choice\",\n        \"option",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "59cfe352a6ff85b0fb72b2bea4159e898d31b8fdfae4c92c943c512a10eea65f",
+              "input_tokens": 197,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08853279100000577,
+              "total_seconds": 0.2314130449999965,
+              "output_text": " \"OPEN\"",
+              "parsed": {
+                "strict_valid": true,
+                "strict": "OPEN",
+                "lenient": "OPEN"
+              }
+            },
+            {
+              "prompt_sha256": "5434e1d95fad0b0e48cf7c198033b5e90a5922fbe228e53b516071f5e926d55f",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08425664199999972,
+              "total_seconds": 0.1197264099999984,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "5f8e09af9289c319be1bad68458f636a3d40a6720bc9758e7c9bfc2bc1928fec",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08461461699999973,
+              "total_seconds": 0.12100888599999848,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "bffd30f8d7b95f03d1a203944cad8ff005afab93fa2efe7866bd4280c068cb79",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08531739300001107,
+              "total_seconds": 0.12163082100001077,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "0d0302a1c358ff6cbc3fe85a7f3eb6ec8b532d0be704866fa636f4fa669ecd42",
+              "input_tokens": 176,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08481443099999808,
+              "total_seconds": 0.12061687700000334,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "3ff5ee9dc7d66b26a1e24e3b0f033dcd6b919333dbf2ec2152415d999e68a335",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08444927399999358,
+              "total_seconds": 0.11958038899999224,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "013708aa4e577a0d20121e0deb86da0e2e81cb4ce88e712b698cf9223bdf1a71",
+              "input_tokens": 222,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08426738100000364,
+              "total_seconds": 0.4008856410000021,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "a1d041f2d324cd6c3f25217d4ddc377a7bf8fa1225f5f289366bf1b2bb3dc72b",
+              "input_tokens": 208,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08398057799999492,
+              "total_seconds": 0.2262004800000028,
+              "output_text": " \"Very dark\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "95b99f077fdb0c90f7f43e848273e87357c9cacb7ac483d852ed5dafc85e9c3d",
+              "input_tokens": 216,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.0874405830000029,
+              "total_seconds": 0.4081043959999988,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "cd7b30d47b4902cbde2c2b72169f623ed732503c999c1854cbe2d55b987c0d57",
+              "input_tokens": 214,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08577155300000072,
+              "total_seconds": 0.624167111999995,
+              "output_text": " \"The text in the image is legible. The text is written in a",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            }
+          ]
+        },
+        {
+          "total_seconds": 4.531035584999998,
+          "peak_cuda_bytes": 1054592000,
+          "output_tokens": 105,
+          "time_to_first_token_seconds": 0.09596744000000967,
+          "calls": [
+            {
+              "prompt_sha256": "80498a2c95640b72a09bd44eeeb6ca9266f39564002189f6e21fa81bedbb6087",
+              "input_tokens": 195,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.09596744000000967,
+              "total_seconds": 0.24192405700000563,
+              "output_text": " \"EXIT\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "039c9f9fa5fa7a43f99e7d5ac0e474f9e63f17f7109e46f450d8c43d7a48e0e7",
+              "input_tokens": 190,
+              "image_views": 1,
+              "output_tokens": 4,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08790344899999525,
+              "total_seconds": 0.19686068999999407,
+              "output_text": " Answer: square",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "square"
+              }
+            },
+            {
+              "prompt_sha256": "963892ea00f550263f9d82e9714b2cbfbe51d456c325009230244dfcfe00814b",
+              "input_tokens": 201,
+              "image_views": 1,
+              "output_tokens": 13,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08843390900000259,
+              "total_seconds": 0.5279858239999982,
+              "output_text": " \"For a true/false question true or false: \"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "9f11f0b2650ba75b4b5120e4b5513c353447fabffa05e91444c03175996ee7f6",
+              "input_tokens": 193,
+              "image_views": 1,
+              "output_tokens": 11,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.09493066800000349,
+              "total_seconds": 0.4585725640000078,
+              "output_text": " {\n    \"answer\": \"white\"\n}",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "white"
+              }
+            },
+            {
+              "prompt_sha256": "32ab8cd7eb59fee7f933466bb9fa0c40081a1195d96fc9910edd59a37ed49901",
+              "input_tokens": 196,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08932171800000788,
+              "total_seconds": 0.6426875060000015,
+              "output_text": " {\n    \"question\": {\n        \"type\": \"choice\",\n        \"option",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "59cfe352a6ff85b0fb72b2bea4159e898d31b8fdfae4c92c943c512a10eea65f",
+              "input_tokens": 197,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.09231262000000129,
+              "total_seconds": 0.23020488599999567,
+              "output_text": " \"OPEN\"",
+              "parsed": {
+                "strict_valid": true,
+                "strict": "OPEN",
+                "lenient": "OPEN"
+              }
+            },
+            {
+              "prompt_sha256": "5434e1d95fad0b0e48cf7c198033b5e90a5922fbe228e53b516071f5e926d55f",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08411487699999043,
+              "total_seconds": 0.1196706069999891,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "5f8e09af9289c319be1bad68458f636a3d40a6720bc9758e7c9bfc2bc1928fec",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08629263400000298,
+              "total_seconds": 0.12108188599999892,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "bffd30f8d7b95f03d1a203944cad8ff005afab93fa2efe7866bd4280c068cb79",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08238408500000105,
+              "total_seconds": 0.11659555500000351,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "0d0302a1c358ff6cbc3fe85a7f3eb6ec8b532d0be704866fa636f4fa669ecd42",
+              "input_tokens": 176,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08263732399998958,
+              "total_seconds": 0.11692034399999329,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "3ff5ee9dc7d66b26a1e24e3b0f033dcd6b919333dbf2ec2152415d999e68a335",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08344451700000377,
+              "total_seconds": 0.11834860599999786,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "013708aa4e577a0d20121e0deb86da0e2e81cb4ce88e712b698cf9223bdf1a71",
+              "input_tokens": 222,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.0835764020000056,
+              "total_seconds": 0.4005960280000096,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "a1d041f2d324cd6c3f25217d4ddc377a7bf8fa1225f5f289366bf1b2bb3dc72b",
+              "input_tokens": 208,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08467935800000248,
+              "total_seconds": 0.224149060000002,
+              "output_text": " \"Very dark\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "95b99f077fdb0c90f7f43e848273e87357c9cacb7ac483d852ed5dafc85e9c3d",
+              "input_tokens": 216,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08329253200000153,
+              "total_seconds": 0.40012093400000026,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "cd7b30d47b4902cbde2c2b72169f623ed732503c999c1854cbe2d55b987c0d57",
+              "input_tokens": 214,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08422955799998988,
+              "total_seconds": 0.6079889879999882,
+              "output_text": " \"The text in the image is legible. The text is written in a",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            }
+          ]
+        },
+        {
+          "total_seconds": 4.485276718000009,
+          "peak_cuda_bytes": 1054592000,
+          "output_tokens": 105,
+          "time_to_first_token_seconds": 0.0905545090000004,
+          "calls": [
+            {
+              "prompt_sha256": "80498a2c95640b72a09bd44eeeb6ca9266f39564002189f6e21fa81bedbb6087",
+              "input_tokens": 195,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.0905545090000004,
+              "total_seconds": 0.23474144600000102,
+              "output_text": " \"EXIT\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "039c9f9fa5fa7a43f99e7d5ac0e474f9e63f17f7109e46f450d8c43d7a48e0e7",
+              "input_tokens": 190,
+              "image_views": 1,
+              "output_tokens": 4,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08682769199999996,
+              "total_seconds": 0.19431662899999935,
+              "output_text": " Answer: square",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "square"
+              }
+            },
+            {
+              "prompt_sha256": "963892ea00f550263f9d82e9714b2cbfbe51d456c325009230244dfcfe00814b",
+              "input_tokens": 201,
+              "image_views": 1,
+              "output_tokens": 13,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.0862728199999907,
+              "total_seconds": 0.5121218150000004,
+              "output_text": " \"For a true/false question true or false: \"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "9f11f0b2650ba75b4b5120e4b5513c353447fabffa05e91444c03175996ee7f6",
+              "input_tokens": 193,
+              "image_views": 1,
+              "output_tokens": 11,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08414151399999525,
+              "total_seconds": 0.43502372800000444,
+              "output_text": " {\n    \"answer\": \"white\"\n}",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "white"
+              }
+            },
+            {
+              "prompt_sha256": "32ab8cd7eb59fee7f933466bb9fa0c40081a1195d96fc9910edd59a37ed49901",
+              "input_tokens": 196,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08651917199999559,
+              "total_seconds": 0.6069625849999909,
+              "output_text": " {\n    \"question\": {\n        \"type\": \"choice\",\n        \"option",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "59cfe352a6ff85b0fb72b2bea4159e898d31b8fdfae4c92c943c512a10eea65f",
+              "input_tokens": 197,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08468068700000231,
+              "total_seconds": 0.22629884399999867,
+              "output_text": " \"OPEN\"",
+              "parsed": {
+                "strict_valid": true,
+                "strict": "OPEN",
+                "lenient": "OPEN"
+              }
+            },
+            {
+              "prompt_sha256": "5434e1d95fad0b0e48cf7c198033b5e90a5922fbe228e53b516071f5e926d55f",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08456665500000327,
+              "total_seconds": 0.12005442699999946,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "5f8e09af9289c319be1bad68458f636a3d40a6720bc9758e7c9bfc2bc1928fec",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08426138999999466,
+              "total_seconds": 0.12278025300000195,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "bffd30f8d7b95f03d1a203944cad8ff005afab93fa2efe7866bd4280c068cb79",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08564540199999726,
+              "total_seconds": 0.1219548159999988,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "0d0302a1c358ff6cbc3fe85a7f3eb6ec8b532d0be704866fa636f4fa669ecd42",
+              "input_tokens": 176,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08597476100000279,
+              "total_seconds": 0.12176957200000516,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "3ff5ee9dc7d66b26a1e24e3b0f033dcd6b919333dbf2ec2152415d999e68a335",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08836188800000855,
+              "total_seconds": 0.124631394000005,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "013708aa4e577a0d20121e0deb86da0e2e81cb4ce88e712b698cf9223bdf1a71",
+              "input_tokens": 222,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08726399600000434,
+              "total_seconds": 0.4066100710000029,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "a1d041f2d324cd6c3f25217d4ddc377a7bf8fa1225f5f289366bf1b2bb3dc72b",
+              "input_tokens": 208,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08634057599999778,
+              "total_seconds": 0.2255901879999982,
+              "output_text": " \"Very dark\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "95b99f077fdb0c90f7f43e848273e87357c9cacb7ac483d852ed5dafc85e9c3d",
+              "input_tokens": 216,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08859943500000611,
+              "total_seconds": 0.41300727499999823,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "cd7b30d47b4902cbde2c2b72169f623ed732503c999c1854cbe2d55b987c0d57",
+              "input_tokens": 214,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08485025999999607,
+              "total_seconds": 0.6129304229999946,
+              "output_text": " \"The text in the image is legible. The text is written in a",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            }
+          ]
+        },
+        {
+          "total_seconds": 4.463277703000003,
+          "peak_cuda_bytes": 1054592000,
+          "output_tokens": 105,
+          "time_to_first_token_seconds": 0.09435129900001016,
+          "calls": [
+            {
+              "prompt_sha256": "80498a2c95640b72a09bd44eeeb6ca9266f39564002189f6e21fa81bedbb6087",
+              "input_tokens": 195,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.09435129900001016,
+              "total_seconds": 0.23324040900000398,
+              "output_text": " \"EXIT\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "039c9f9fa5fa7a43f99e7d5ac0e474f9e63f17f7109e46f450d8c43d7a48e0e7",
+              "input_tokens": 190,
+              "image_views": 1,
+              "output_tokens": 4,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08430341200001124,
+              "total_seconds": 0.1876496850000109,
+              "output_text": " Answer: square",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "square"
+              }
+            },
+            {
+              "prompt_sha256": "963892ea00f550263f9d82e9714b2cbfbe51d456c325009230244dfcfe00814b",
+              "input_tokens": 201,
+              "image_views": 1,
+              "output_tokens": 13,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08456248299999913,
+              "total_seconds": 0.5023817470000012,
+              "output_text": " \"For a true/false question true or false: \"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "9f11f0b2650ba75b4b5120e4b5513c353447fabffa05e91444c03175996ee7f6",
+              "input_tokens": 193,
+              "image_views": 1,
+              "output_tokens": 11,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08380263200000115,
+              "total_seconds": 0.42821267300000443,
+              "output_text": " {\n    \"answer\": \"white\"\n}",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": "white"
+              }
+            },
+            {
+              "prompt_sha256": "32ab8cd7eb59fee7f933466bb9fa0c40081a1195d96fc9910edd59a37ed49901",
+              "input_tokens": 196,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08457800700000462,
+              "total_seconds": 0.601623779999997,
+              "output_text": " {\n    \"question\": {\n        \"type\": \"choice\",\n        \"option",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "59cfe352a6ff85b0fb72b2bea4159e898d31b8fdfae4c92c943c512a10eea65f",
+              "input_tokens": 197,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.0847781920000017,
+              "total_seconds": 0.223105958000005,
+              "output_text": " \"OPEN\"",
+              "parsed": {
+                "strict_valid": true,
+                "strict": "OPEN",
+                "lenient": "OPEN"
+              }
+            },
+            {
+              "prompt_sha256": "5434e1d95fad0b0e48cf7c198033b5e90a5922fbe228e53b516071f5e926d55f",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08380603599999858,
+              "total_seconds": 0.1186969299999987,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "5f8e09af9289c319be1bad68458f636a3d40a6720bc9758e7c9bfc2bc1928fec",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08817244899999821,
+              "total_seconds": 0.12403871599998695,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "bffd30f8d7b95f03d1a203944cad8ff005afab93fa2efe7866bd4280c068cb79",
+              "input_tokens": 179,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08497940800000947,
+              "total_seconds": 0.12071819300000186,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "0d0302a1c358ff6cbc3fe85a7f3eb6ec8b532d0be704866fa636f4fa669ecd42",
+              "input_tokens": 176,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08574132500000076,
+              "total_seconds": 0.12203077399999529,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "3ff5ee9dc7d66b26a1e24e3b0f033dcd6b919333dbf2ec2152415d999e68a335",
+              "input_tokens": 180,
+              "image_views": 1,
+              "output_tokens": 2,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.09148491000000547,
+              "total_seconds": 0.12696809799999187,
+              "output_text": " True",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": true
+              }
+            },
+            {
+              "prompt_sha256": "013708aa4e577a0d20121e0deb86da0e2e81cb4ce88e712b698cf9223bdf1a71",
+              "input_tokens": 222,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08673024999998802,
+              "total_seconds": 0.398817190999992,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "a1d041f2d324cd6c3f25217d4ddc377a7bf8fa1225f5f289366bf1b2bb3dc72b",
+              "input_tokens": 208,
+              "image_views": 1,
+              "output_tokens": 5,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08522773400000005,
+              "total_seconds": 0.23354663499999617,
+              "output_text": " \"Very dark\"",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "95b99f077fdb0c90f7f43e848273e87357c9cacb7ac483d852ed5dafc85e9c3d",
+              "input_tokens": 216,
+              "image_views": 1,
+              "output_tokens": 10,
+              "hit_token_budget": false,
+              "time_to_first_token_seconds": 0.08928060400000959,
+              "total_seconds": 0.4159406800000056,
+              "output_text": " \"Emit no markdown or explanation\".",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            },
+            {
+              "prompt_sha256": "cd7b30d47b4902cbde2c2b72169f623ed732503c999c1854cbe2d55b987c0d57",
+              "input_tokens": 214,
+              "image_views": 1,
+              "output_tokens": 16,
+              "hit_token_budget": true,
+              "time_to_first_token_seconds": 0.08588700500000357,
+              "total_seconds": 0.6201036060000007,
+              "output_text": " \"The text in the image is legible. The text is written in a",
+              "parsed": {
+                "strict_valid": false,
+                "strict": null,
+                "lenient": null
+              }
+            }
+          ]
+        }
+      ],
+      "median_output_tokens": 105,
+      "all_strict_valid": false,
+      "strict_valid_count": 1,
+      "agreement_lenient": {
+        "per_question": [
+          false,
+          false,
+          false,
+          false,
+          false,
+          false,
+          true,
+          true,
+          false,
+          true,
+          false,
+          false,
+          false,
+          false,
+          false
+        ],
+        "matches": 3,
+        "n": 15,
+        "rate": 0.2
+      },
+      "outputs_identical_across_runs": true
+    }
+  },
+  "median_wall_ratio_vs_typed_default_batch": {
+    "typed_default_batch": 1.0,
+    "typed_one_batch": 0.6774437841532293,
+    "compact_array": 22.27746507101423,
+    "compact_array_shipped": 4.249057295426961,
+    "per_question": 31.099148028869912
+  }
+}
