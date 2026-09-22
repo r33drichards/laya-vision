@@ -20,14 +20,15 @@ tags:
 - rubric-scoring
 ---
 
-# Laya Vision (SmolVLM-256M, Cauldron + rubric scoring)
+# Laya Vision
 
-This model makes calibrated, typed decisions about an **image plus optional text**. It answers `choice`, `score` (a graded level on a rubric you write) and `noul` (yes/no probability) questions in one forward pass, with no text generation.
+Typed, calibrated decisions about an **image plus optional text**, in one forward pass with no text generation. Give it a picture, some context and a set of questions; it answers each as a multiple choice (`choice`), a yes/no probability (`noul`) or a graded level on a rubric you write (`score`), with probabilities you can act on at face value.
 
-It is the second SmolVLM checkpoint of [Laya Vision](https://github.com/r33drichards/laya-vision), an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces Laya's ModernBERT encoder with [SmolVLM-256M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct). Compared with [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m) it is trained on 19 closed-form subsets of The Cauldron instead of three VQA sets, its answer options attend to each other (see Training), and **its `score` head is trained**, on four rubric-scored image datasets. Laya's `predict(state, questions)` API, proper-scoring-rule training and temperature calibration are unchanged.
+This is the recommended Laya Vision checkpoint, pinned to the run `cauldron-score-2ep-bidir-full` (the moving copy is [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision)): a SmolVLM-256M backbone whose answer options attend to each other, trained on 19 closed-form subsets of The Cauldron and on four rubric-scored image datasets, so that the `score` head is trained for the first time. Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces its ModernBERT text encoder with a small vision-language model and keeps Laya's `predict(state, questions)` API, RLCD training objective and temperature calibration.
 
-- **Code:** [github.com/r33drichards/laya-vision](https://github.com/r33drichards/laya-vision); the data is described in `docs/score-data.md` and the runs in `docs/score-results.md`.
-- **Status:** experimental. This is an independent research fork, not affiliated with Convai Innovations, the authors of Laya.
+- **Code and the other checkpoints:** [github.com/r33drichards/laya-vision](https://github.com/r33drichards/laya-vision). The data is described in `docs/score-data.md` and the runs in `docs/score-results.md`.
+- **Demo:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU.
+- **Status:** experimental research project, not affiliated with Convai Innovations, the authors of Laya.
 
 ## Usage
 
