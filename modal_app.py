@@ -548,7 +548,7 @@ def finetune_long(
 
 @app.function(
     image=image,
-    gpu="A10G",
+    gpu=["A10G", "L4", "A100"],  # any of these: an eval should not queue on one GPU type's capacity
     cpu=16,
     memory=32768,
     timeout=30 * 60,
