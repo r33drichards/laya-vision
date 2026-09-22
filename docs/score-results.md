@@ -55,9 +55,22 @@ _pending: results_
 
 ## Qualitative check
 
-`try_model` with four `score` questions on unseen val images (two CrisisMMD dev photos, two AVA val photos):
+`try_model` on unseen val images: a CrisisMMD dev photo labelled severe damage (California wildfires), one labelled little or no damage (Hurricane Irma), and two AVA val photos with mean votes 7.0 and 3.5. The answer is the expected level; `conf` is the agent's confidence (1 minus normalised entropy). "Urgency" is a rubric neither model was trained on.
 
-_pending_
+| Question (levels) | Image | SmolVLM | ModernVBERT |
+|---|---|---|---|
+| damage (0 none, 1 mild, 2 severe) | wildfire, severe | **1.89** (conf 0.67) | **1.93** (conf 0.80) |
+| | hurricane, no damage | 1.36 (0.16) | **0.97** (0.41) |
+| | AVA 7.0 photo | 0.34 | 0.52 |
+| | AVA 3.5 photo | 0.43 | 0.65 |
+| aesthetics (0 very poor .. 4 excellent) | AVA 7.0 photo | **2.48** | **2.77** |
+| | AVA 3.5 photo | 1.93 | 1.97 |
+| | wildfire | 1.81 | 1.94 |
+| urgency for emergency services (0 .. 4), untrained rubric | wildfire | 2.64 | **3.36** |
+| | hurricane, no damage | 2.66 | 1.88 |
+| | AVA photos | 1.68 / 1.93 | 1.12 / 1.29 |
+
+Both models order the pairs the right way on the trained rubrics: severe over no damage, the 7.0 photo over the 3.5 photo, and near-zero damage on the ordinary photos. The AVA gap is small (about half a level), consistent with the soft targets and the val majority sitting at "average". On the untrained urgency rubric ModernVBERT transfers the damage signal (3.4 for the wildfire vs 1.9 for the calm photo, 1.1 to 1.3 for the AVA photos) while SmolVLM gives the two disaster photos the same 2.6 and only separates them from the ordinary photos. Confidences on 5-level questions are low (0.05 to 0.33) because a spread over adjacent levels is what the ranked probability score rewards; the expected level is the number to use.
 
 ## Next
 
