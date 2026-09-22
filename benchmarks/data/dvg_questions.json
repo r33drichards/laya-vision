@@ -1,0 +1,32 @@
+{
+  "state": {"context": "Test card from a signage checker. Describe only what is drawn in the image."},
+  "questions": {
+    "circle_color": {"type": "choice", "instructions": "What color is the circle?",
+                     "criteria": ["red", "blue", "green", "yellow", "purple"]},
+    "largest_shape": {"type": "choice", "instructions": "Which shape is the largest?",
+                      "criteria": ["circle", "square", "triangle"]},
+    "shape_count": {"type": "choice", "instructions": "How many separate shapes and signs are drawn in the image?",
+                    "criteria": ["2", "3", "4", "5", "6"]},
+    "background": {"type": "choice", "instructions": "What color is the background?",
+                   "criteria": ["white", "light gray", "black", "blue"]},
+    "top_left": {"type": "choice", "instructions": "Which object is in the top left corner?",
+                 "criteria": ["circle", "square", "triangle", "sign"]},
+    "sign_word": {"type": "choice", "instructions": "What word is written on the sign?",
+                  "criteria": ["STOP", "EXIT", "OPEN", "SALE"]},
+    "red_circle": {"type": "noul", "instructions": "Is there a red circle in the image?"},
+    "triangle": {"type": "noul", "instructions": "Is there a triangle in the image?"},
+    "person": {"type": "noul", "instructions": "Is there a person in the image?"},
+    "square_blue": {"type": "noul", "instructions": "Is the square blue?"},
+    "photograph": {"type": "noul", "instructions": "Is this a photograph of a real scene?"},
+    "clutter": {"type": "score", "instructions": "How cluttered is the image?",
+                "criteria": ["empty: nothing drawn", "sparse: a few separate objects", "busy: many objects",
+                             "cluttered: objects overlap everywhere"]},
+    "brightness": {"type": "score", "instructions": "How bright is the image overall?",
+                   "criteria": ["very dark", "dim", "moderately bright", "very bright"]},
+    "realism": {"type": "score", "instructions": "How realistic does the image look?",
+                "criteria": ["clearly synthetic: flat shapes", "stylized illustration", "somewhat realistic",
+                             "photorealistic"]},
+    "legibility": {"type": "score", "instructions": "How legible is the text in the image?",
+                   "criteria": ["no readable text", "hard to read", "readable", "large and very clear"]}
+  }
+}
