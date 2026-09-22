@@ -21,15 +21,22 @@ Val splits are the upstream validation or dev splits (AVA, RichHF, CrisisMMD) or
 | score_crisismmd (damage) | 3 | 62.8% | 70.5% | 0.154 → 0.067 | 70.5% | 0.185 → 0.097 |
 | score_ava (photo aesthetics, soft vote targets) | 5 | 84.8% | 67.6% | 0.146 → 0.256 | 59.0% | 0.040 → 0.150 |
 
-Ordinal metrics (`mae`: absolute difference between the model's and the target's expected level; `xent`: cross-entropy against the soft target), from `evaluate --datasets score` on the saved `best/` checkpoints:
+Ordinal metrics from `evaluate --datasets score` on the saved `best/` checkpoints, raw logits (temperature 1). `mae` is the absolute difference between the model's expected level and the target's, in levels; `xent` is the cross-entropy against the (soft) target. "Prior" is a model that always predicts the val split's mean level distribution, the floor any image-reading head must beat; for AVA the target's own entropy (1.098) is the lowest `xent` possible.
 
-_pending_
+| Set | Prior mae | SmolVLM mae | ModernVBERT mae | Prior xent | SmolVLM xent | ModernVBERT xent |
+|---|---|---|---|---|---|---|
+| score_vlfeedback | 1.369 | **0.920** | **0.896** | 1.560 | **1.281** | **1.256** |
+| score_richhf | 0.663 | **0.508** | **0.504** | 1.168 | **0.973** | **0.958** |
+| score_crisismmd | 0.636 | **0.357** | **0.346** | 0.904 | 0.881 | 0.911 |
+| score_ava | 0.293 | 0.366 | 0.463 | 1.233 | 1.364 | 1.492 |
+
+VLFeedback, RichHF and CrisisMMD beat the prior clearly on expected level: a third of a level off on 5-level VLFeedback relative to guessing the prior, and the damage level is within 0.35 of the truth on average. **AVA does not beat the prior on either metric.** The cause is in the data prep, not the head: `balance_levels` capped the "average" level in the *train* split at 3x the median level count (17,620 → 2,109 rows), while the val split keeps AVA's natural distribution (52% "average"), so the head learned a flatter, more extreme-leaning histogram than the voters actually produce. For a soft-target set the balance should be off (`--balance 0` for AVA in `prepare_score`), or applied to val too. AVA's temperature-scaled `xent` (1.30 / 1.37) is closer to the prior for the same reason: flattening the over-spread prediction helps it.
 
 Reading it:
 
 - **The head learns rubrics.** Both backbones reach 50% over 5 levels on VLFeedback (majority 27.5%) and 57% on RichHF (majority 44%) after seeing VLFeedback only 0.2 times and RichHF once. VLFeedback was still climbing at every eval (42% → 50%). The two backbones are within a point of each other on every score set, unlike the Cauldron holdouts, so the rubric data is not where the backbones differ.
 - **Raw calibration on the rubric sets is already good** (ECE 0.04 to 0.07) and the fitted `score` temperature of about 1.7 makes it *worse* on VLFeedback, RichHF and AVA while fixing CrisisMMD. One temperature per question type is fit on the pooled calibration holdout of all four sets; the head's confidence differs by set (and by level count), so a per-option-count temperature (`temperature_by_options` in the agent config) or a per-dataset one is the fix.
-- **AVA argmax accuracy is below the majority baseline by design.** The target is the vote histogram collapsed to 5 levels, so the head is trained to spread probability the way voters did; argmax accuracy and NLL against the argmax label then look bad. `mae` and `xent` are the right numbers for it (above).
+- **AVA is the one set that did not work**, and the ordinal table above says why: the train-only level balancing changed the target distribution. Argmax accuracy is also the wrong measure for a vote-histogram target; `mae` and `xent` are the ones to watch once the prep is fixed.
 - **Temperatures (choice, score, noul):** SmolVLM 2.09 / 1.69 / 1.75; ModernVBERT 2.58 / 1.65 / 2.32. Both are more overconfident than the released SmolVLM checkpoint (about 1.3), as in the earlier Cauldron runs, and the truncated schedule kept the learning rate high through the end.
 
 ## Did the extra data cost the other questions?
@@ -76,5 +83,6 @@ Both models order the pairs the right way on the trained rubrics: severe over no
 
 - Rerun with `--max-minutes 240` (or continue from `best/` with `--init-from`) so the schedule completes; every score set was still improving.
 - Weight VLFeedback up (`--mix score_vlfeedback=3`): it is the largest and most rubric-like set and got 0.2 passes.
+- Re-prepare AVA without train-only balancing (`prepare_score --names ava --balance 0`); the soft targets carry the level distribution already.
 - Per-option-count or per-dataset temperatures for `score`.
 - Report `mae` / `xent` in the training-time evals too (they are in `metrics_from` now, so the next run's `metrics.json` will carry them).
