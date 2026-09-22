@@ -9,8 +9,8 @@ Checks, in order:
    under ``results/raw/`` except ``SHA256SUMS`` and ``README.md`` is listed.
 2. For each claim in ``results/claims.json``, the evidence rows (``*.predictions.jsonl[.gz]``, written by
    ``modal run modal_app.py::evidence``) are self-consistent: ``probs_calibrated`` is ``softmax(logits / T[qtype])``
-   with the temperatures in the evidence's ``*.meta.json``, and those temperatures are the checkpoint's (the
-   metrics JSON's ``temperature``).
+   with the temperatures in the evidence's ``*.meta.json``, those temperatures are the checkpoint's (the metrics
+   JSON's ``temperature``), and the scored weights are the claimed ones (``weights_sha256``, when the claim has it).
 3. Per dataset, accuracy and calibrated ECE (max-probability confidence, 15 equal bins, ``laya.common.ece_score``)
    are recomputed from the rows and compared with
    * the metrics the evidence job itself computed (``meta.metrics.val_calibrated``, tolerance 1e-4: the rows are
@@ -152,6 +152,11 @@ def verify_claim(root, claim, tol):
         if any(abs(a - b) > 1e-6 for a, b in zip(temps, metrics["temperature"])):
             problems.append("%s: evidence temperatures %s != checkpoint's %s"
                             % (claim["meta"], temps, metrics["temperature"]))
+    if claim.get("weights_sha256"):
+        checks += 1
+        if meta.get("weights_sha256") != claim["weights_sha256"]:
+            problems.append("%s: scored weights %s, the claim is about %s"
+                            % (claim["meta"], meta.get("weights_sha256"), claim["weights_sha256"]))
     if len(rows) != meta["n_rows"]:
         problems.append("%s: %d rows, meta says %d" % (claim["evidence"], len(rows), meta["n_rows"]))
     bad = 0
