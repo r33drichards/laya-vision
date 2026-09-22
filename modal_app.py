@@ -354,6 +354,7 @@ def finetune(
     memory=65536,
     timeout=300 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
+    retries=modal.Retries(max_retries=3, initial_delay=10.0),
 )
 def finetune_long(
     datasets: str = ",".join(DATASETS),
@@ -382,6 +383,9 @@ def finetune_long(
     max_len: int = 0,
     max_train: int = 0,
     max_val: int = 0,
+    restart: bool = False,
+    state_every_min: float = 10.0,
+    crash_at_step: int = 0,
 ):
     """Multi-epoch fine-tune (vision tower frozen) with per-epoch train/val tracking and best-checkpoint keeping.
 
@@ -424,6 +428,13 @@ def finetune_long(
       checkpoint's.
     * ``max_train`` / ``max_val`` > 0 keep the first records per dataset (file order) for a quicker run on a
       subset; ``max_train`` does not count the ``n_calib`` holdout.
+    * Durability: every ``state_every_min`` minutes (clamped to ``vlm_train.MIN_STATE_MINUTES``, and backed off
+      further when writes are slow) and after every eval the run writes ``<out>/state.pt`` atomically (weights,
+      optimizer, step, RNG, per-dataset sample counts, elapsed training time, best-so-far and the log), and a
+      preempted or retried container resumes from it; ``max_minutes`` counts training time across attempts. The
+      state is deleted once the run finishes, so a later call with the same ``run_name`` starts fresh.
+      ``restart`` ignores an unfinished run's state; ``crash_at_step`` raises once at that step to test the
+      resume path (Modal retries the container).
     """
     import math
 
@@ -487,6 +498,42 @@ def finetune_long(
            "evals": []}
     best = {"score": -1.0, "step": None, "state": None}
 
+    # ------------------------------------------------------------------ durability: resume from state.pt
+    state_path = os.path.join(out_dir, "state.pt")
+    restart_marker = os.path.join(out_dir, "restarted")
+    call_id = modal.current_function_call_id() or str(t_start)
+    marked = open(restart_marker).read().strip() if os.path.exists(restart_marker) else ""
+    if restart and marked != call_id:
+        # only this call's first attempt restarts: its retries must still resume from their own state
+        for f_ in (state_path, os.path.join(out_dir, "crashed")):
+            if os.path.exists(f_):
+                os.remove(f_)
+                print("--restart: removed %s" % os.path.basename(f_))
+        os.makedirs(out_dir, exist_ok=True)
+        with open(restart_marker, "w") as f_:
+            f_.write(call_id)
+        ckpt_vol.commit()
+    resume = None
+    if os.path.exists(state_path):
+        blob = torch.load(state_path, map_location="cpu", weights_only=False)
+        model.load_state_dict(blob["model"])
+        model.to("cuda")
+        resume, log = blob["train"], blob["log"]
+        best.update(blob["best"])
+        print("resuming %s from state.pt at step %d (%d evals so far, best mean val acc %.4f)"
+              % (run_name, resume["step"], len(log["evals"]), best["score"]), flush=True)
+
+    def save_state(step, tstate):
+        ts = time.time()
+        os.makedirs(out_dir, exist_ok=True)
+        blob = {"train": tstate, "model": {k: v.detach().cpu() for k, v in model.state_dict().items()},
+                "best": {k: best[k] for k in ("score", "step")}, "log": log}
+        tmp = state_path + ".tmp"
+        torch.save(blob, tmp)
+        os.replace(tmp, state_path)  # atomic: a torn write never replaces a good state
+        ckpt_vol.commit()
+        print("  wrote state.pt at step %d (%.1f s)" % (step, time.time() - ts), flush=True)
+
     def write_log():
         os.makedirs(out_dir, exist_ok=True)
         with open(os.path.join(out_dir, "metrics.json"), "w") as f:
@@ -514,13 +561,28 @@ def finetune_long(
         ckpt_vol.commit()
         print("  eval + save took %.1f min" % ((time.time() - te) / 60), flush=True)
 
+    def maybe_eval(step):
+        # Called every few steps as a cheap probe (so ``crash_at_step`` can fire between evals); evaluates on
+        # multiples of ``eval_every`` and returns True only then, so the training loop writes state.pt after a
+        # real eval and not on every probe.
+        if crash_at_step and step >= crash_at_step and not os.path.exists(os.path.join(out_dir, "crashed")):
+            os.makedirs(out_dir, exist_ok=True)
+            open(os.path.join(out_dir, "crashed"), "w").close()
+            ckpt_vol.commit()
+            raise RuntimeError("crash_at_step %d: simulated preemption" % crash_at_step)
+        if step % eval_every == 0:
+            eval_fn(step)
+            return True
+        return False
+
     stats = {}
     losses = train(
         model, proc, train_ex, steps=steps, batch_size=batch_size, freeze="full", lr_head=lr_h, lr_backbone=lr_b,
         device="cuda", log_every=100, max_minutes=max_minutes, num_workers=tr_workers,
         prefetch_factor=tr_prefetch, warmup=warmup,
-        eval_fn=eval_fn, eval_every=eval_every, max_passes=max_passes or None, stats=stats,
+        eval_fn=maybe_eval, eval_every=math.gcd(25, eval_every), max_passes=max_passes or None, stats=stats,
         w_ce_schedule=w_ce_schedule, mix_weights=mix_weights, mix_alpha=mix_alpha,
+        resume=resume, save_state_fn=save_state, save_state_every_min=state_every_min,
     )
     if not log["evals"] or log["evals"][-1]["step"] != stats["steps"]:
         eval_fn(stats["steps"])
@@ -531,8 +593,14 @@ def finetune_long(
     print("train stats:", json.dumps(log["train_stats"]))
     print("loss curve (10 chunks):", ", ".join("%.3f" % c["mean_loss"] for c in log["loss_curve"]))
 
-    # final model = best checkpoint by mean val acc
-    model.load_state_dict(best["state"])
+    # final model = best checkpoint by mean val acc; a resumed run kept it on disk rather than in memory
+    if best["state"] is not None:
+        model.load_state_dict(best["state"])
+    else:
+        from safetensors.torch import load_file
+
+        model.load_state_dict(load_file(os.path.join(out_dir, "best", "model.safetensors")))
+        model.to("cuda")
     model.eval()
     print("final model: best checkpoint from step %d (mean val acc %.4f)" % (best["step"], best["score"]))
     temps = fit_temperatures_from(collect_logits(model, proc, calib_ex, **ev_kw))
@@ -569,6 +637,9 @@ def finetune_long(
     agent.temperature = temps
     agent.save(os.path.join(out_dir, "best"))
     write_log()
+    for f_ in (state_path, os.path.join(out_dir, "crashed")):
+        if os.path.exists(f_):
+            os.remove(f_)  # finished: a later call with this run_name starts fresh
     ckpt_vol.commit()
     print("saved %s/best with temperatures (%.1f min total)" % (out_dir, (time.time() - t_start) / 60))
     return {k: log[k] for k in ("run", "args", "best_step", "best_mean_val_acc", "temperature", "final", "train_stats")}
