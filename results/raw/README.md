@@ -34,8 +34,8 @@ it was fine-tuned from is unknown (the full weights, including the backbone, are
 the val splits predate `manifest.json`, so their upstream dataset commits are unknown; the sha256 of each val file
 as scored is in the meta.
 
-Discrepancy noted, not fixed: the README says "Calibrated ECE is 0.02 to 0.03 for all three over their full
-validation sets". For the recommended checkpoint both the committed metrics JSON and these rows give 0.16
-(A-OKVQA), 0.035-0.038 (ScienceQA) and 0.076-0.077 (VQAv2 yes/no); the model card
-(`hf_model_card_score.md`) has the right values. The sentence likely describes an earlier checkpoint and needs
-rewording by whoever owns the README.
+Fixed discrepancy: the README used to say "Calibrated ECE is 0.02 to 0.03 for all three over their full
+validation sets". That range is the ECE pooled over all of a checkpoint's validation sets (docs/score-results.md);
+per set, for the recommended checkpoint, both the committed metrics JSON and these rows give 0.16 (A-OKVQA),
+0.035-0.038 (ScienceQA) and 0.076-0.077 (VQAv2 yes/no), as the model card (`hf_model_card_score.md`) says. The
+README sentence now states both.
