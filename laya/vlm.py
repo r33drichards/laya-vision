@@ -57,6 +57,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from .calibration import Calibration, calibrate_records, checkpoint_identity, resolve_temperature
 from .common import QTYPES, confidence_from_probs, render_options, serialize_state, temp_bucket
 from .preprocess import ImagePrep, as_uint8_chw, prefix_ids
 
@@ -793,6 +794,7 @@ class VLMAgent:
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
         self.temperature_by_options = self.cfg.get("temperature_by_options", {})
+        self.source = model_id_or_path or self.cfg["backbone"]  # what a ``Calibration`` records it was fitted for
         self.model.to(self.device).eval()
 
     def _torch_dtype(self) -> torch.dtype:
@@ -878,6 +880,10 @@ class VLMAgent:
         n_permutations: int = 1,
         batch_size: int = 8,
         prefix_cache: Optional[bool] = None,
+        temperature: Any = None,
+        calibration: Optional[Calibration] = None,
+        strict_calibration: bool = False,
+        _raw_logits: Optional[Dict[str, np.ndarray]] = None,
     ) -> Dict[str, Any]:
         """Evaluate typed questions over a text / JSON / image state. Same output schema as ``Agent.predict``.
 
@@ -895,7 +901,16 @@ class VLMAgent:
         a CPU as soon as two rows share the prefix (compute-bound), but on CUDA a small backbone pass takes about
         the same time at any batch size up to a few thousand tokens (launch-bound), so there it is used only when
         the full path would need more than one pass (more than ``batch_size`` rows). See docs/architecture.md.
+
+        ``temperature`` (a number for every type, or ``{"choice": T, ...}``) or ``calibration`` (from ``calibrate``)
+        replaces the checkpoint's temperatures for this call only; types not given keep the checkpoint's. The
+        answer (argmax) never changes, only the probabilities. A calibration fitted for a different checkpoint
+        warns, or raises with ``strict_calibration=True``. ``_raw_logits``, if a dict, receives each question's
+        permutation-averaged logits before any temperature (used by ``calibrate``).
         """
+        t_override = resolve_temperature(temperature, calibration)
+        if calibration is not None:
+            calibration.check(checkpoint_identity(self), strict=strict_calibration)
         images, _ = split_state(state)
         prefix = vlm_prefix(self.processor, images, self.prep)
         img_feats = None
@@ -960,7 +975,9 @@ class VLMAgent:
                 act_sum += float(ac[0])
                 n += 1
             qt = QTYPES[q["t"]]
-            t_scale = self.temperature_by_options.get(temp_bucket(qt, k), self.temperature[qt])
+            if _raw_logits is not None:
+                _raw_logits[qid] = z_sum / n
+            t_scale = t_override.get(qt, self._checkpoint_temperature(qt, k))
             z = (z_sum / n) / max(1e-3, float(t_scale))
             p = np.exp(z - z.max())
             p = p / p.sum()
@@ -999,6 +1016,81 @@ class VLMAgent:
         }
 
     system_one = predict
+
+    def _checkpoint_temperature(self, qt: int, k: int) -> float:
+        """The stored temperature for a question type with ``k`` options (per-option-count bucket first)."""
+        return float(self.temperature_by_options.get(temp_bucket(qt, k), self.temperature[qt]))
+
+    def calibrate(
+        self,
+        rows: Sequence[Dict[str, Any]],
+        group_key: Optional[str] = "image_id",
+        folds: int = 5,
+        per_type: bool = True,
+        bootstrap: int = 1000,
+        seed: int = 0,
+        min_rows: int = 30,
+        n_permutations: int = 1,
+        batch_size: int = 8,
+    ) -> Calibration:
+        """Fit temperatures on your own labelled rows and report whether confidence got more honest.
+
+        Each row is one state with its questions and labels::
+
+            {"state": {"image": img, ...}, "questions": {qid: qdef}, "labels": {qid: label}, "image_id": "a17"}
+
+        or, one question per row, ``{"state": ..., "question": qdef, "label": label, "image_id": ...}``. A label is
+        the option name for ``choice``, the level index for ``score`` and a bool for ``noul``; questions without a
+        label are skipped. ``group_key`` names the row field that groups related rows (several questions or crops of
+        one image): folds and bootstrap resamples keep a group together, and a row without it is its own group.
+
+        The model runs once per row (with ``n_permutations``, as ``predict`` would), then ``laya.calibration`` fits
+        ``T`` per type (a type with fewer than ``min_rows`` questions shares a pooled ``T``; under ``min_rows`` in
+        total the checkpoint's are kept) and reports raw, checkpoint-temperature and out-of-fold fitted ECE with
+        95% group-bootstrap intervals, NLL and accuracy (identical across all three). Nothing on the agent changes;
+        pass the result to ``predict(..., calibration=cal)`` or ``cal.save(path)``.
+        """
+        records, ungrouped = [], 0
+        for i, row in enumerate(rows):
+            if "questions" in row:
+                questions, labels = row["questions"], row.get("labels", {})
+            else:
+                questions, labels = {"q": row["question"]}, {"q": row.get("label")}
+            questions = {qid: q for qid, q in questions.items() if labels.get(qid) is not None}
+            if not questions:
+                continue
+            group = row.get(group_key) if group_key else None
+            if group is None:
+                group, ungrouped = ("__row__", i), ungrouped + 1
+            raw = {}
+            self.predict(row["state"], questions, n_permutations=n_permutations, batch_size=batch_size, _raw_logits=raw)
+            for qid, qdef in questions.items():
+                q = self._to_internal(qdef)
+                qt, k = QTYPES[q["t"]], len(raw[qid])
+                records.append({"logits": raw[qid], "label": _label_index(q, labels[qid], qid), "qtype": qt,
+                                "group": group, "checkpoint_t": self._checkpoint_temperature(qt, k)})
+        if ungrouped:
+            warnings.warn("%d rows have no %r; each is treated as its own group, so related rows may leak across "
+                          "folds" % (ungrouped, group_key), stacklevel=2)
+        return calibrate_records(records, group_key, folds, per_type, bootstrap, seed, min_rows,
+                                 checkpoint=checkpoint_identity(self), n_permutations=n_permutations)
+
+
+def _label_index(q: Dict, label: Any, qid: str) -> int:
+    """A user label as an option index: option name (``choice``), level index (``score``), bool (``noul``)."""
+    k = len(render_options(q))
+    if q["t"] == "choice" and isinstance(label, str):
+        keys = list(q["crit"].keys())
+        if label not in keys:
+            raise ValueError("label %r for %r is not one of its options %s" % (label, qid, keys))
+        return keys.index(label)
+    if q["t"] == "noul" and isinstance(label, (bool, np.bool_)):
+        return int(bool(label))
+    if isinstance(label, (int, np.integer)) and not isinstance(label, (bool, np.bool_)) and 0 <= int(label) < k:
+        return int(label)
+    raise ValueError("label %r for %s question %r: expected %s" % (
+        label, q["t"], qid, {"choice": "an option name", "score": "a level index 0..%d" % (k - 1),
+                             "noul": "True or False"}[q["t"]]))
 
 
 def load_vlm(

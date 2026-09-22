@@ -3,6 +3,7 @@ import json
 import math
 import random
 import time
+import warnings
 
 import numpy as np
 import pytest
@@ -519,3 +520,54 @@ def test_ragged_image_counts_pad_without_losing_a_frame(agent):
     pv1, pam1 = prep.pixel_values([frames[0]], device=agent.device, dtype=agent.model.encoder.dtype)
     alone = agent.model.encode_images(pv1, pam1)
     assert float((feats[0] - alone[0]).abs().max()) < 1e-3  # batching noise only
+
+
+def test_calibrate_and_temperature_override(agent, tmp_path):
+    from laya.calibration import Calibration
+
+    colors = {"red": (220, 20, 20), "blue": (20, 40, 220), "green": (20, 200, 40)}
+    qs = {k: QUESTIONS[k] for k in ("color", "is_red")}
+    rows = [{"state": {"image": square(colors[c]), "caption": "card %d" % i}, "questions": qs,
+             "labels": {"color": c, "is_red": c == "red"}, "image_id": "img%d" % (i // 2)}
+            for i, c in enumerate(["red", "blue", "green", "red", "blue", "green", "red", "blue"])]
+    rows.append({"state": "plain text, no image", "question": QUESTIONS["size"], "label": 1})  # flat form, no group
+    stored = (list(agent.temperature), dict(agent.temperature_by_options))
+    with pytest.warns(UserWarning, match="own group"):
+        cal = agent.calibrate(rows, folds=3, bootstrap=50, min_rows=6)
+    assert (list(agent.temperature), dict(agent.temperature_by_options)) == stored
+    assert cal.sources == {"choice": "per_type", "noul": "per_type", "score": "pooled"}
+    assert cal.fitted_on == {"choice": 8, "noul": 8, "score": 17} and cal.folds == 3
+    assert cal.evidence["all"]["n"] == 17 and cal.evidence["all"]["groups"] == 5
+    assert cal.evidence["all"]["accuracy_unchanged"]
+
+    state = rows[0]["state"]
+    base = agent.predict(state, QUESTIONS)
+    raw = {}
+    one = agent.predict(state, QUESTIONS, temperature=1.0, _raw_logits=raw)
+    z = raw["color"]
+    p = np.exp(z - z.max())
+    assert [one["answers"]["color"]["probabilities"][k] for k in QUESTIONS["color"]["criteria"]] == \
+        pytest.approx(list(p / p.sum()), abs=1e-4)
+    hot = agent.predict(state, QUESTIONS, temperature={"choice": 0.25})
+    assert hot["answers"]["size"] == base["answers"]["size"] and hot["answers"]["is_red"] == base["answers"]["is_red"]
+    path = str(tmp_path / "cal.json")
+    cal.save(path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        calibrated = agent.predict(state, QUESTIONS, calibration=Calibration.load(path))
+    for a, b in ((one, base), (hot, base), (calibrated, base)):
+        for qid in ("color", "size"):
+            assert a["answers"][qid].get("choice") == b["answers"][qid].get("choice")
+            pa, pb = a["answers"][qid]["probabilities"], b["answers"][qid]["probabilities"]
+            assert max(pa, key=pa.get) == max(pb, key=pb.get)
+        assert (a["answers"]["is_red"]["noul"] > 0.5) == (b["answers"]["is_red"]["noul"] > 0.5)
+    assert agent.predict(state, QUESTIONS) == base
+    for bad in (0.0, -1.0, {"choice": 0}):
+        with pytest.raises(ValueError):
+            agent.predict(state, QUESTIONS, temperature=bad)
+    other = Calibration.load(path)
+    other.checkpoint["weights_sha256"] = "0" * 64
+    with pytest.warns(UserWarning, match="different checkpoint"):
+        agent.predict(state, QUESTIONS, calibration=other)
+    with pytest.raises(ValueError, match="different checkpoint"):
+        agent.predict(state, QUESTIONS, calibration=other, strict_calibration=True)
