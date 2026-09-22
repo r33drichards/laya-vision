@@ -3,6 +3,8 @@
     modal run modal_app.py::test                     # pytest on a GPU + latency, both backbones
     modal run modal_app.py::finetune --minutes 18    # short fine-tune + held-out acc / ECE
     modal run modal_app.py::evaluate --run-name <run> # re-evaluate a saved checkpoint
+    modal run --detach modal_app.py::robustness_eval [--run <run>] [--n 300]  # perturbation robustness,
+                                                     # see laya/robustness.py -> results/robustness/
     modal run --detach modal_app.py::finetune_long   # ~3-epoch A100 run with per-epoch eval + best checkpoint
     modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep
                                                      # the same run on the bidirectional backbone
@@ -36,7 +38,8 @@
 Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
     laya-datasets     -> /data       (read-only; /data/vqa/<name>/{<split>.jsonl, images/, _READY})
-    laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/ and /ckpt/modernvbert/)
+    laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/ and /ckpt/modernvbert/;
+                                      robustness results under /ckpt/smolvlm/robustness/)
 
 Data: the fine-tune jobs default to The Cauldron subsets (``CAULDRON_DATASETS``, written by ``prepare_cauldron``);
 two layouts exist on the volume: the capped ``cauldron_<subset>`` sets (10,000 usable rows per subset, 5% val)
@@ -702,6 +705,86 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
         except (OSError, ValueError):
             metas[name] = None
     return {"val_raw": raw, "val_calibrated": cal, "temperature": list(agent.temperature), "dataset_meta": metas}
+
+
+ROBUSTNESS_DATASETS = ("aokvqa", "scienceqa", "vqav2_yesno", "cauldron_ai2d", "cauldron_visual7w", "cauldron_vsr",
+                       "cauldron_mapqa")
+ROBUSTNESS_ROOT = CKPT_ROOT + "/robustness"  # <tag>/{predictions.jsonl.gz, summary.json}; never overwritten
+
+
+@app.function(image=image, gpu="L4", cpu=16, memory=32768, timeout=40 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol})
+def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: str = ",".join(ROBUSTNESS_DATASETS),
+               n_per_dataset: int = 300, families: str = "", seed: int = 0, n_boot: int = 1000, val_split: str = "val",
+               tag: str = ""):
+    """Meaning-preserving perturbations of ``n_per_dataset`` seeded val rows per set (``laya.robustness``): option
+    order, rewording, image corruptions, and the shuffled-image / no-image controls, scored with the checkpoint's
+    temperatures. Writes the per-row predictions and the summary to ``ROBUSTNESS_ROOT/<tag>/`` (a new directory;
+    the job refuses an existing one) so a detached run's results survive the local client, and returns the
+    summary."""
+    import gzip
+
+    import torch
+
+    from laya import robustness as R
+    from laya.vlm import VLMAgent
+
+    out_dir = os.path.join(ROBUSTNESS_ROOT, tag or "%s-n%d-s%d" % (run_name.replace("/", "_"), n_per_dataset, seed))
+    ckpt_vol.reload()
+    if os.path.exists(out_dir):
+        raise SystemExit("%s exists; pass a new --tag" % out_dir)
+    t0 = time.time()
+    print("GPU:", torch.cuda.get_device_name(0))
+    data_vol.reload()
+    rows = []
+    for name in _ready(datasets):
+        src = R.source_rows(_load_split(name, val_split, 0), n=n_per_dataset, seed=seed, dataset=name)
+        print("dataset %s: %d source rows" % (name, len(src)))
+        rows += src
+    fams = [f for f in families.split(",") if f] or list(R.FAMILIES)
+    variants = R.build_variants(rows, fams, seed)
+    counts = {}
+    for v in variants:
+        counts[v["family"]] = counts.get(v["family"], 0) + 1
+    print("%d rows to score: %s" % (len(variants), counts))
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda")
+    print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
+    preds = R.score_rows(agent.model, agent.processor, variants, agent.temperature, batch_size=32, num_workers=14)
+    print("scored in %.1f min" % ((time.time() - t0) / 60))
+    summary = R.summarize(preds, n_boot, seed)
+    print(R.format_table(summary))
+    meta = {"run": run_name, "datasets": sorted({r["dataset"] for r in rows}), "n_per_dataset": n_per_dataset,
+            "families": fams, "seed": seed, "n_boot": n_boot, "val_split": val_split,
+            "temperature": list(agent.temperature), "gpu": torch.cuda.get_device_name(0), "row_counts": counts,
+            "minutes": (time.time() - t0) / 60}
+    os.makedirs(out_dir)
+    with gzip.open(os.path.join(out_dir, "predictions.jsonl.gz"), "wt") as f:
+        for p in preds:
+            f.write(json.dumps(p, sort_keys=True) + "\n")
+    with open(os.path.join(out_dir, "summary.json"), "w") as f:
+        json.dump({"meta": meta, **summary}, f, indent=1)
+    ckpt_vol.commit()
+    print("wrote %s (%d rows)" % (out_dir, len(preds)))
+    return {"meta": meta, "summary": summary, "out_dir": out_dir}
+
+
+@app.local_entrypoint()
+def robustness_eval(run: str = "cauldron-score-2ep-bidir-full/best", datasets: str = ",".join(ROBUSTNESS_DATASETS),
+                    n: int = 300, families: str = "", seed: int = 0, tag: str = "", out: str = "results/robustness"):
+    """Run ``robustness`` (``modal run --detach`` keeps it going if this client drops), then copy
+    ``predictions.jsonl.gz`` and ``summary.json`` from the volume into ``out`` (refusing to overwrite). After a
+    dropped client: ``modal volume get laya-checkpoints smolvlm/robustness/<tag>/ <out>``."""
+    for fname in ("predictions.jsonl.gz", "summary.json"):
+        if os.path.exists(os.path.join(out, fname)):
+            raise SystemExit("%s already holds %s; pass a new --out" % (out, fname))
+    res = robustness.remote(run, datasets, n, families, seed, tag=tag)
+    rel = os.path.relpath(res["out_dir"], "/ckpt")
+    os.makedirs(out, exist_ok=True)
+    for fname in ("predictions.jsonl.gz", "summary.json"):
+        with open(os.path.join(out, fname), "wb") as f:
+            for chunk in ckpt_vol.read_file(rel + "/" + fname):
+                f.write(chunk)
+    print("copied %s -> %s" % (res["out_dir"], out))
 
 
 def _public_question(q: dict) -> dict:
