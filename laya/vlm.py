@@ -58,6 +58,7 @@ import torch
 import torch.nn as nn
 
 from .common import QTYPES, confidence_from_probs, render_options, serialize_state, temp_bucket
+from .common import truncation_answer, truncation_error, truncation_report
 from .preprocess import ImagePrep, as_uint8_chw, prefix_ids
 
 DEFAULT_BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
@@ -230,7 +231,8 @@ def build_vlm_inputs(
 ) -> Dict[str, Any]:
     """Build one VLM sequence for an internal question ``q = {"t", "ins", "crit"}``.
 
-    Returns ``{"ids", "markers", "option_span", "pixel_values", "pixel_attention_mask", "raw_images", "n_images"}``.
+    Returns ``{"ids", "markers", "option_span", "pixel_values", "pixel_attention_mask", "raw_images", "n_images",
+    "truncation"}``, the last saying what was cut to fit the budgets (``laya.common.truncation_report``).
     ``markers[j]`` indexes the readout token of the j-th option in ``option_order`` order: the ``\\n``
     terminating its line (``readout="terminator"``, causal backbones) or the ``[MASK]`` opening it
     (``readout="mask"``, ModernVBERT). ``readout`` defaults to what the processor was bound to
@@ -258,8 +260,10 @@ def build_vlm_inputs(
 
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
-    opt_ids = [enc(OPTION_BULLET + opts[i].replace(OPTION_END, " "))[:48] for i in order]
+    full = [enc(OPTION_BULLET + opts[i].replace(OPTION_END, " ")) for i in order]
+    opt_ids = [o[:48] for o in full]
     head_ids = enc(QUESTION_TEXT % (q["t"], str(q["ins"]).replace("<end_of_utterance>", " ")))
+    n_head = len(head_ids)
     opt_budget = head_max_len - sum(len(o) + 1 for o in opt_ids)
     if opt_budget < 16:
         per = max(4, (head_max_len - 16) // max(1, len(opt_ids)) - 1)
@@ -280,7 +284,8 @@ def build_vlm_inputs(
 
     room = max(0, max_len - len(prefix["ids"]) - len(tail))
     st = enc(text) if text else []
-    st = st[-room:] if truncate_left else st[:room]
+    n_state = len(st)
+    st = st[len(st) - room:] if truncate_left else st[:room]  # not st[-room:]: that keeps all of it at room=0
     off = len(prefix["ids"]) + len(st)
     if len(prefix["ids"]) + len(tail) > max_len:
         raise ValueError("question + options + images exceed max_len=%d" % max_len)
@@ -292,6 +297,7 @@ def build_vlm_inputs(
         "pixel_attention_mask": prefix["pixel_attention_mask"],
         "raw_images": prefix.get("raw_images"),
         "n_images": prefix["n_images"],
+        "truncation": truncation_report(order, full, opt_ids, n_head - len(head_ids), n_state - len(st)),
     }
 
 
@@ -313,8 +319,10 @@ def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int,
 
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
-    opt_ids = [[mask_id] + enc(" " + clean(opts[i]))[:48] for i in order]
+    full = [[mask_id] + enc(" " + clean(opts[i])) for i in order]
+    opt_ids = [o[:49] for o in full]  # [MASK] + 48 option tokens
     head_ids = enc(MASK_QUESTION_TEXT % (q["t"], clean(str(q["ins"]))))
+    n_head = len(head_ids)
     opt_budget = head_max_len - sum(len(o) for o in opt_ids)
     if opt_budget < 16:
         per = max(4, (head_max_len - 16) // max(1, len(opt_ids)))
@@ -333,9 +341,10 @@ def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int,
     if len(ids) > max_len:
         raise ValueError("question + options + images exceed max_len=%d" % max_len)
     st = enc(clean(text)) if text else []
+    n_state = len(st)
     if st:
         room = max(0, max_len - len(ids) - 1)
-        st = st[-room:] if truncate_left else st[:room]
+        st = st[len(st) - room:] if truncate_left else st[:room]  # not st[-room:]: that keeps all of it at room=0
         ids = ids + st + [sep_id]
     return {
         "ids": ids,
@@ -345,6 +354,7 @@ def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int,
         "pixel_attention_mask": prefix["pixel_attention_mask"],
         "raw_images": prefix.get("raw_images"),
         "n_images": prefix["n_images"],
+        "truncation": truncation_report(order, full, opt_ids, n_head - len(head_ids), n_state - len(st)),
     }
 
 
@@ -796,12 +806,20 @@ class VLMAgent:
         questions: Dict[str, Dict[str, Any]],
         n_permutations: int = 1,
         batch_size: int = 8,
+        strict: bool = False,
     ) -> Dict[str, Any]:
         """Evaluate typed questions over a text / JSON / image state. Same output schema as ``Agent.predict``.
 
         Images are encoded once and their features reused for every question row. ``n_permutations > 1``
         scores each question under several option orders and averages the logits (in label order) to
         reduce the causal option-order bias (pointless with the ``"mask"`` readout, which has none).
+
+        Inputs are cut to fit the checkpoint's budgets: each option to 48 tokens (then evenly when all of them
+        exceed ``head_max_len``), the instructions to what ``head_max_len`` leaves, the state's text to what
+        ``max_len`` leaves. An answer whose question was cut carries ``"truncated": {"options": [labels cut],
+        "indistinguishable": [[label, label], ...] (identical once cut), "instructions": bool,
+        "instructions_tokens_dropped": n, "state_tokens_dropped": n}``; the key is absent when nothing was cut.
+        ``strict=True`` raises ``ValueError`` (naming the question and what would be cut) instead.
         """
         images, _ = split_state(state)
         prefix = vlm_prefix(self.processor, images, self.prep)
@@ -816,16 +834,19 @@ class VLMAgent:
         ids = list(questions.keys())
         internal = {qid: self._to_internal(questions[qid]) for qid in ids}
         rows = []
+        truncated = {}
+        max_len, head_max_len = self.cfg.get("max_len", 1024), self.cfg.get("head_max_len", 256)
         for qid in ids:
             q = internal[qid]
             k = len(render_options(q))
             for order in _permutations(k, max(1, n_permutations)):
-                it = build_vlm_inputs(
-                    self.processor, state, q, self.cfg.get("max_len", 1024), self.cfg.get("head_max_len", 256),
-                    option_order=order, prefix=prefix,
-                )
+                it = build_vlm_inputs(self.processor, state, q, max_len, head_max_len, option_order=order, prefix=prefix)
                 if len(it["markers"]) != k:
                     raise ValueError("question %r options exceed head_max_len" % qid)
+                if qid not in truncated:  # the cuts do not depend on the option order: report the first one's
+                    truncated[qid] = truncation_answer(it["truncation"], q)
+                    if strict and truncated[qid]:
+                        raise truncation_error(qid, truncated[qid], max_len, head_max_len)
                 it.update(qtype=QTYPES[q["t"]], qid=qid, order=order)
                 rows.append(it)
 
@@ -893,6 +914,8 @@ class VLMAgent:
                     "confidence": round(max(float(p[1]), 1.0 - float(p[1])), 4),
                     "action": ext,
                 }
+            if truncated[qid]:
+                answers[qid]["truncated"] = truncated[qid]
 
         return {
             "model": "laya-vlm",
