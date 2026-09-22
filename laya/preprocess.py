@@ -37,6 +37,12 @@ Filters (``interpolation``):
 scale_factor^2``, which is 64 at 512 and 16 at 256 for SmolVLM-256M (patch 16, pixel-shuffle 4). The processor
 has to agree, because it is what writes those ``<image>`` tokens into the prompt, so ``apply(processor)`` sets
 ``image_seq_len`` and ``max_image_size`` on it.
+
+Image splitting (``split_edge``) is the processor's own tiling, which this repo otherwise turns off: the image is
+resized so its longest edge is ``split_edge`` (upscaled too, as the processor does), cut into ``image_size``
+tiles, and followed by one downscaled global view. That is up to ``(split_edge / image_size)^2 + 1`` tiles of
+``image_seq_len`` tokens each: 17 x 64 at the processor's default 2048, 5 x 64 at 1024. It runs only through the
+Hugging Face processor (``backend="processor"``); the device-side path above has no tiling.
 """
 import functools
 import math
@@ -66,6 +72,8 @@ class ImagePrep:
     * ``image_size``: the square side fed to the vision tower (the processor's ``max_image_size.longest_edge``).
     * ``backend``: ``"gpu"`` for the device-side path here, ``"processor"`` for the Hugging Face processor.
     * ``interpolation``: filter for the ``"gpu"`` backend, see the module docstring.
+    * ``split_edge``: 0 for one ``image_size`` view per image (the released checkpoints); otherwise the longest
+      edge an image is resized to before the processor cuts it into tiles, see the module docstring.
     """
 
     image_size: int = 512
@@ -73,6 +81,7 @@ class ImagePrep:
     interpolation: str = "processor"
     patch_size: int = 16
     scale_factor: int = 4
+    split_edge: int = 0
 
     def __post_init__(self):
         if self.backend not in BACKENDS:
@@ -83,6 +92,12 @@ class ImagePrep:
         if self.image_size % step:
             raise ValueError("image_size %d must be a multiple of patch_size * scale_factor = %d"
                              % (self.image_size, step))
+        if self.split_edge:
+            if self.split_edge < self.image_size:
+                raise ValueError("split_edge %d is below image_size %d; use 0 to turn splitting off"
+                                 % (self.split_edge, self.image_size))
+            if self.backend != "processor":
+                raise ValueError("image splitting runs through the Hugging Face processor; pass preprocess='processor'")
 
     @property
     def image_seq_len(self) -> int:
@@ -93,19 +108,30 @@ class ImagePrep:
     def on_gpu(self) -> bool:
         return self.backend == "gpu"
 
+    @property
+    def max_tiles(self) -> int:
+        """Most vision-tower views one image can become: the tile grid plus the global view when splitting."""
+        if not self.split_edge:
+            return 1
+        return math.ceil(self.split_edge / self.image_size) ** 2 + 1
+
     # -- config round-trip ------------------------------------------------------------------------------------
 
     @classmethod
     def from_config(cls, cfg: Dict[str, Any], default_backend: str = "processor") -> "ImagePrep":
-        """Read the three ``vlm_agent_config.json`` keys. A config written before they existed means 512 through
+        """Read the ``vlm_agent_config.json`` keys. A config written before they existed means 512 through
         the Hugging Face processor, so ``default_backend`` is ``"processor"`` for a load and ``"gpu"`` for a
-        fresh agent."""
+        fresh agent. Splitting needs the processor, so it is the default backend whenever ``image_split_edge``
+        is set."""
+        split_edge = int(cfg.get("image_split_edge") or 0)
         return cls(image_size=int(cfg.get("image_size", 512)),
-                   backend=cfg.get("preprocess", default_backend),
-                   interpolation=cfg.get("image_interpolation", "processor"))
+                   backend=cfg.get("preprocess") or ("processor" if split_edge else default_backend),
+                   interpolation=cfg.get("image_interpolation", "processor"),
+                   split_edge=split_edge)
 
     def to_config(self) -> Dict[str, Any]:
-        return {"image_size": self.image_size, "preprocess": self.backend, "image_interpolation": self.interpolation}
+        return {"image_size": self.image_size, "preprocess": self.backend, "image_interpolation": self.interpolation,
+                "image_split_edge": self.split_edge}
 
     # -- processor agreement ----------------------------------------------------------------------------------
 
@@ -117,6 +143,7 @@ class ImagePrep:
         between having to pass it (the training loader, ``collect_logits``).
         """
         processor.image_processor.max_image_size = {"longest_edge": self.image_size}
+        processor.image_processor.size = {"longest_edge": self.split_edge or STAGE1}
         processor.image_seq_len = self.image_seq_len
         processor.laya_prep = self
         return self
@@ -132,6 +159,7 @@ class ImagePrep:
             ("rescale_factor", float(ip.rescale_factor), RESCALE_FACTOR),
             ("image_mean", flat(mean), IMAGE_MEAN), ("image_std", flat(std), IMAGE_STD),
             ("max_image_size", ip.max_image_size.get("longest_edge"), self.image_size),
+            ("size", _longest_edge(ip.size), self.split_edge or STAGE1),
             ("image_seq_len", processor.image_seq_len, self.image_seq_len),
         ]
         wrong = ["%s=%r (expected %r)" % (k, got, want) for k, got, want in expected if got != want]
@@ -174,6 +202,13 @@ class ImagePrep:
         mode = {"bicubic": InterpolationMode.BICUBIC, "bilinear": InterpolationMode.BILINEAR,
                 "nearest": InterpolationMode.NEAREST_EXACT}[self.interpolation]
         return tvF.resize(x, [self.image_size, self.image_size], interpolation=mode, antialias=True)
+
+
+def _longest_edge(size) -> Optional[int]:
+    """``size["longest_edge"]`` whether the image processor holds a plain dict or a ``SizeDict``."""
+    if isinstance(size, dict):
+        return size.get("longest_edge")
+    return getattr(size, "longest_edge", None)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -304,12 +339,14 @@ def prefix_ids(processor, text: str, n_images: int, image_seq_len: Optional[int]
     """``text`` with each image replaced by the processor's ``<image>`` run, tokenized (cached).
 
     This is exactly what ``processor(text=..., images=...)`` produces with ``do_image_splitting=False`` (see
-    ``Idefics3Processor.replace_image_token``), without touching a single pixel: the ids depend only on the image
-    count and ``image_seq_len``. ``tests/test_vlm.py`` asserts the two agree.
+    ``Idefics3Processor.replace_image_token``; SmolVLM2's ``SmolVLMProcessor`` writes the same run and names the
+    global tag ``global_image_token``), without touching a single pixel: the ids depend only on the image count
+    and ``image_seq_len``. ``tests/test_vlm.py`` asserts the two agree.
     """
     if image_seq_len is None:
         image_seq_len = processor.image_seq_len
-    return list(_expanded_ids(processor.tokenizer, text, processor.fake_image_token, processor.global_image_tag,
+    glob = getattr(processor, "global_image_tag", None) or processor.global_image_token
+    return list(_expanded_ids(processor.tokenizer, text, processor.fake_image_token, glob,
                               processor.image_token, n_images, image_seq_len))
 
 

@@ -13,6 +13,8 @@
                                                      # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
                                                      # add --backbone ModernVBERT/modernvbert for the bidirectional one,
                                                      # or --option-attention bidirectional to un-causal SmolVLM's option block
+    modal run --detach modal_app.py::split_bench      # SmolVLM2, image splitting off vs 1024 vs 2048 on a 6-set subset:
+                                                     # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
@@ -79,6 +81,7 @@ def _with_local_code(img):
 image = _with_local_code(base_image)
 
 BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
+SMOLVLM2 = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
 MODERNVBERT = "ModernVBERT/modernvbert"
 VQA_DATASETS = ("aokvqa", "scienceqa", "vqav2_yesno")  # the original post-training sets, official val splits
 CAULDRON_SUBSETS = ("ai2d", "aokvqa", "iconqa", "intergps", "scienceqa", "tqa", "visual7w", "raven",
@@ -89,7 +92,7 @@ CAULDRON_FULL_DATASETS = tuple("cauldronfull_" + s for s in CAULDRON_SUBSETS)  #
 SCORE_SOURCES = ("vlfeedback", "ava", "richhf", "crisismmd")  # see laya/rubric.py
 SCORE_DATASETS = tuple("score_" + s for s in SCORE_SOURCES)  # rubric-scored sets for the ``score`` head, written by prepare_score
 DATASETS = CAULDRON_DATASETS
-CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", MODERNVBERT: "/ckpt/modernvbert"}
+CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", SMOLVLM2: "/ckpt/smolvlm2", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
 
 
@@ -128,13 +131,15 @@ def _ckpt_path(run_name: str) -> str:
 
 
 @app.function(image=image, gpu="L4", timeout=45 * 60, volumes={"/cache/hf": hf_vol})
-def test(backbones: str = BACKBONE + "," + MODERNVBERT):
-    """Run tests/test_vlm.py and tests/test_modernvbert.py on the GPU, then time predict() in fp32 and bf16."""
+def test(backbones: str = BACKBONE + "," + SMOLVLM2 + "," + MODERNVBERT):
+    """Run tests/test_vlm.py, test_smolvlm2.py and test_modernvbert.py on the GPU, then time predict() in fp32 and
+    bf16."""
     import torch
 
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     rc = subprocess.run(
-        [sys.executable, "-m", "pytest", "/root/tests/test_vlm.py", "/root/tests/test_modernvbert.py", "-v", "-s",
+        [sys.executable, "-m", "pytest", "/root/tests/test_vlm.py", "/root/tests/test_smolvlm2.py",
+         "/root/tests/test_modernvbert.py", "-v", "-s",
          "-p", "no:cacheprovider", "-W", "ignore"],
         cwd="/root",
     ).returncode
@@ -373,6 +378,10 @@ def finetune_long(
     w_ce_schedule: str = "const",
     mix: str = "",
     mix_alpha: float = 0.0,
+    split_edge: int = 0,
+    max_len: int = 0,
+    max_train: int = 0,
+    max_val: int = 0,
 ):
     """Multi-epoch fine-tune (vision tower frozen) with per-epoch train/val tracking and best-checkpoint keeping.
 
@@ -408,6 +417,13 @@ def finetune_long(
     * ``w_ce_schedule="anneal"`` holds the soft cross-entropy weight for the first 30% of training and decays it
       to 0 by 80%, so the run ends on the proper scoring rule alone, which keeps the raw model calibrated
       (``laya.vlm_train.train``); ``"const"`` is the released recipe.
+    * ``split_edge`` > 0 turns on the processor's image splitting (``laya.preprocess``): each image is resized to
+      that longest edge and cut into 512 tiles plus a global view, up to 17 views at 2048 against 1 without.
+      Needs ``preprocess="processor"``. ``max_len`` (0: ``laya.vlm.default_max_len``, 1024 without splitting)
+      is the sequence cap; both are saved in the checkpoint. Neither applies with ``init_from``, which keeps the
+      checkpoint's.
+    * ``max_train`` / ``max_val`` > 0 keep the first records per dataset (file order) for a quicker run on a
+      subset; ``max_train`` does not count the ``n_calib`` holdout.
     """
     import math
 
@@ -421,7 +437,7 @@ def finetune_long(
     t_start = time.time()
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     out_dir = os.path.join(_ckpt_root(backbone), run_name)
-    train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, 0, 0, {}, val_datasets)
+    train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, max_train, max_val, {}, val_datasets)
     names = sorted({ex["dataset"] for ex in train_ex})
     val_names = sorted({ex["dataset"] for ex in val_ex})
     train_eval = []
@@ -445,14 +461,18 @@ def finetune_long(
         agent = VLMAgent(_ckpt_path(init_from), device="cuda")
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
-        agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention)
-    print("backbone %s, readout %s, preprocess %s" % (agent.cfg["backbone"], agent.model.readout, agent.prep.backend))
+        agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention,
+                         image_split_edge=split_edge, **({"max_len": max_len} if max_len else {}))
+    print("backbone %s, readout %s, preprocess %s, split_edge %d, max_len %d" % (
+        agent.cfg["backbone"], agent.model.readout, agent.prep.backend, agent.prep.split_edge, agent.cfg["max_len"]))
     init_temps = list(agent.temperature)
     hf_vol.commit()
     model, proc = agent.model, agent.processor
     ev_kw = dict(batch_size=64, num_workers=num_workers)
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
+                                         split_edge=agent.prep.split_edge, max_len=agent.cfg["max_len"],
+                                         max_train=max_train, max_val=max_val,
                                          option_attention=agent.model.option_attention,
                                          w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
                                          epochs=epochs, max_minutes=max_minutes, batch_size=batch_size, lr_head=lr_h,
@@ -544,7 +564,7 @@ def finetune_long(
     write_log()
     ckpt_vol.commit()
     print("saved %s/best with temperatures (%.1f min total)" % (out_dir, (time.time() - t_start) / 60))
-    return {k: log[k] for k in ("run", "best_step", "best_mean_val_acc", "temperature", "final", "train_stats")}
+    return {k: log[k] for k in ("run", "args", "best_step", "best_mean_val_acc", "temperature", "final", "train_stats")}
 
 
 @app.function(
@@ -580,6 +600,151 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     print("[val, T=1]        " + format_metrics(raw))
     print("[val, calibrated] " + format_metrics(cal))
     return {"val_raw": raw, "val_calibrated": cal}
+
+
+def _public_question(q: dict) -> dict:
+    """An internal ``{"t", "ins", "crit"}`` question back in ``predict``'s input format."""
+    crit = q["crit"]
+    if q["t"] == "choice":
+        crit = list(crit)
+    return {"type": q["t"], "instructions": q["ins"], "criteria": crit}
+
+
+@app.function(image=image, gpu="L4", cpu=4, memory=16384, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = "bf16", seed: int = 0):
+    """Time ``predict`` on real val images, one question each, as a user would call it: the checkpoint's own
+    preprocessing on the CPU (the processor's resize and, with ``image_split_edge``, its tiling), then the forward
+    pass, bf16 on an L4 like the README's latency column. Images are decoded before the clock starts. ``n``
+    examples are drawn evenly from ``datasets`` (the run's own val sets when empty)."""
+    import random
+
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from laya.vlm import VLMAgent, vlm_prefix
+
+    path = _ckpt_path(run_name)
+    agent = VLMAgent(path, device="cuda", dtype=dtype)
+    if not datasets:
+        with open(os.path.join(os.path.dirname(path.rstrip("/")), "metrics.json")) as f:
+            datasets = json.load(f)["args"]["val_datasets"]
+    names = _ready(datasets)
+    rng = random.Random(seed)
+    per = max(1, n // max(1, len(names)))
+    picked = []
+    for name in names:
+        exs = [ex for ex in _load_split(name, "val", 0) if isinstance(ex["state"], dict) and ex["state"].get("image")]
+        picked += rng.sample(exs, min(per, len(exs)))
+    cases = []
+    for ex in picked:
+        state = dict(ex["state"])
+        with Image.open(state["image"]) as im:
+            state["image"] = im.convert("RGB")
+        cases.append((state, {"q": _public_question(ex["q"])}))
+    for state, qs in cases[:5]:  # warm-up: kernels, allocator
+        agent.predict(state, qs)
+    ms, tokens, views = [], [], []
+    for state, qs in cases:
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        res = agent.predict(state, qs)
+        torch.cuda.synchronize()
+        ms.append((time.perf_counter() - t0) * 1000)
+        tokens.append(res["usage"]["input_tokens"])
+    for state, _ in cases[:50]:
+        views.append(vlm_prefix(agent.processor, [state["image"]], agent.prep)["n_images"])
+    out = {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype, "n": len(cases),
+           "split_edge": agent.prep.split_edge, "max_len": agent.cfg["max_len"],
+           "median_ms": float(np.median(ms)), "p90_ms": float(np.percentile(ms, 90)),
+           "mean_input_tokens": float(np.mean(tokens)), "mean_views_per_image": float(np.mean(views))}
+    print(json.dumps(out))
+    return out
+
+
+SPLIT_BENCH_DATASETS = ("cauldron_ai2d", "cauldron_aokvqa", "cauldron_tqa", "cauldron_ocrvqa", "cauldron_mapqa",
+                        "cauldron_vqav2")  # diagrams, photos, textbook figures, book-cover text, maps, photos
+
+
+def _split_label(edge: int) -> str:
+    return "split%d" % edge if edge else "nosplit"
+
+
+def _split_table(rows: list, names: list) -> str:
+    """Markdown summary of ``split_bench``: one row per setting."""
+    short = [n.replace("cauldron_", "") for n in names]
+    head = ("| setting | views / image | tokens / question | " + " | ".join(short) +
+            " | mean acc | mean ECE (cal.) | L4 bf16 median | p90 | train samples/s |")
+    lines = [head, "|" + "---|" * (head.count("|") - 1)]
+    for r in rows:
+        cal = r["final"]["val_calibrated"]
+        accs = [cal[n]["acc"] for n in names if n in cal]
+        eces = [cal[n]["ece"] for n in names if n in cal]
+        lat, ts = r["latency"], r["train_stats"]
+        lines.append("| %s | %.1f | %.0f | %s | %.1f%% | %.3f | %.0f ms | %.0f ms | %.0f |" % (
+            r["label"], lat["mean_views_per_image"], lat["mean_input_tokens"],
+            " | ".join("%.1f%%" % (100 * cal[n]["acc"]) if n in cal else "-" for n in names),
+            100 * sum(accs) / len(accs), sum(eces) / len(eces), lat["median_ms"], lat["p90_ms"],
+            ts["steps_per_s"] * r["args"]["batch_size"]))
+    return "\n".join(lines) + "\n"
+
+
+@app.function(image=image, cpu=1, memory=4096, timeout=24 * 60 * 60, volumes={"/ckpt": ckpt_vol})
+def split_bench(
+    bench: str = "split-bench",
+    split_edges: str = "0,1024,2048",
+    backbone: str = SMOLVLM2,
+    datasets: str = ",".join(SPLIT_BENCH_DATASETS),
+    epochs: float = 2.0,
+    max_train: int = 4000,
+    batch_size: int = 32,
+    max_minutes: float = 240.0,
+    option_attention: str = "bidirectional",
+    train_gpu: str = "H100",
+    latency_n: int = 300,
+):
+    """Image splitting off vs on, with everything else equal: one ``finetune_long`` per ``split_edges`` value
+    (0 = off, the released recipe; 1024 = up to 5 views per image; 2048 = the processor default, up to 17), all
+    on ``backbone`` from a fresh head, the same subset, schedule, batch and GPU type, run in parallel. Then
+    ``bench_latency`` on each best checkpoint. Writes ``results.json`` and ``results.md`` (accuracy per set,
+    calibrated ECE, tokens and views per question, L4 latency, training throughput) to
+    ``<backbone root>/<bench>/`` and returns the markdown table.
+
+    ``max_minutes`` caps training wall-clock per run; the table's throughput column shows whether a slow setting
+    finished its epochs (compare ``train_stats.steps`` in results.json with ``args.steps``).
+    """
+    edges = [int(e) for e in split_edges.split(",") if e.strip()]
+    root = _ckpt_root(backbone)
+    ft = finetune_long.with_options(gpu=train_gpu)
+    calls = {}
+    for e in edges:
+        run = "%s/%s" % (bench, _split_label(e))
+        print("spawning %s (split_edge %d)" % (run, e), flush=True)
+        calls[e] = ft.spawn(datasets=datasets, epochs=epochs, max_minutes=max_minutes, batch_size=batch_size,
+                            evals_per_epoch=1.0, train_eval_n=300, max_train=max_train, run_name=run,
+                            backbone=backbone, option_attention=option_attention, split_edge=e)
+    rows = []
+    for e in edges:
+        r = calls[e].get()
+        print("%s done: best mean val acc %.4f" % (_split_label(e), r["best_mean_val_acc"]), flush=True)
+        rows.append(dict(r, label=_split_label(e), split_edge=e))
+    lat_calls = [bench_latency.spawn(os.path.relpath(os.path.join(root, bench, r["label"], "best"), "/ckpt"),
+                                     datasets=datasets, n=latency_n) for r in rows]
+    for r, c in zip(rows, lat_calls):
+        r["latency"] = c.get()
+    names = [n for n in _expand_datasets(datasets) if any(n in r["final"]["val_calibrated"] for r in rows)]
+    table = _split_table(rows, names)
+    out_dir = os.path.join(root, bench)
+    ckpt_vol.reload()
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "results.json"), "w") as f:
+        json.dump(rows, f, indent=2)
+    with open(os.path.join(out_dir, "results.md"), "w") as f:
+        f.write(table)
+    ckpt_vol.commit()
+    print(table)
+    return table
 
 
 DEMO_QUESTIONS = {
