@@ -4,3 +4,4 @@ commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 a82ec1d	0.6757	0.7160	0.0403	0.1439	236.5623	1.0008	keep	exp: mix game data (toolkit maze/snake/control + pool atari/doom) at 25% of draws
 596dab2	0.6633	0.7105	0.0472	0.1530	236.5623	1.0048	discard	exp: game data at 50% of draws
 a430602	0.6750	0.7140	0.0390	0.1099	236.7113	0.9991	discard	exp: value head trained 1:1 on game value targets
+3aed5cd	0.6522	0.6807	0.0284	0.1632	236.5623	1.0228	discard	exp: train the vision tower too (on the 25% game mix)
