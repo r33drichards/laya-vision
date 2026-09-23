@@ -26,6 +26,7 @@ Inputs are cut to fit the checkpoint's token budgets: each option to 48 tokens (
 Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces its ModernBERT text encoder with a small vision-language model. Laya's `predict(state, questions)` API, output schema, RLCD training objective and temperature calibration are unchanged. It is an experimental research project, not affiliated with Convai Innovations, the authors of Laya.
 
 - **Try it:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU, about 3 s per image. Source in `space/`.
+- **In the browser, no server (experimental):** `web-demo/` runs the model with ONNX Runtime Web (WebGPU or WASM) from files you export with `scripts/export_onnx.py`; what is and is not verified is in [web-demo/README.md](web-demo/README.md).
 - **Install:** `pip install -e .` plus `torchvision`, which the image processor needs. ModernVBERT needs `transformers >= 5.3`.
 
 ## Checkpoints
