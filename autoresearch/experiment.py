@@ -29,7 +29,7 @@ BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
 # size and latency: 0 keeps what the checkpoint has
-KEEP_TEXT_LAYERS = 10      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+KEEP_TEXT_LAYERS = 15      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
@@ -45,6 +45,8 @@ WARMUP_STEPS = 20
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.25
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
+# test-time search the games benchmark plays with on the grid and control games (None = greedy); saved in the config
+SEARCH = {"kind": "lookahead", "depth": 2}
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
@@ -109,3 +111,5 @@ def train(agent, ctx):
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
                max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
+    if SEARCH:
+        agent.cfg["search"] = dict(SEARCH)

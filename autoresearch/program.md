@@ -115,7 +115,8 @@ architecture plays far better than ours. What carries over, with its evidence:
   policy (0.322 vs 0.334). `laya` models take `"value_head": true`, and game examples can carry a `value` target.
 - **Spend test-time compute through search.** autogo plays with 1024-simulation MCTS over a policy + value network,
   with the network's calls batched across leaves (19x faster than unbatched). Set `agent.cfg["search"]` to turn on
-  `laya.search` for the deterministic games; the latency objective prices what it costs.
+  `laya.search` for the deterministic games. Note: `latency_x` times one plain `predict`, so it does not price
+  search (a depth-d lookahead scores up to 4^d frames per move); report the games job's time alongside a search win.
 - **Variety beats per-episode strength, and don't throw away old data.** More games at 1024 simulations beat fewer at
   2048; training only on the newest data overfit (0.273 vs 0.305).
 - **Augment with the game's symmetries** where they hold (mirrors in Maze; not in Atari, whose screens have text).
