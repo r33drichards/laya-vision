@@ -1,2 +1,3 @@
 commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 fc915f0	0.6570	0.7083	0.0513	-0.0330	236.5623	1.0023	keep	baseline
+5f1380e	0.6561	0.7051	0.0490	0.1737	236.5623	0.9976	keep	exp: game data at 25% of draws (a82ec1d recipe) on the 15-minute harness
