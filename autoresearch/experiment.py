@@ -17,8 +17,7 @@ fly: ``toolkit.maze_examples(n)`` and ``toolkit.snake_examples(n)`` (soft target
 ``value`` target, the board's 8 symmetries), ``toolkit.control_examples(game, n)`` for CartPole, Acrobot,
 MountainCar and LunarLander, and ``toolkit.game_mix(ctx.train_examples(), games, frac, base_weights=MIX)`` to give
 games ``frac`` of the draws. A model built with ``"value_head": True`` in its config learns the ``value`` targets
-(``train(..., w_value=...)``); setting ``agent.cfg["search"]`` makes the games benchmark plan with ``laya.search``
-on the deterministic games.
+(``train(..., w_value=...)``). The games are played greedy: no test-time search.
 """
 from typing import Dict, Optional
 
@@ -45,8 +44,6 @@ WARMUP_STEPS = 20
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.25
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
-# test-time search the games benchmark plays with on the grid and control games (None = greedy); saved in the config
-SEARCH = {"kind": "lookahead", "depth": 2}
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
@@ -111,5 +108,3 @@ def train(agent, ctx):
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
                max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
-    if SEARCH:
-        agent.cfg["search"] = dict(SEARCH)

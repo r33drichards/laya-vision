@@ -93,6 +93,7 @@ You CANNOT:
 - train on anything but `ctx.train_examples()` (the pool's 2,000 examples per Cauldron and score set),
   `ctx.game_examples()` and what `toolkit.py` generates (on seeds below 100,000; the games benchmark plays 700,000+):
   no val splits, no `eval_*` sets, no calibration tail;
+- use test-time search (`agent.cfg["search"]` / `laya.search`): the model plays greedy, one forward per move;
 - exceed the 5-minute training budget (the harness fails runs over budget + 60 s);
 - add dependencies beyond what the harness image installs.
 
@@ -113,10 +114,6 @@ architecture plays far better than ours. What carries over, with its evidence:
   `toolkit.py` builds them for Maze and Snake (every shortest-path move, not one).
 - **Give the policy a value head.** autogo trains policy and value 1:1 and cutting the value weight to 0.25 hurt the
   policy (0.322 vs 0.334). `laya` models take `"value_head": true`, and game examples can carry a `value` target.
-- **Spend test-time compute through search.** autogo plays with 1024-simulation MCTS over a policy + value network,
-  with the network's calls batched across leaves (19x faster than unbatched). Set `agent.cfg["search"]` to turn on
-  `laya.search` for the deterministic games. Note: `latency_x` times one plain `predict`, so it does not price
-  search (a depth-d lookahead scores up to 4^d frames per move); report the games job's time alongside a search win.
 - **Variety beats per-episode strength, and don't throw away old data.** More games at 1024 simulations beat fewer at
   2048; training only on the newest data overfit (0.273 vs 0.305).
 - **Augment with the game's symmetries** where they hold (mirrors in Maze; not in Atari, whose screens have text).
@@ -139,7 +136,7 @@ architecture plays far better than ours. What carries over, with its evidence:
 - **Data mix**: the eval sets reward breadth; weight the weakest groups.
 - **Game data**: mix `toolkit` game examples (soft BFS targets for Maze and Snake, expert frames for classic
   control) into the training stream, and the pool's Atari and ViZDoom expert frames via `ctx.game_examples()`.
-- **Value head + search**: `"value_head": true` with `value` targets, then `cfg["search"]` at play time.
+- **Value head**: `"value_head": true` with `value` targets, as an auxiliary loss.
 - **Calibration**: the harness fits temperatures, but training with the proper scoring rules (`w_ce_schedule`, `w_sph`)
   changes how well a single temperature can fix things.
 
