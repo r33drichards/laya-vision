@@ -1,6 +1,6 @@
 ---
 name: evals
-description: Run, read and report Laya Vision evals on Modal. Use whenever the task is to evaluate, benchmark or score a checkpoint (a run on the laya-checkpoints volume, or a Hugging Face model such as thaitea/laya-vision), compare checkpoints, run the dataset evals / games suite / latency benchmark, prepare eval datasets, trigger the eval GitHub workflow, write or commit an eval report (docs/evals/*.md, HTML scorecard), add a new eval set or game, or explain eval numbers (accuracy, ECE, soft_xent vs prior, normalized Atari score). Also covers the robustness / perturbation evals, row-level evidence and `benchmarks/verify_published.py`, the typed-vs-generated-JSON benchmark, the prefix-cache and CUDA-graph game-step benchmarks, fitting `calibrate()` on a user's labelled data, and getting the Modal client to connect from a Claude Code cloud sandbox.
+description: Run, read and report Laya Vision evals on Modal. Use whenever the task is to evaluate, benchmark or score a checkpoint (a run on the laya-checkpoints volume, or a Hugging Face model such as thaitea/laya-vision), compare checkpoints, run the dataset evals / games suite / latency benchmark, prepare eval datasets, trigger the eval GitHub workflow, write or commit an eval report (site-docs/reference/evals/*.md, HTML scorecard), add a new eval set or game, or explain eval numbers (accuracy, ECE, soft_xent vs prior, normalized Atari score). Also covers the robustness / perturbation evals, row-level evidence and `benchmarks/verify_published.py`, the typed-vs-generated-JSON benchmark, the prefix-cache and CUDA-graph game-step benchmarks, fitting `calibrate()` on a user's labelled data, and getting the Modal client to connect from a Claude Code cloud sandbox.
 ---
 
 # Laya Vision evals
@@ -90,13 +90,16 @@ Needs the `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` repo secrets.
 
 ```bash
 python scripts/eval_report.py eval-results/<name>*.json                                   # PR-comment Markdown to stdout
-python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecard" --doc docs/evals/<name>.md
+python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecard" --doc site-docs/reference/evals/<name>.md
 python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecard" --html <scratch>/report.html
 ```
 
 - `--doc` is the one to commit: deterministic (same inputs, same bytes), links its result files, and its charts
   are Mermaid `xychart-beta` blocks that GitHub renders. Commit the result JSONs in `eval-results/` with it and
-  link the doc from the README if it is a released checkpoint. `docs/evals/laya-vision.md` is the example.
+  link the doc from the README if it is a released checkpoint. `site-docs/reference/evals/laya-vision.md` is the example.
+  A doc under `site-docs/` is a page of the documentation site: add it to the `nav` in `mkdocs.yml` (Reference ›
+  Results) and build with `nix build .#docs` (or `mkdocs build --strict`); its result-file links point at GitHub,
+  since MkDocs cannot link outside `site-docs/`.
 - `--html` is a self-contained page (no scripts) for reading; publish it as an artifact rather than committing it.
 - Standard library only; no torch needed.
 - If you change the charts, check every Mermaid block still parses (render them with mermaid@11 in the

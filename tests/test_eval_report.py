@@ -118,3 +118,15 @@ def test_markdown_doc_is_deterministic_with_mermaid_charts():
     assert "- **weak** ·" not in doc or "- **good** ·" in doc
     assert "&times;" not in doc and "×" in doc
     assert "### Classic control" in doc and "| CartPole | 120.0 | 20.0 | 500.0 | 0.21 | 10.0% | LEFT 60%, RIGHT 40% |" in doc
+
+
+def test_doc_links_sources_on_github_inside_site_docs(tmp_path):
+    root = tmp_path
+    (root / "site-docs" / "reference" / "evals").mkdir(parents=True)
+    (root / "eval-results").mkdir()
+    res = str(root / "eval-results" / "a.json")
+    # a report in the MkDocs source cannot link outside it, so it links the file on GitHub
+    assert R.source_links(str(root / "site-docs" / "reference" / "evals" / "x.md"), [res], root=str(root)) == \
+        [R.REPO_BLOB + "eval-results/a.json"]
+    # anywhere else, relative to the report, as before
+    assert R.source_links(str(root / "reports" / "x.md"), [res], root=str(root)) == ["../eval-results/a.json"]

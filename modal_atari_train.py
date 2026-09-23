@@ -10,7 +10,7 @@ frames (no photo-VQA data), then scored by playing ALE games.
     modal run modal_atari_train.py::renormalize --results play.json [--out play_renorm.json]
 
 Volumes (created out of band; never ``modal deploy`` this app):
-    laya-datasets     -> /data       (read-only; /data/atari/<source>/<Game>/, see docs/atari-data-format.md)
+    laya-datasets     -> /data       (read-only; /data/atari/<source>/<Game>/, see site-docs/reference/atari-data-format.md)
     laya-hf-cache     -> /cache/hf   (HF_HOME)
     laya-checkpoints  -> /ckpt       (this app writes only under /ckpt/smolvlm/atari-*)
 """

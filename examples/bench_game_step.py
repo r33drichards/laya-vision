@@ -7,7 +7,7 @@ times one decision of the current SmolVLM "terminator" layout piece by piece, fo
     current      <|im_start|>User:<image run><question><options, each ending in \\n>        (nothing reusable)
     split        the same sequence, run as prefix (up to the image) + tail (question + options) on the prefix's
                  KV cache: the tail's time is exactly what caching the question/options could ever save
-    qfirst       question-first (docs/game-caching.md, option (a)): <|im_start|>User:<question><options> is run
+    qfirst       question-first (site-docs/concepts/game-caching.md, option (a)): <|im_start|>User:<question><options> is run
                  once and kept as a KV cache; each frame runs only <image run> + one readout token per option
 
     python examples/bench_game_step.py                       # CPU, fp32, a fresh (untrained) agent

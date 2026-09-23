@@ -1,5 +1,5 @@
 """Expert-labelled Atari frames: a pretrained agent plays each game, and every full-colour frame it acts on is saved
-with the agent's action probabilities, in the layout of ``docs/atari-data-format.md`` (source ``expert``).
+with the agent's action probabilities, in the layout of ``site-docs/reference/atari-data-format.md`` (source ``expert``).
 
 Agents are CleanRL's JAX PPO checkpoints on the Hugging Face Hub (``cleanrl/<Game>-v5-<exp>-seed<n>``), which cover
 all 57 games. SB3's Hub agents (``sb3/*NoFrameskip-v4``) cover only 10 games and score lower. All three CleanRL

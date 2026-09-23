@@ -9,7 +9,7 @@ game, and every full-colour frame is saved with the agent's action probabilities
     modal run modal_atari_expert.py::table                                     # per-game table from the meta.json files
 
 Volumes (created out of band; never ``modal deploy`` this app):
-    laya-datasets  -> /data      (this app writes only under /data/atari/expert/, see docs/atari-data-format.md)
+    laya-datasets  -> /data      (this app writes only under /data/atari/expert/, see site-docs/reference/atari-data-format.md)
     laya-hf-cache  -> /cache/hf  (HF_HOME; agent weights)
 """
 import json

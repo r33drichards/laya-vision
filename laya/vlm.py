@@ -973,7 +973,7 @@ class VLMAgent:
         ``"mask"`` readout always does), and ``None`` picks: the cache costs one extra backbone pass, which pays on
         a CPU as soon as two rows share the prefix (compute-bound), but on CUDA a small backbone pass takes about
         the same time at any batch size up to a few thousand tokens (launch-bound), so there it is used only when
-        the full path would need more than one pass (more than ``batch_size`` rows). See docs/architecture.md.
+        the full path would need more than one pass (more than ``batch_size`` rows). See site-docs/concepts/architecture.md.
 
         ``temperature`` (a number for every type, or ``{"choice": T, ...}``) or ``calibration`` (from ``calibrate``)
         replaces the checkpoint's temperatures for this call only; types not given keep the checkpoint's. The

@@ -40,7 +40,7 @@ Each set is written as `/data/vqa/score_<name>/{train,val}.jsonl`, `images/`, `m
 
 ## The runs
 
-Two runs, same data and recipe as the Cauldron runs in [modernvbert-cauldron.md](modernvbert-cauldron.md), with the four score sets added to the 19 Cauldron subsets (group names expand in `--datasets`):
+Two runs, same data and recipe as the Cauldron runs in [modernvbert-cauldron.md](../reference/results/modernvbert-cauldron.md), with the four score sets added to the 19 Cauldron subsets (group names expand in `--datasets`):
 
 ```bash
 # SmolVLM (causal backbone)

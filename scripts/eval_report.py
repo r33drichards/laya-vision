@@ -11,6 +11,7 @@ Standard library only, so the reporting job needs no torch.
 """
 import argparse
 import json
+import os
 import sys
 from typing import Dict, List, Optional
 
@@ -202,9 +203,7 @@ def main(argv=None) -> int:
         ap.error("give result files or --model")
     sys.stdout.write(render(result, parse_status(args.status), args.run_url))
     if args.doc:
-        import os
-        base = os.path.dirname(os.path.abspath(args.doc))
-        rel = [os.path.relpath(os.path.abspath(p), base) for p in args.results]
+        rel = source_links(args.doc, args.results)
         with open(args.doc, "w") as f:
             f.write(render_doc(result, args.title, rel))
     if args.html:
@@ -644,6 +643,21 @@ def mermaid_hbar(title: str, labels: List[str], values: List[float], axis: str, 
     if line is not None:
         out.append("    line [%s]" % ", ".join(fmt(round(v, 3)) for v in line))
     return out + ["```", ""]
+
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_BLOB = "https://github.com/r33drichards/laya-vision/blob/main/"
+
+
+def source_links(doc: str, results: List[str], root: str = REPO_ROOT) -> List[str]:
+    """How the report links its result files: relative to the report, except for a report inside the MkDocs source
+    (``site-docs/``), which cannot link outside its own folder (``mkdocs build --strict`` fails), so there each file
+    is linked on GitHub."""
+    doc = os.path.abspath(doc)
+    if os.path.commonpath([doc, os.path.join(root, "site-docs")]) == os.path.join(root, "site-docs"):
+        return [REPO_BLOB + os.path.relpath(os.path.abspath(p), root).replace(os.sep, "/") for p in results]
+    base = os.path.dirname(doc)
+    return [os.path.relpath(os.path.abspath(p), base) for p in results]
 
 
 def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = None) -> str:

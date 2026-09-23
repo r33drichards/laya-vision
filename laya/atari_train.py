@@ -1,7 +1,7 @@
 """Game-only Atari training helpers for ``modal_atari_train.py``: load the shared Atari data layout, hold out
 calibration frames, score per game, and play ALE games with a checkpoint.
 
-Data layout (``docs/atari-data-format.md``): ``<root>/<source>/<Game>/{train,val}.jsonl`` + ``images/`` +
+Data layout (``site-docs/reference/atari-data-format.md``): ``<root>/<source>/<Game>/{train,val}.jsonl`` + ``images/`` +
 ``meta.json`` + ``_READY``. Each record becomes a ``choice`` example tagged ``dataset = "<source>/<Game>"`` and
 ``game``. A record's optional soft ``target`` is the training target; otherwise it is one-hot from ``label``.
 Training balances games, not sources: every game gets an equal share of samples and, within a game, the frames
@@ -349,7 +349,7 @@ def model_policy(agent: VLMAgent, game: str, actions: Sequence[str], sample: boo
 
     ``cuda_graph`` runs each decision as one captured CUDA graph (``laya.static_step.StaticStep``, one per number
     of episodes still running) instead of eager ``action_probs``; it replaces the feature cache. See
-    docs/game-caching.md.
+    site-docs/concepts/game-caching.md.
     """
     q = atari_question(game, actions)["action"]
     rng = np.random.default_rng(seed)

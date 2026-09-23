@@ -100,7 +100,7 @@ The refit `choice` temperature (8.30, up from 3.33) is shared by all `choice` qu
 
 ## Atari, game-only model (implemented, 2026-09-19)
 
-A model trained on Atari only: plain SmolVLM-256M with a fresh head, and none of the photo datasets. The data format is in [atari-data-format.md](atari-data-format.md). All sources are on `laya-datasets:/data/atari/<source>/<Game>/`.
+A model trained on Atari only: plain SmolVLM-256M with a fresh head, and none of the photo datasets. The data format is in [atari-data-format.md](../atari-data-format.md). All sources are on `laya-datasets:/data/atari/<source>/<Game>/`.
 
 | Source | Games | Frames per game | Format | Labels | Code |
 |---|---|---|---|---|---|
@@ -394,7 +394,7 @@ after the image, and at batch 1 on a GPU the language model costs the same ~24 m
 What pays is capturing the whole fixed-shape decision as one CUDA graph: `--cuda-graph` in both live viewers and
 `model_policy(..., cuda_graph=True)`: ~11 ms per decision at batch 1 in bf16 on an L4, 3.4-5.0x fewer, with the same
 answer. The measurements and the question-first layout that was considered and rejected are in
-[game-caching.md](game-caching.md).
+[game-caching.md](../../concepts/game-caching.md).
 
 ### Is the dataset's full-size PNG decode worth avoiding?
 

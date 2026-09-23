@@ -1,6 +1,6 @@
 # First `score` results: Cauldron + rubric sets, both backbones
 
-Three runs of `finetune_long` on the 19 closed-form Cauldron subsets plus the four rubric-scored sets from [score-data.md](score-data.md), one A100 40 GB each, launched 2026-09-22 00:30 UTC:
+Three runs of `finetune_long` on the 19 closed-form Cauldron subsets plus the four rubric-scored sets from [score-data.md](../../concepts/score-data.md), one A100 40 GB each, launched 2026-09-22 00:30 UTC:
 
 | Run | Backbone | Option attention | Trained | Best step | Mean val acc (26 sets) |
 |---|---|---|---|---|---|

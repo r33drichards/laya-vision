@@ -1,5 +1,7 @@
 # Laya Vision
 
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue)](https://r33drichards.github.io/laya-vision/)
+
 Typed, calibrated decisions about an **image plus optional text**, in one forward pass with no text generation. You give it a picture, some context and a set of questions; it answers each one as a multiple choice (`choice`), a yes/no probability (`noul`) or a graded level on a rubric you write (`score`), with probabilities you can act on at face value.
 
 ```python
@@ -25,9 +27,10 @@ Inputs are cut to fit the checkpoint's token budgets: each option to 48 tokens (
 
 Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces its ModernBERT text encoder with a small vision-language model. Laya's `predict(state, questions)` API, output schema, RLCD training objective and temperature calibration are unchanged. It is an experimental research project, not affiliated with Convai Innovations, the authors of Laya.
 
+- **In your browser:** <https://r33drichards.github.io/laya-vision/demo/> runs the model on your own GPU with WebGPU (or WASM on the CPU); no server, and the image never leaves the page.
 - **Try it:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU, about 3 s per image. Source in `space/`.
-- **In the browser, no server (experimental):** `web-demo/` runs the model with ONNX Runtime Web (WebGPU or WASM) from files you export with `scripts/export_onnx.py`; what is and is not verified is in [web-demo/README.md](web-demo/README.md).
 - **Install:** `pip install -e .` plus `torchvision`, which the image processor needs. ModernVBERT needs `transformers >= 5.3`.
+- **Documentation:** <https://r33drichards.github.io/laya-vision/>, built from [`site-docs/`](site-docs/).
 
 ## Checkpoints
 
@@ -38,125 +41,24 @@ Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/la
 
 Accuracies are on the official validation splits (VQAv2 yes/no is a re-split of the official val set by image, so not comparable to published VQAv2 numbers). Calibrated ECE pooled over all of a checkpoint's validation sets is 0.02 to 0.035, but it varies by set: for the recommended checkpoint it is 0.16 on A-OKVQA, 0.035 on ScienceQA and 0.077 on VQAv2 yes/no ([row-level evidence](results/raw/README.md)). The original checkpoint is ahead on ScienceQA because it made 12 passes over that one train split; the others made 3 to 4 as one of 19 to 23 sets, and are far broader: the recommended one averages 75% over 26 validation sets, and 93.7% on IconQA, 91.8% on DVQA, 89.9% on Hateful Memes.
 
-The full scorecard for the recommended checkpoint covers 34 validation sets, human-vote calibration, the games suite and latency: [docs/evals/laya-vision.md](docs/evals/laya-vision.md).
+The full scorecard for the recommended checkpoint covers 34 validation sets, human-vote calibration, the games suite and latency: [Scorecard](https://r33drichards.github.io/laya-vision/reference/evals/laya-vision/).
 
 The recommended row's accuracies are backed by committed per-row predictions in [results/raw/](results/raw/); `python benchmarks/verify_published.py` recomputes them (and calibrated ECE) and checks them against this table and [its metrics](docs/smolvlm-cauldron-score-bidir-full-metrics.json). Rules for adding or changing numbers: [AGENTS.md](AGENTS.md).
 
-The recommended checkpoint is the only one whose `score` answers mean anything. On held-out rubric data it scores 54% over 5 levels on VLFeedback response grading (prior-only baseline 27.5%), is 0.8 levels off on average against 1.4 for the baseline, and 0.38 levels off on 3-level damage severity. Full tables, the ordinal metrics and what each run changed are in [docs/score-results.md](docs/score-results.md).
+The recommended checkpoint is the only one whose `score` answers mean anything. On held-out rubric data it scores 54% over 5 levels on VLFeedback response grading (prior-only baseline 27.5%), is 0.8 levels off on average against 1.4 for the baseline, and 0.38 levels off on 3-level damage severity. Full tables, the ordinal metrics and what each run changed are in [Score head results](https://r33drichards.github.io/laya-vision/reference/results/score-results/).
 
-## How it works
+## Documentation
 
-A `score` question with 4 levels, a `choice` with 5 options and a `noul` are each rendered as a question followed by their options, one per line, after the image and the state text. The backbone encodes the whole sequence once per image, and a small head reads one logit per option from the hidden state at each option's marker. Softmax over the options, divided by a per-type temperature fitted after training, is the answer. Nothing is generated.
+The documentation site, <https://r33drichards.github.io/laya-vision/>, is built from [`site-docs/`](site-docs/) with MkDocs:
 
-- **Causal backbones (SmolVLM)** can only read an option after everything before it, so the options go last and each is read at its line terminator. That leaves an option-order bias of about a point of accuracy, which random orders in training and permutation averaging at inference reduce. The recommended checkpoint adds a 4D attention mask that lets the option block attend to itself in both directions (`option_attention="block"`; the older spelling `"bidirectional"` still loads but is deprecated), which is worth about a point on the reasoning-heavy sets.
-- **Bidirectional backbones (ModernVBERT)** use Laya's original format unchanged: a `[MASK]` in front of each option, read from a marker that sees the whole sequence. No order bias to fix, and the fastest at inference; it trails SmolVLM by about 7 points on the Cauldron holdouts, mostly on reasoning sets like RAVEN and TQA.
-- **Training** is Laya's RLCD objective: Gaussian noise is added to the option logits, several noisy copies are scored with a strictly proper scoring rule (log plus spherical, plus a ranked probability score for `score` questions), and the group-normalised score is the policy-gradient advantage, with a soft cross-entropy term added. The vision tower stays frozen.
+- [Install](https://r33drichards.github.io/laya-vision/install/overview/) and [Tutorials](https://r33drichards.github.io/laya-vision/tutorials/overview/): a first prediction in Python, and the model in your browser.
+- [How-to guides](https://r33drichards.github.io/laya-vision/how-to/overview/): [calibrate on your own data](https://r33drichards.github.io/laya-vision/how-to/calibrate/), [run jobs on Modal](https://r33drichards.github.io/laya-vision/how-to/run-on-modal/), [evaluate a checkpoint](https://r33drichards.github.io/laya-vision/how-to/evaluate/), [export for the browser](https://r33drichards.github.io/laya-vision/how-to/export-for-the-web/), [play games](https://r33drichards.github.io/laya-vision/how-to/play-games/).
+- [Concepts](https://r33drichards.github.io/laya-vision/concepts/overview/): [how it works](https://r33drichards.github.io/laya-vision/concepts/how-it-works/), the [architecture](https://r33drichards.github.io/laya-vision/concepts/architecture/), [calibration](https://r33drichards.github.io/laya-vision/concepts/calibration/), the [training data](https://r33drichards.github.io/laya-vision/concepts/data/).
+- [Reference](https://r33drichards.github.io/laya-vision/reference/overview/): [`predict()` and the answer schema](https://r33drichards.github.io/laya-vision/reference/predict/), [checkpoints](https://r33drichards.github.io/laya-vision/reference/checkpoints/), and every result, from [typed answers vs generated JSON](https://r33drichards.github.io/laya-vision/reference/results/decision-vs-generation/) to [what didn't work](https://r33drichards.github.io/laya-vision/reference/results/what-didnt-work/).
 
-Diagrams of every variant and the shared head are in [docs/architecture.md](docs/architecture.md); the model code is `laya/vlm.py` and the training loop `laya/vlm_train.py`.
-
-## Speed: typed answers versus generated JSON
-
-Fifteen questions (6 `choice`, 5 `noul`, 4 `score`) about one image and a short state text, on one L4 in bf16, the median of 5 runs after 2 warm-up rounds, with the clock synchronized with CUDA. Every path starts from a decoded image, so every time includes the CPU preprocessing:
-
-| Path | Time | Output tokens | Result |
-|---|---:|---:|---|
-| `predict`, thaitea/laya-vision, default `batch_size=8` (2 forward passes) | **0.144 s** | **0** | 15 typed answers with probabilities |
-| `predict`, `batch_size=15` (1 forward pass) | **0.098 s** | **0** | the same answers |
-| Base SmolVLM-256M-Instruct asked for one compact JSON array, same 512-pixel view | 3.216 s (22x) | 89 | prose, no JSON array; 0/15 usable |
-| The same with the base model's shipped image splitting (17 views) | 0.613 s (4.3x) | 9 | "The image does not contain any text."; 0/15 usable |
-| The base model asked one question per `generate` call, 15 calls | 4.489 s (31x) | 105 | 1/15 strictly valid; 3/15 agree with `predict` after lenient parsing |
-
-This is a systems comparison, like [SemIf's](https://github.com/r33drichards/SemIf), not a quality one. The two paths do not share weights: the checkpoint's backbone was fine-tuned with its head, and the base model it started from cannot follow the compact-array instruction at this size, so its time is the time to say whatever it said. A valid array of the checkpoint's own answers is 41 tokens in this tokenizer; at the 36 ms per token the base model decoded here it would take about 1.6 s, or 11x `predict`, an estimate, not a measurement. Generation also grows with every token of output, where `predict` costs one forward pass per batch of questions whatever their answers. Agreement is with `predict`'s argmax, not with the truth: `predict` itself says the circle is the largest shape on this card. The image is drawn by the script, so the fixture is owned by this repo.
-
-Rerun with `modal run modal_app.py::decision_vs_generation --output results/raw/<new>.json`. The [raw report](results/raw/decision-vs-generation-l4.json) has the prompts, every run's timings, the generated text and token timeline, the pinned revisions of both models, the torch and transformers versions and the git sha of the code measured; the script is [benchmarks/decision_vs_generation.py](benchmarks/decision_vs_generation.py).
-
-## Calibrating on your own data
-
-Each answer's probabilities come from the option scores divided by a **temperature** and turned into percentages. A temperature above 1 flattens them (less sure), below 1 sharpens them (more sure). The checkpoint's temperatures were fitted on its validation sets, so on those sets "80% sure" is right about 80% of the time. On your photos and your questions it may not be: the model can be overconfident on a domain it has not seen. If you act on a probability threshold (auto-approve above 0.9, send to a human below), calibrate on a few hundred of your own labelled questions first.
-
-```python
-cal = agent.calibrate(
-    [
-        {"state": {"image": img, "note": note}, "image_id": "a17",
-         "questions": {"damage": damage_q, "outdoors": outdoors_q},
-         "labels": {"damage": 2, "outdoors": False}},            # level index for score, option name for choice, bool for noul
-        ...
-    ],
-    group_key="image_id",                                        # questions about one image stay together in every split
-)
-print(cal.summary())                                             # fitted temperatures; ECE raw / checkpoint / fitted, with 95% intervals
-cal.save("my-calibration.json")
-
-result = agent.predict(state, questions, calibration=laya.Calibration.load("my-calibration.json"))
-result = agent.predict(state, questions, temperature={"noul": 1.4})   # or set one by hand, for this call only
-```
-
-`calibrate` runs the model once over your rows and fits one temperature per question type (a type with fewer than 30 labelled questions shares one fitted on all rows; with fewer than 30 in total the checkpoint's are kept). It then checks the result honestly: the fitted temperature is scored on rows it was not fitted on (5 folds that never split a group), next to the raw and checkpoint temperatures, each with a 95% interval. `cal.evidence["all"]["ece_improvement"]` gives the paired interval of the gain; if it includes 0, the new temperature is not shown to beat the checkpoint's on your data and you can keep the checkpoint's. Rows without the `group_key` field count as their own group, with a warning. A calibration records which checkpoint it was fitted for and warns (`strict_calibration=True` raises) if used with another; use the same `n_permutations` in `calibrate` and `predict` (the calibration records the value it was fitted with).
-
-**Accuracy does not change.** Dividing every option's score by the same positive number keeps their order, so the chosen option, the `score` level with the highest probability and which side of 0.5 a `noul` falls on stay the same; only how sure the model says it is moves. The `score` field (the expected level) does move a little, since it averages over the probabilities. Neither `temperature=` nor `calibration=` changes the agent: they apply to that one call. The fitting code is plain numpy in `laya/calibration.py`.
-
-## Data
-
-Everything is a prepared dataset on the `laya-datasets` Modal volume: `/data/vqa/<name>/{train,val}.jsonl` plus `images/`, one record per question with its type, instructions, criteria and label, optionally a soft target.
-
-- **The Cauldron** (`laya/cauldron.py`, `prepare_cauldron`): the 19 subsets of [HuggingFaceM4/the_cauldron](https://huggingface.co/datasets/HuggingFaceM4/the_cauldron) whose answers are closed. Lettered choices and option lists become `choice`, yes/no turns become `noul`, RAVEN's letters become an 8-way `choice`; numbers, captions and free text are skipped. 270k questions.
-- **Rubric-scored sets** (`laya/rubric.py`, `prepare_score`): VLFeedback (response helpfulness and visual faithfulness, 1 to 5), AVA (photo aesthetics, human vote histograms as soft targets), RichHF-18K (generated-image plausibility, alignment, aesthetics, overall) and CrisisMMD (damage severity). Each level is a short rubric clause in the style you would write for `predict`, with several instruction phrasings per question. How they were cleaned, and why, is in [docs/score-data.md](docs/score-data.md).
-- **Held-out evaluation sets** (`laya/evalsets.py`, `prepare_eval`): KonIQ-10k photo quality and EvalMuse-40K prompt alignment as `score` questions, CIFAR-10H and FER+ as `choice`, VizWiz answerability and POPE (random, popular, adversarial) as `noul`. KonIQ, EvalMuse, CIFAR-10H, FER+ and VizWiz keep each image's human vote histogram as a soft target, so `evaluate` also reports cross-entropy against how people actually split (`soft_xent`, `xent`) next to the same number for the set's average histogram (`prior_…`). Evaluation only, except KonIQ, EvalMuse and FER+, which have train splits. KonIQ and FER+ also get their official test split (`evaluate --val-split test`).
-- **The original three** (`aokvqa`, `scienceqa`, `vqav2_yesno`): the official train splits, prepared on the [`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment) branch.
-- **Games**: frames auto-labelled by a scripted expert or a trained agent; see below.
-
-## Running it on Modal
-
-`modal_app.py` expects the volumes `laya-hf-cache`, `laya-datasets` and `laya-checkpoints`, and a `huggingface-thaitea` secret for the publish jobs. Dataset arguments take names or the groups `vqa`, `cauldron`, `score` and `eval`.
-
-From a Claude Code on the web session, run `bash .claude/skills/modal/check.sh` first: the CLI needs `modal[api-proxy-support]` to get through the session's proxy. The `modal` skill in [.claude/skills/modal](.claude/skills/modal/SKILL.md) covers setup, a smoke test, detached runs and reading results off the volumes.
-
-```bash
-modal run modal_app.py::try_model --image photo.jpg --questions q.json --run cauldron-score-2ep-bidir-full/best
-modal run modal_app.py::test                                              # GPU tests + latency, both backbones
-modal run modal_app.py::prepare_cauldron                                  # -> /data/vqa/cauldron_<subset>
-modal run modal_app.py::prepare_score                                     # -> /data/vqa/score_<name>
-modal run modal_app.py::prepare_eval                                      # -> /data/vqa/eval_<name>
-modal run --detach modal_app.py::finetune_long --run-name my-run --epochs 2 --max-passes 4 --max-minutes 240 \
-    --option-attention block --mix score_vlfeedback=3 --datasets cauldron,score --val-datasets vqa,cauldron,score
-modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name my-run --datasets cauldron
-modal run modal_app.py::full_eval --model my-run/best                   # every eval below at once, one results JSON (no --detach: results are collected locally)
-modal run modal_app.py::evaluate --run-name my-run/best                   # every prepared val set, raw and calibrated
-modal run modal_app.py::evaluate --run-name my-run/best --datasets eval   # only the held-out evaluation sets
-modal run --detach modal_app.py::split_bench                              # SmolVLM2, image splitting off / 1024 / 2048
-modal run modal_app.py::games_eval --model my-run/best --out games.json   # Atari, ViZDoom, Maze, Snake, classic control + baselines
-modal run modal_app.py::publish --repo user/name --run my-run/best --card hf_model_card_score.md
-modal run modal_app.py::publish_space                                     # push space/ to the demo Space
-```
-
-`full_eval` runs the whole suite on one checkpoint in parallel and saves one file. That covers the `evaluate` dataset groups (`vqa,cauldron,score,eval`), the games suite and `bench_latency`. It writes the results to `eval-results/<run>-<commit>.json` locally, and to `<run>/evals/` on the checkpoint volume, beside the weights but outside the folder `publish` uploads. The file records the git commit it ran from, and each dataset's `meta.json`. To evaluate a branch's checkpoint, run it from that branch's checkout, since the Modal images ship the local `laya/` code. `--parts datasets,games,latency`, `--datasets` and `--val-split test` narrow it down. `python scripts/eval_report.py <result files> --doc docs/evals/<name>.md` turns results into a Markdown report whose charts are Mermaid blocks GitHub renders; `--html` writes the same as a standalone page.
-
-The same suite runs from GitHub Actions with the `eval` workflow (`.github/workflows/eval.yml`). Start it from Actions → eval → Run workflow, on the branch whose code trained the checkpoint, or with `gh workflow run eval.yml --ref <branch> -f model=<run>/best`.
-- The datasets, games and latency parts run as parallel jobs, and each job's log is the live Modal output.
-- The results go to the run summary and to a comment on the branch's open pull request. Re-running for the same checkpoint updates that comment.
-- It needs the `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets.
-
-`finetune_long` keeps data, objective, schedule and evaluation identical across backbones, which is what makes the checkpoints above comparable. It also takes `--backbone HuggingFaceTB/SmolVLM2-256M-Video-Instruct` (same size and code path as SmolVLM), `--split-edge` to turn on the processor's image splitting (the image is resized to that longest edge and cut into 512 tiles plus a global view: up to 5 views at 1024, 17 at 2048, against 1 without) and `--max-len` for the sequence cap, which is 1024 by default and raised to fit the tiles when splitting. `split_bench` trains one SmolVLM2 run per split setting on a six-set subset and writes accuracy per set, tokens per question and L4 latency to `/ckpt/smolvlm2/split-bench/results.md`. Results: splitting at 1024 gained about 1 point for 35% more latency, and 2048 gained nothing for 2.5× the latency ([docs/split-bench.md](docs/split-bench.md)). Runs save under `/ckpt/smolvlm/` or `/ckpt/modernvbert/` with a `best/` and `last/` checkpoint and a `metrics.json` of every evaluation. Locally, `python -m laya.vlm_train --synthetic --steps 3` is a smoke run.
-
-## Playing games
-
-The screen is the image and the options are the game's buttons. `examples/atari_live.py` and `examples/vizdoom_live.py` let you watch a checkpoint play in a local window. Trained for 7 minutes on 20,000 auto-labelled frames, it plays ViZDoom `basic` at expert level (mean reward +75.4 against the expert's +75.8 over 50 unseen episodes); the Atari work, with a two-frame input and DAgger rounds, is in [docs/game-training.md](docs/game-training.md).
-
-`modal run modal_app.py::games_eval --model <run>/best` scores a checkpoint on the games suite in one go:
-- Atari Freeway, Breakout and Galaxian, at `atari_eval`'s settings, against random play and, where expert data exists, the expert. Galaxian has no expert data, so it is compared with random only.
-- ViZDoom `basic`, against the scripted expert, random and always-attack.
-- Maze, at 4×4, 6×6 and 8×8 cells: solve rate, and path efficiency against the BFS shortest path.
-- Snake, on a 10×10 board: food eaten and steps survived, against a greedy BFS expert and random.
-- Classic control from Gymnasium (CartPole, Acrobot, MountainCar, LunarLander), 10 episodes each: episode return and share solved, normalized between random play (0) and a scripted controller (1). A single frame hides velocity, so the screen ghosts the previous frame under the current one.
-
-Maze and Snake are small seeded games in `laya/gridgames.py`, and the classic-control wrappers are in `laya/controlgames.py`, so every checkpoint plays the same levels. `maze_eval`, `snake_eval` and `control_eval` compare several checkpoints on one game.
-
-## What didn't work
-
-- **A SigLIP projector into Laya's text encoder** ([`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment)): kept text answers bit-identical but never learned to use the image in 5 runs; accuracy with shuffled images matched accuracy with real ones.
-- **Annealing the cross-entropy weight to zero** so training ends on the proper scoring rule alone: tied on accuracy and made the raw model more overconfident ([docs/modernvbert-cauldron.md](docs/modernvbert-cauldron.md)).
-- **Balancing AVA's levels on the train split only**: the head learned a flatter vote histogram than the val voters produce and lost to a prior-only baseline until the balancing was removed.
-- **A third epoch over the same rubric data**: half a point on VLFeedback, nothing elsewhere. More passes are flat; the next gains need new rubric data.
+To build it: `nix build .#docs` (the site, with the browser demo under `demo/`, lands in `./result`), or
+`pip install mkdocs mkdocs-mermaid2-plugin && mkdocs build --strict`. Pull requests run the build, a link check and a
+headless-browser check (`docs-check.yml`); pushes to `main` deploy it to GitHub Pages (`deploy-docs.yml`).
 
 ## License
 

@@ -10,11 +10,11 @@ modal run --detach modal_app.py::robustness_eval --n 300 --tag <new-tag>   # L4,
 python -m laya.robustness results/robustness/predictions.jsonl.gz         # re-summarise offline, no model
 ```
 
-Code: [`laya/robustness.py`](../laya/robustness.py) (builders, scoring, summary; each rule is documented
+Code: [`laya/robustness.py`](https://github.com/r33drichards/laya-vision/blob/main/laya/robustness.py) (builders, scoring, summary; each rule is documented
 there), `modal_app.py::robustness` / `robustness_eval`, tests in `tests/test_robustness.py`. Raw outputs:
-[`results/robustness/predictions.jsonl.gz`](../results/robustness/predictions.jsonl.gz) (one line per scored
+[`results/robustness/predictions.jsonl.gz`](https://github.com/r33drichards/laya-vision/blob/main/results/robustness/predictions.jsonl.gz) (one line per scored
 row: ids, family/variant, label, raw logits, calibrated probabilities, argmax) and
-[`results/robustness/summary.json`](../results/robustness/summary.json).
+[`results/robustness/summary.json`](https://github.com/r33drichards/laya-vision/blob/main/results/robustness/summary.json).
 
 ## Setup
 

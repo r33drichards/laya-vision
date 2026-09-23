@@ -77,7 +77,7 @@ The mean over the six sets is 70.2%. The validation sets come from the Cauldron'
 | No splitting | 1 | 68.7% | 69.2% | 77.0 ms | 8.6 min |
 | **Split at 1024 (this model)** | 4.6 | **70.2%** | **70.3%** | 103.6 ms (+35%) | 21.0 min |
 
-The gains were on photos and diagrams: A-OKVQA +2.5, AI2D +2.1, VQAv2 +1.8 points. OCR-VQA was flat (−0.1) and MapQA gained 0.7. Every row is a single training run, and most per-set differences are within about 1–2 standard errors. The pooled gain over all questions, +1.1 ± 0.9 points (one standard error of the difference), is the most reliable figure. Splitting at 2048 gained nothing over no splitting (−0.3 ± 1.0) at 2.5× the latency; the full write-up is in the repo's `docs/split-bench.md`.
+The gains were on photos and diagrams: A-OKVQA +2.5, AI2D +2.1, VQAv2 +1.8 points. OCR-VQA was flat (−0.1) and MapQA gained 0.7. Every row is a single training run, and most per-set differences are within about 1–2 standard errors. The pooled gain over all questions, +1.1 ± 0.9 points (one standard error of the difference), is the most reliable figure. Splitting at 2048 gained nothing over no splitting (−0.3 ± 1.0) at 2.5× the latency; the full write-up is in the repo's `site-docs/reference/results/split-bench.md`.
 
 ## Training
 
