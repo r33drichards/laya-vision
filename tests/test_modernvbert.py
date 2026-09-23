@@ -40,6 +40,12 @@ class _Cfg:
         self.model_type = model_type
 
 
+
+def same_but_checkpoint(a, b):
+    """Two predict outputs agree on everything except which checkpoint produced them (a reload changes its id)."""
+    strip = lambda r: dict(r, provenance={k: v for k, v in r["provenance"].items() if k != "checkpoint"})  # noqa: E731
+    return strip(a) == strip(b)
+
 def test_readout_follows_the_backbone(agent):
     """The family is decided by the backbone's model_type, recorded in the config and left on the processor."""
     assert readout_for(_Cfg("modernvbert")) == "mask"
@@ -169,7 +175,7 @@ def test_save_load_roundtrip(agent, tmp_path, include_backbone):
     assert loaded.cfg["readout"] == loaded.model.readout == processor_readout(loaded.processor) == "mask"
     assert loaded.cfg["backbone"] == MODERNVBERT_BACKBONE
     after = [loaded.predict(state, QUESTIONS), loaded.predict("plain text", QUESTIONS)]
-    assert after == before
+    assert all(same_but_checkpoint(a, b) for a, b in zip(after, before))
     assert loaded.cfg["temperature"] == [1.3, 0.8, 1.1]
 
 
@@ -199,7 +205,7 @@ def test_train_and_predict_at_256(tmp_path):
     a.save(str(tmp_path))
     loaded = VLMAgent(str(tmp_path), device=DEVICE)
     assert loaded.cfg["image_size"] == 256 and loaded.prep.backend == "gpu" and loaded.model.readout == "mask"
-    assert loaded.predict(state, QUESTIONS) == res
+    assert same_but_checkpoint(loaded.predict(state, QUESTIONS), res)
 
 
 def test_latency(agent):

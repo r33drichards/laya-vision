@@ -76,6 +76,12 @@ def check_schema(res, questions):
     json.dumps(prov)
 
 
+
+def same_but_checkpoint(a, b):
+    """Two predict outputs agree on everything except which checkpoint produced them (a reload changes its id)."""
+    strip = lambda r: dict(r, provenance={k: v for k, v in r["provenance"].items() if k != "checkpoint"})  # noqa: E731
+    return strip(a) == strip(b)
+
 def test_predict_image_and_text(agent):
     for state in ({"image": square((220, 20, 20)), "caption": "a test card"}, {"images": [square((220, 20, 20)), square((20, 40, 220))]}):
         res = agent.predict(state, QUESTIONS)
@@ -513,7 +519,7 @@ def test_train_and_predict_at_256(tmp_path):
     a.save(str(tmp_path))
     loaded = VLMAgent(str(tmp_path), device=DEVICE)
     assert loaded.cfg["image_size"] == 256 and loaded.prep.backend == "gpu"
-    assert loaded.predict(state, QUESTIONS) == res
+    assert same_but_checkpoint(loaded.predict(state, QUESTIONS), res)
 
 
 def test_config_without_the_new_keys_keeps_the_old_path(tmp_path):
