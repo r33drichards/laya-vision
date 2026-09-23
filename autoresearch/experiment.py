@@ -30,7 +30,6 @@ OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a che
 
 # size and latency: 0 keeps what the checkpoint has
 KEEP_TEXT_LAYERS = 15      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
-TEXT_LAYER_PICK = "spread"  # "first": layers 0..N-1; "spread": N layers evenly across the stack (0, 2, 4, ...)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
@@ -38,8 +37,8 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-LR_HEAD = 5e-5
-LR_BACKBONE = 1e-5
+LR_HEAD = 1e-4
+LR_BACKBONE = 2e-5
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
 
@@ -50,22 +49,14 @@ CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 # -- helpers ------------------------------------------------------------------------------------------------------
 
-def keep_text_layers(agent, n: int, pick: str = "first") -> None:
-    """Keep ``n`` decoder layers of the language model (the first ``n``, or ``n`` spread evenly across the stack),
-    in the module and in the saved config."""
-    import torch
-
+def keep_text_layers(agent, n: int) -> None:
+    """Drop all but the first ``n`` decoder layers of the language model, in the module and in the saved config."""
     tm = agent.model.encoder.text_model
-    total = len(tm.layers)
-    idx = list(range(n)) if pick == "first" else sorted({round(i * (total - 1) / (n - 1)) for i in range(n)})
-    tm.layers = torch.nn.ModuleList([tm.layers[i] for i in idx])
-    for j, layer in enumerate(tm.layers):  # attention caches index layers by position
-        if hasattr(layer, "self_attn") and hasattr(layer.self_attn, "layer_idx"):
-            layer.self_attn.layer_idx = j
+    tm.layers = tm.layers[:n]
     cfg = agent.model.encoder.config.text_config
     cfg.num_hidden_layers = n
     if getattr(cfg, "layer_types", None):
-        cfg.layer_types = [list(cfg.layer_types)[i] for i in idx]
+        cfg.layer_types = list(cfg.layer_types)[:n]
 
 
 def keep_vision_layers(agent, n: int) -> None:
@@ -95,7 +86,7 @@ def build(ctx):
     else:
         agent = VLMAgent(backbone=BACKBONE, device=ctx.device, option_attention=OPTION_ATTENTION)
     if KEEP_TEXT_LAYERS:
-        keep_text_layers(agent, KEEP_TEXT_LAYERS, TEXT_LAYER_PICK)
+        keep_text_layers(agent, KEEP_TEXT_LAYERS)
     if KEEP_VISION_LAYERS:
         keep_vision_layers(agent, KEEP_VISION_LAYERS)
     if IMAGE_SIZE:
