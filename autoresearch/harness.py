@@ -438,6 +438,16 @@ def _code_hash() -> str:
     return h.hexdigest()[:10]
 
 
+def deployment_name() -> str:
+    return "%s-%s" % (app.name, _code_hash())
+
+
+def follow_logs(name: str):
+    """Stream the deployment's container logs into this process's output (a deployed app's logs do not reach
+    ``modal run`` on their own). Returns the process to terminate when the run is over."""
+    return subprocess.Popen([sys.executable, "-m", "modal", "app", "logs", name, "-f"], cwd=REPO)
+
+
 def deployed_classes():
     """``(TrainEval, Latency)`` from a deployment of exactly this code, deploying it first if needed.
 
@@ -445,7 +455,7 @@ def deployed_classes():
     the code gets its own app, ``laya-autoresearch-<hash>``: redeploying unchanged code is quick and keeps its
     snapshot, and concurrent runs from different code never call each other's deployment.
     """
-    name = "%s-%s" % (app.name, _code_hash())
+    name = deployment_name()
     try:
         te = modal.Cls.from_name(name, "TrainEval")
         te.hydrate()
@@ -480,10 +490,18 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
     runs = os.path.join(REPO, "autoresearch", "runs", tag)
     tsv = os.path.join(runs, "results.tsv")
     os.makedirs(runs, exist_ok=True)
+    # results are only comparable under one harness: this file, the laya package and the pool it reads
+    version, pinned = _code_hash(), os.path.join(runs, "harness.txt")
+    if os.path.exists(pinned) and open(pinned).read().strip() != version:
+        raise SystemExit("the harness (autoresearch/harness.py or laya/) changed since tag %r started (%s -> %s), so its "
+                         "results would not be comparable; start a new tag" % (tag, open(pinned).read().strip(), version))
+    with open(pinned, "w") as f:
+        f.write(version + "\n")
     with open(exp_path) as f:
         source = f.read()
     t0 = time.time()
     train_eval, latency = deployed_classes()  # a failed deploy is not the experiment's crash
+    logs = follow_logs(deployment_name())
     try:
         res = train_eval().run.remote(source, tag, commit)
         res["summary"].update({k: v for k, v in latency().run.remote(tag, commit).items() if k.startswith("latency")})
@@ -492,6 +510,10 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         pareto.append_tsv(tsv, pareto.crash_row(commit, desc))
         print("status: crash")
         raise SystemExit(1)
+    finally:
+        time.sleep(3)  # let the last lines arrive
+        logs.terminate()
+    res["harness"] = version
     res.update(description=desc, total_s=round(time.time() - t0, 1))
     out = os.path.join(runs, commit + ".json")
     with open(out, "w") as f:
