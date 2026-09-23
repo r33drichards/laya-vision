@@ -1,0 +1,3 @@
+commit	quality	macro_acc	ece_hard	params_m	latency_x	status	description
+0ef4458	0.6715	0.7148	0.0434	236.5623	0.9984	keep	baseline A
+0ef4458	0.6739	0.7147	0.0408	236.5623	1.0072	discard	baseline B

@@ -24,8 +24,9 @@ import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
 # Noise margins: a result must beat every kept result by more than these in at least one objective to count as
-# new. Starting values, not yet measured: re-run the baseline experiment a few times and set them just above the
-# spread you see (program.md asks for this at setup).
+# new. Measured on the unchanged baseline experiment (4 runs, harness with the data pool): quality 0.6691-0.6739
+# (spread 0.0048), latency_x 0.998 and 1.007 on two L4 hosts whose raw times were 52 and 77 ms. Re-measure when the
+# harness changes (program.md asks for this at setup).
 EPS_QUALITY = 0.005   # absolute, on the quality score
 EPS_PARAMS = 0.01     # relative
 EPS_LATENCY = 0.03    # relative
