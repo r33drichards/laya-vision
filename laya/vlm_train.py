@@ -631,9 +631,16 @@ def metrics_from(records: List[Dict], temperatures: Sequence[float] = (1.0, 1.0,
     levels; with a one-hot target that is the distance from the label), and ``xent``, the cross-entropy against
     the (possibly soft) target, which is what a vote-histogram target like AVA's is actually trained on. Argmax
     accuracy and NLL against the argmax label understate such a model: it is trained to spread probability.
+
+    ``choice`` and ``noul`` records with a soft target (human vote shares, e.g. CIFAR-10H or VQAv2 yes/no) add
+    ``n_soft`` and ``soft_xent``, the same cross-entropy for those records. Next to each cross-entropy is a
+    model-free reference, ``prior_xent`` / ``prior_soft_xent``: the cross-entropy of the same records' targets
+    against their mean target (the dataset's average vote histogram), where they all have the same option count.
     """
     groups: Dict[str, List] = {"all": []}
     ordinal: Dict[str, List] = {}
+    soft: Dict[str, List] = {}
+    targets: Dict[str, Dict[str, List]] = {"xent": {}, "soft_xent": {}}
     for r in records:
         p = torch.softmax(r["logits"] / temperatures[r["qtype"]], -1)
         row = (float(p.max()), float(int(p.argmax()) == r["label"]), -float(torch.log(p[r["label"]].clamp_min(1e-12))))
@@ -646,6 +653,15 @@ def metrics_from(records: List[Dict], temperatures: Sequence[float] = (1.0, 1.0,
             orow = (abs(float((p * levels).sum() - (t * levels).sum())), -float((t * torch.log(p.clamp_min(1e-12))).sum()))
             ordinal.setdefault("all", []).append(orow)
             ordinal.setdefault(r["dataset"], []).append(orow)
+            for g in ("all", r["dataset"]):
+                targets["xent"].setdefault(g, []).append(t)
+        elif r["qtype"] != QTYPES["score"] and float(r["target"].max()) < 1.0 - 1e-6:
+            t = torch.as_tensor(r["target"], dtype=torch.float32)
+            t = t / t.sum().clamp_min(1e-12)
+            xent = -float((t * torch.log(p.clamp_min(1e-12))).sum())
+            for g in ("all", r["dataset"]):
+                soft.setdefault(g, []).append(xent)
+                targets["soft_xent"].setdefault(g, []).append(t)
     out = {}
     for name, rows in groups.items():
         a = np.array(rows) if rows else np.zeros((0, 3))
@@ -654,6 +670,13 @@ def metrics_from(records: List[Dict], temperatures: Sequence[float] = (1.0, 1.0,
         if name in ordinal:
             o = np.array(ordinal[name])
             out[name].update(n_score=len(o), mae=float(o[:, 0].mean()), xent=float(o[:, 1].mean()))
+        if name in soft:
+            out[name].update(n_soft=len(soft[name]), soft_xent=float(np.mean(soft[name])))
+        for key, by_group in targets.items():
+            ts = by_group.get(name)
+            if ts and key in out[name] and len({len(t) for t in ts}) == 1:
+                T = torch.stack(ts)
+                out[name]["prior_" + key] = -float((T * torch.log(T.mean(0).clamp_min(1e-12))).sum(-1).mean())
     return out
 
 
@@ -664,8 +687,13 @@ def evaluate(model: VLMDecisionModel, processor, examples: List[Dict], temperatu
 def format_metrics(m: Dict) -> str:
     def one(k, v):
         s = "%s n=%d acc=%.3f ece=%.3f nll=%.3f" % (k, v["n"], v["acc"], v["ece"], v["nll"])
-        if "mae" in v:
-            s += " mae=%.3f xent=%.3f" % (v["mae"], v["xent"])
+        for key in ("xent", "soft_xent"):
+            if key == "xent" and "mae" in v:
+                s += " mae=%.3f" % v["mae"]
+            if key in v:
+                s += " %s=%.3f" % (key, v[key])
+                if "prior_" + key in v:
+                    s += " (prior %.3f)" % v["prior_" + key]
         return s
     return " | ".join(one(k, v) for k, v in m.items())
 

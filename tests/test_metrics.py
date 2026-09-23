@@ -42,3 +42,32 @@ def test_score_mae_and_soft_cross_entropy():
     m = metrics_from(both, temperatures=(1.0, 2.0, 1.0))
     assert m["all"]["n"] == 2 and m["all"]["n_score"] == 1 and m["all"]["mae"] == pytest.approx(2.0)
     assert "mae=" in format_metrics(m) and "xent=" in format_metrics(m)
+
+
+def test_soft_choice_and_noul_cross_entropy_with_prior():
+    # human vote shares on a choice set: soft_xent is the cross-entropy against them, prior_soft_xent that of the
+    # set's mean histogram; hard-label records in the same group do not count toward either
+    votes = [[0.9, 0.1, 0.0], [0.2, 0.8, 0.0]]
+    recs = [rec([math.log(0.9), math.log(0.1), -30.0], votes[0], "choice", "h"),
+            rec([math.log(0.2), math.log(0.8), -30.0], votes[1], "choice", "h"),
+            rec([2.0, 0.0, 0.0], [1, 0, 0], "choice", "h")]
+    m = metrics_from(recs)
+    ent = [-sum(v * math.log(v) for v in t if v) for t in votes]
+    assert m["h"]["n"] == 3 and m["h"]["n_soft"] == 2
+    assert m["h"]["soft_xent"] == pytest.approx(sum(ent) / 2, abs=1e-5)
+    mean = [0.55, 0.45]
+    prior = sum(-sum(v * math.log(p) for v, p in zip(t, mean)) for t in votes) / 2
+    assert m["h"]["prior_soft_xent"] == pytest.approx(prior, abs=1e-5) and m["h"]["prior_soft_xent"] > m["h"]["soft_xent"]
+    assert "mae" not in m["h"] and "xent" not in m["h"]
+    assert "soft_xent=" in format_metrics(m) and "(prior " in format_metrics(m)
+    # a yes/no set with only hard labels gets neither
+    m = metrics_from([rec([0.0, 2.0], [0, 1], "noul", "pope")])
+    assert "soft_xent" not in m["pope"] and "prior_soft_xent" not in m["pope"]
+
+
+def test_score_prior_is_the_mean_histogram():
+    t1, t2 = [0.5, 0.5, 0.0], [0.0, 0.5, 0.5]
+    m = metrics_from([rec([0.0] * 3, t1, "score", "q"), rec([0.0] * 3, t2, "score", "q")])
+    mean = [0.25, 0.5, 0.25]
+    prior = sum(-sum(v * math.log(p) for v, p in zip(t, mean) if v) for t in (t1, t2)) / 2
+    assert m["q"]["prior_xent"] == pytest.approx(prior, abs=1e-5) and m["q"]["xent"] == pytest.approx(math.log(3), abs=1e-5)

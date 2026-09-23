@@ -8,6 +8,8 @@
                                                      # the same run on the bidirectional backbone
     modal run modal_app.py::prepare_cauldron          # The Cauldron's closed-form subsets -> /data/vqa/cauldron_<subset>
     modal run modal_app.py::prepare_score             # rubric-scored sets (score questions) -> /data/vqa/score_<name>
+    modal run modal_app.py::prepare_eval              # held-out eval sets (KonIQ, EvalMuse, CIFAR-10H, FER+, VizWiz,
+                                                     # POPE) -> /data/vqa/eval_<name>; evaluate scores them by default
     modal run --detach modal_app.py::finetune_long --run-name cauldron-score-2ep --epochs 2 --max-passes 4 \
         --datasets cauldron,score --val-datasets vqa,cauldron,score
                                                      # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
@@ -22,6 +24,14 @@
     modal run modal_app.py::publish_space            # push space/ to the thaitea/laya-vision-demo Space
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
+    modal run modal_app.py::maze_eval --models <run>/best     # Maze at 4x4 / 6x6 / 8x8 cells: BFS expert, random, models
+    modal run modal_app.py::snake_eval --models <run>/best    # Snake on a 10x10 board: greedy expert, random, models
+    modal run modal_app.py::full_eval --model <run>/best  # EVERYTHING on one checkpoint, in parallel: evaluate over
+                                                     # vqa,cauldron,score,eval + games suite + latency; one JSON in
+                                                     # eval-results/ and <run>/evals/ on the checkpoint volume
+    modal run modal_app.py::games_eval --model <run>/best --out games.json
+                                                     # the games suite on one checkpoint: Atari Freeway / Breakout /
+                                                     # Galaxian, ViZDoom basic, Maze, Snake, with baselines, in parallel
 
 Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
@@ -35,11 +45,14 @@ and the uncapped ``cauldronfull_<subset>`` sets (``CAULDRON_FULL_DATASETS``, eve
 ``--datasets aokvqa,scienceqa,vqav2_yesno`` and as ``--val-datasets`` for a Cauldron-trained model. The ``score``
 head has its own sets (``SCORE_DATASETS``, written by ``prepare_score`` from ``laya.rubric``): rubric-graded
 responses, aesthetics votes, generated-image ratings and damage levels; add them to ``--datasets`` to train it.
-``--datasets`` and ``--val-datasets`` take dataset names and the group names ``vqa``, ``cauldron``, ``cauldronfull``
-and ``score`` (``DATASET_GROUPS``).
+The held-out evaluation sets (``EVAL_DATASETS``, written by ``prepare_eval`` from ``laya.evalsets``) score
+calibration against human vote histograms, abstention, hallucination and rubric scoring; ``evaluate`` includes
+them, and ``--val-split test`` reads the official test split where one exists (KonIQ, FER+).
+``--datasets`` and ``--val-datasets`` take dataset names and the group names ``vqa``, ``cauldron``, ``cauldronfull``,
+``score`` and ``eval`` (``DATASET_GROUPS``).
 
 Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
-(``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``--init-from``)
+(``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``games_eval``, ``--init-from``)
 the name is relative to /ckpt/smolvlm as before, or to /ckpt, so a ModernVBERT run is ``modernvbert/<run>/best``.
 """
 import json
@@ -91,6 +104,9 @@ CAULDRON_DATASETS = tuple("cauldron_" + s for s in CAULDRON_SUBSETS)
 CAULDRON_FULL_DATASETS = tuple("cauldronfull_" + s for s in CAULDRON_SUBSETS)  # uncapped prep, see the docstring
 SCORE_SOURCES = ("vlfeedback", "ava", "richhf", "crisismmd")  # see laya/rubric.py
 SCORE_DATASETS = tuple("score_" + s for s in SCORE_SOURCES)  # rubric-scored sets for the ``score`` head, written by prepare_score
+EVAL_SOURCES = ("koniq", "evalmuse", "cifar10h", "ferplus", "vizwiz", "pope_random", "pope_popular",
+                "pope_adversarial")  # see laya/evalsets.py
+EVAL_DATASETS = tuple("eval_" + s for s in EVAL_SOURCES)  # held-out sets written by prepare_eval
 DATASETS = CAULDRON_DATASETS
 CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", SMOLVLM2: "/ckpt/smolvlm2", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
@@ -182,7 +198,7 @@ def _load_split(name: str, split: str, limit):
 
 
 DATASET_GROUPS = {"vqa": VQA_DATASETS, "cauldron": CAULDRON_DATASETS, "cauldronfull": CAULDRON_FULL_DATASETS,
-                  "score": SCORE_DATASETS}
+                  "score": SCORE_DATASETS, "eval": EVAL_DATASETS}
 
 
 def _expand_datasets(names: str) -> list:
@@ -650,10 +666,11 @@ def finetune_long(
     gpu=["A10G", "L4", "A100"],  # any of these: an eval should not queue on one GPU type's capacity
     cpu=16,
     memory=32768,
-    timeout=30 * 60,
+    timeout=60 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
-def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS), val_split: str = "val",
+def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS + EVAL_DATASETS),
+             val_split: str = "val",
              max_val: int = 0):
     """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
     raw and with its temperatures. Defaults to every prepared set (the official VQA splits and the Cauldron
@@ -677,7 +694,14 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
     print("[val, T=1]        " + format_metrics(raw))
     print("[val, calibrated] " + format_metrics(cal))
-    return {"val_raw": raw, "val_calibrated": cal}
+    metas = {}
+    for name in {ex["dataset"] for ex in val_ex}:
+        try:
+            with open(os.path.join("/data/vqa", name, "meta.json")) as f:
+                metas[name] = json.load(f)
+        except (OSError, ValueError):
+            metas[name] = None
+    return {"val_raw": raw, "val_calibrated": cal, "temperature": list(agent.temperature), "dataset_meta": metas}
 
 
 def _public_question(q: dict) -> dict:
@@ -1213,6 +1237,258 @@ def prepare_score(names: str = ",".join(SCORE_SOURCES), max_rows: int = 0, max_t
 
 
 # ---------------------------------------------------------------------------------------------------------
+# Held-out evaluation sets (laya.evalsets): human-vote calibration, abstention, hallucination, rubric scoring
+# ---------------------------------------------------------------------------------------------------------
+
+eval_image = _with_local_code(base_image.pip_install("requests"))
+
+
+def _hf_file_url(repo: str, filename: str) -> str:
+    from huggingface_hub import hf_hub_url
+
+    return hf_hub_url(repo, filename, repo_type="dataset")
+
+
+def _hf_headers() -> dict:
+    token = os.environ.get("HF_TOKEN")
+    return {"Authorization": "Bearer " + token} if token else {}
+
+
+def _koniq_source(rng):
+    """KonIQ-10k from the pyiqa mirror's tarball, streamed: its own label csv comes first, then the 512x384
+    images, whose JPEG bytes are kept as they are (re-encoding would change the quality being rated)."""
+    import csv
+    import io
+    import tarfile
+
+    import requests
+
+    from laya.evalsets import SOURCES, koniq_record
+
+    url = _hf_file_url(SOURCES["koniq"], "koniq10k.tgz")
+    rows = None
+    with requests.get(url, headers=_hf_headers(), stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with tarfile.open(fileobj=r.raw, mode="r|gz") as tar:
+            for m in tar:
+                if m.name.endswith("koniq10k_distributions_sets.csv"):
+                    rows = {row["image_name"]: row for row in csv.DictReader(io.StringIO(tar.extractfile(m).read().decode("utf-8")))}
+                    left = set(rows)
+                elif "/512x384/" in m.name and m.name.endswith(".jpg"):
+                    if rows is None:
+                        raise RuntimeError("koniq10k.tgz: images before the label csv")
+                    fn = m.name.rsplit("/", 1)[1]
+                    got = koniq_record(rows[fn], rng) if fn in rows else None
+                    if got is None:
+                        continue
+                    split, rec = got
+                    yield split, rec["id"], (tar.extractfile(m).read(), ".jpg"), [rec]
+                    left.discard(fn)
+                    if not left:
+                        return
+
+
+def _evalmuse_source(rng, max_rows: int, val_pct: float, seed: int, workers: int = 16):
+    """EvalMuse-40K: labels from train_list.json, val a seeded share of prompts, and each needed image read out of
+    the 54 GB split zip by range requests (``laya.evalsets.MultiPartZip``) instead of downloading it."""
+    import io
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    import requests
+    from huggingface_hub import hf_hub_download
+    from PIL import Image
+
+    from laya.evalsets import SOURCES, MultiPartZip, evalmuse_record, stable_split
+
+    repo = SOURCES["evalmuse"]
+    with open(hf_hub_download(repo, "train_list.json", repo_type="dataset")) as f:
+        rows = json.load(f)
+    todo = {"train": [], "val": []}
+    for row in rows:
+        rec = evalmuse_record(row, rng)
+        if rec is not None:
+            todo[stable_split(str(row["prompt_id"]), val_pct, seed)].append((row["img_path"], rec))
+    if max_rows and len(todo["train"]) > max_rows:
+        todo["train"] = rng.sample(todo["train"], max_rows)
+    parts = ["images.zip.part-a%s" % c for c in "abcdef"]
+    urls = [_hf_file_url(repo, p) for p in parts]
+    sess = requests.Session()
+    sess.headers.update(_hf_headers())
+    sizes = [int(sess.head(u, allow_redirects=True, timeout=60).headers["Content-Length"]) for u in urls]
+
+    def fetch(i, start, end):
+        for attempt in range(5):
+            try:
+                r = sess.get(urls[i], headers={"Range": "bytes=%d-%d" % (start, end - 1)}, timeout=120)
+                r.raise_for_status()
+                if len(r.content) == end - start:
+                    return r.content
+            except requests.RequestException:
+                pass
+            time.sleep(2 ** attempt)
+        raise RuntimeError("range read failed: %s [%d, %d)" % (parts[i], start, end))
+
+    archive, local = MultiPartZip(sizes, fetch), threading.local()
+    names = {n.split("dataset/images/", 1)[-1]: n for n in archive.open().namelist()}
+
+    def read(img_path):
+        if not hasattr(local, "zf"):
+            local.zf = archive.open()
+        return local.zf.read(names[img_path])
+
+    for split in ("val", "train"):
+        with ThreadPoolExecutor(workers) as pool:
+            items = todo[split]
+            for (img_path, rec), data in zip(items, pool.map(lambda it: read(it[0]), items)):
+                # rated for prompt alignment, not image quality, so re-encoding (JPEG, max_side) loses nothing
+                yield split, rec["id"], Image.open(io.BytesIO(data)), [rec]
+
+
+def _eval_source(name: str, rng, max_rows: int, val_pct: float, seed: int, info: dict):
+    """Yield ``(split, image_key, image, records)`` for one evaluation source; ``image`` is a PIL image or
+    ``(bytes, ext)`` kept verbatim. ``info`` collects source checks for meta.json."""
+    import csv
+    import io
+
+    from datasets import load_dataset
+
+    from laya import evalsets as E
+
+    repo = E.SOURCES[name]
+    if name == "koniq":
+        yield from _koniq_source(rng)
+    elif name == "evalmuse":
+        yield from _evalmuse_source(rng, max_rows, val_pct, seed)
+    elif name == "cifar10h":
+        for i, row in enumerate(load_dataset(repo, split="train", streaming=True)):
+            rec = E.cifar10h_record(row, i, rng)
+            if rec:
+                yield "val", rec["id"], row["image"], [rec]
+    elif name == "ferplus":
+        import requests
+
+        text = requests.get(E.FERPLUS_VOTES_URL, timeout=120).text
+        votes = list(csv.DictReader(io.StringIO(text)))
+        for usage, hf_split in (("Training", "train"), ("PublicTest", "valid"), ("PrivateTest", "test")):
+            ds = load_dataset(repo, split=hf_split)
+            sub = [(i, v) for i, v in enumerate(votes) if v["Usage"] == usage]
+            if len(sub) != len(ds):
+                raise RuntimeError("FER+ %s: %d vote rows but %d images" % (usage, len(sub), len(ds)))
+            labels = ds["label"]
+            agree = E.ferplus_agreement((v, labels[k]) for k, (_, v) in enumerate(sub))
+            info["fer2013_agreement_" + usage] = round(agree, 3)
+            if agree < 0.45:  # ~0.65 when aligned, ~0.17 when off by one row
+                raise RuntimeError("FER+ %s: votes do not line up with %s (agreement %.2f)" % (usage, repo, agree))
+            for k, (i, v) in enumerate(sub):
+                got = E.ferplus_record(v, i, rng)
+                if got:
+                    yield got[0], got[1]["id"], ds[k]["image"], [got[1]]
+    elif name == "vizwiz":
+        for row in load_dataset(repo, split="val", streaming=True):
+            rec = E.vizwiz_record(row, rng)
+            if rec:
+                yield "val", rec["id"], row["image"], [rec]
+    elif name.startswith("pope_"):
+        for row in load_dataset(repo, "Full", split=name.split("_", 1)[1], streaming=True):
+            rec = E.pope_record(row)
+            if rec:
+                yield "val", "pope-" + str(row["image_source"]), row["image"], [rec]
+    else:
+        raise ValueError("unknown eval source %r (one of %s)" % (name, sorted(E.SOURCES)))
+
+
+def _save_eval_image(image, base: str, key: str, max_side: int) -> str:
+    """Write one image under ``base/images``: ``(bytes, ext)`` verbatim; a PIL image as PNG when it is tiny
+    (CIFAR, FER faces: JPEG would smear them), else as JPEG with the longest side at most ``max_side``."""
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in key)
+    if isinstance(image, tuple):
+        rel = "images/%s%s" % (safe, image[1])
+        with open(os.path.join(base, rel), "wb") as f:
+            f.write(image[0])
+        return rel
+    im = image.convert("RGB")
+    if max(im.size) <= 64:
+        rel = "images/%s.png" % safe
+        im.save(os.path.join(base, rel))
+    else:
+        rel = "images/%s.jpg" % safe
+        im.thumbnail((max_side, max_side))
+        im.save(os.path.join(base, rel), quality=92)
+    return rel
+
+
+@app.function(image=eval_image, cpu=8, memory=32768, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def prepare_eval_dataset(name: str, max_rows: int = 10000, max_val: int = 0, val_pct: float = 10.0, max_side: int = 1024,
+                         seed: int = 0, prefix: str = "eval_"):
+    """Write one ``laya.evalsets`` source to /data/vqa/<prefix><name>/{train,val[,test]}.jsonl + images/.
+
+    Splits follow the source (see ``laya.evalsets``); sets without a train split get an empty train.jsonl, so they
+    are for ``evaluate`` / ``--val-datasets`` only. ``max_rows`` caps the train records (0: all), ``max_val`` the
+    val and test records each (0: all: these are eval sets, so none are dropped by default); ``val_pct`` is the
+    share of prompts held out where the source has no labelled val split (EvalMuse). No level balancing: an
+    evaluation set keeps its natural label distribution.
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    final_dir = os.path.join("/data/vqa", prefix + name)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    rng = random.Random(seed)
+    t0 = time.time()
+    recs = {"train": [], "val": [], "test": []}
+    saved, info = {}, {}
+    for n_seen, (split, key, image, rows) in enumerate(_eval_source(name, rng, max_rows, val_pct, seed, info), 1):
+        cap = max_rows if split == "train" else max_val
+        if cap and len(recs[split]) >= cap:
+            continue
+        if key not in saved:
+            saved[key] = _save_eval_image(image, tmp_dir, key, max_side)
+        for rec in rows:
+            rec["image"] = saved[key]
+        recs[split] += rows
+        if n_seen % 2000 == 0:
+            print("%s: %s records, %d images in %.1f min" % (name, {k: len(v) for k, v in recs.items()}, len(saved),
+                                                            (time.time() - t0) / 60), flush=True)
+    for split in ("train", "val", "test"):
+        if split == "test" and not recs["test"]:
+            continue
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as f:
+            for rec in recs[split]:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    meta = {"source": name, "records": {s: len(r) for s, r in recs.items()}, "images": len(saved),
+            "labels": {s: dict(sorted(Counter(int(x["label"]) for x in r).items())) for s, r in recs.items() if r},
+            "soft_targets": sum("target" in x for r in recs.values() for x in r), "max_rows": max_rows, "max_val": max_val,
+            "val_pct": val_pct, "max_side": max_side, "seed": seed, "minutes": round((time.time() - t0) / 60, 1), **info}
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    print("%s: records %s, %d images, labels %s, %.1f min" % (name, meta["records"], len(saved), meta["labels"], meta["minutes"]))
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_eval(names: str = ",".join(EVAL_SOURCES), max_rows: int = 10000, max_val: int = 0, val_pct: float = 10.0,
+                 max_side: int = 1024, prefix: str = "eval_"):
+    """modal run modal_app.py::prepare_eval [--names koniq,pope_adversarial] -- one container per source, in parallel."""
+    kw = dict(max_rows=max_rows, max_val=max_val, val_pct=val_pct, max_side=max_side, prefix=prefix)
+    print("%-18s %-40s %s" % ("source", "records", "labels (val)"))
+    for meta in prepare_eval_dataset.map([n for n in names.split(",") if n], kwargs=kw, order_outputs=True,
+                                         return_exceptions=True):
+        if isinstance(meta, Exception):
+            print("FAILED:", repr(meta)[:300])
+            continue
+        print("%-18s %-40s %s" % (meta["source"], meta["records"], meta["labels"].get("val")))
+
+
+# ---------------------------------------------------------------------------------------------------------
 # ViZDoom "basic": auto-labelled training data and closed-loop evaluation
 # ---------------------------------------------------------------------------------------------------------
 
@@ -1359,3 +1635,318 @@ def doom_eval(models: str = "all3-3ep/best", episodes: int = 50):
     for c in calls:
         r = c.get()
         print("%-32s %12.1f %9.0f%% %10.1f  %s" % (r["policy"], r["mean_reward"], 100 * r["kill_rate"], r["mean_steps"], r["actions"]))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Maze and Snake (laya.gridgames), and the games suite: Atari, ViZDoom, Maze and Snake on one checkpoint
+# ---------------------------------------------------------------------------------------------------------
+
+GRID_SEED = 200_000  # eval episodes use seeds GRID_SEED + i; keep training data off this range
+SUITE_ATARI_GAMES = ("Freeway", "Breakout", "Galaxian")
+
+
+def _load_policy_agent(model: str):
+    from laya.vlm import VLMAgent
+
+    path = _ckpt_path(model)
+    return VLMAgent(path if os.path.exists(path) else model, device="cuda", dtype="bf16")
+
+
+def _play_grid(game: str, policy: str, model: str, episodes: int, size: int, seed: int, max_steps: int) -> dict:
+    from laya import gridgames
+
+    t0 = time.time()
+    if policy == "model":
+        fn = gridgames.model_policy(_load_policy_agent(model), game)
+    elif policy == "expert":
+        fn = gridgames.expert_policy
+    else:
+        fn = gridgames.random_policy(seed)
+    out = gridgames.play_episodes(game, fn, episodes, size, seed, max_steps)
+    out.update(policy="model:" + model if policy == "model" else policy, seconds=round(time.time() - t0, 1))
+    print(json.dumps({k: v for k, v in out.items() if k != "results"}))
+    return out
+
+
+@app.function(image=image, cpu=2, timeout=30 * 60)
+def play_grid_baseline(game: str, policy: str = "expert", episodes: int = 50, size: int = 0, seed: int = GRID_SEED,
+                       max_steps: int = 0):
+    """``expert`` or ``random`` on Maze / Snake, on the same seeded episodes as ``play_grid``."""
+    return _play_grid(game, policy, "", episodes, size, seed, max_steps)
+
+
+@app.function(image=image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+def play_grid(game: str, model: str, episodes: int = 50, size: int = 0, seed: int = GRID_SEED, max_steps: int = 0):
+    """Play ``episodes`` of Maze or Snake (``laya.gridgames``) with a checkpoint (bf16): each step the rendered
+    screen and ``laya.games.maze_question`` / ``snake_question`` go to ``predict`` and its choice is the move.
+    Episode i uses seed ``seed + i``, so every checkpoint and baseline plays the same levels."""
+    return _play_grid(game, "model", model, episodes, size, seed, max_steps)
+
+
+def _grid_row(r: dict) -> str:
+    if r["game"] == "maze":
+        return "%-32s %5d %10.0f%% %11.2f %10.1f" % (r["policy"], r["size"], 100 * r["solve_rate"], r["efficiency"], r["mean_steps"])
+    return "%-32s %5d %10.1f %11d %10.1f  %s" % (r["policy"], r["size"], r["mean_eaten"], r["max_eaten"], r["mean_steps"], r["ends"])
+
+
+def _grid_header(game: str) -> str:
+    if game == "maze":
+        return "%-32s %5s %11s %11s %10s" % ("policy", "size", "solved", "efficiency", "steps/ep")
+    return "%-32s %5s %10s %11s %10s  %s" % ("policy", "size", "food/ep", "max food", "steps/ep", "ends")
+
+
+def _grid_eval(game: str, models: str, sizes: str, episodes: int) -> list:
+    calls = []
+    for size in [int(s) for s in sizes.split(",") if s]:
+        calls += [play_grid_baseline.spawn(game, p, episodes, size) for p in ("expert", "random")]
+        calls += [play_grid.spawn(game, m, episodes, size) for m in models.split(",") if m]
+    results = [c.get() for c in calls]
+    print(_grid_header(game))
+    for r in results:
+        print(_grid_row(r))
+    return results
+
+
+@app.local_entrypoint()
+def maze_eval(models: str = "cauldron-score-2ep-bidir-full/best", sizes: str = "4,6,8", episodes: int = 50):
+    """modal run modal_app.py::maze_eval --models a/best,b/best [--sizes 4,6,8,12]  -- expert, random, each model."""
+    _grid_eval("maze", models, sizes, episodes)
+
+
+@app.local_entrypoint()
+def snake_eval(models: str = "cauldron-score-2ep-bidir-full/best", sizes: str = "10", episodes: int = 20):
+    """modal run modal_app.py::snake_eval --models a/best,b/best [--sizes 8,10]  -- expert, random, each model."""
+    _grid_eval("snake", models, sizes, episodes)
+
+
+atari_image = _with_local_code(base_image.pip_install("ale-py", "gymnasium"))
+
+
+def _atari_baseline(game: str) -> dict:
+    """Expert and random scores from the expert data's meta.json, as ``modal_atari_train.expert_baseline`` reads
+    them (the 4,500-step-capped scores when present); ``None`` for a game without expert data, e.g. Galaxian."""
+    try:
+        with open(os.path.join("/data/atari/expert", game, "meta.json")) as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return {"expert": None, "random": None, "capped": False}
+    if meta.get("expert_score_cap4500") is not None and meta.get("random_score_cap4500") is not None:
+        return {"expert": meta["expert_score_cap4500"], "random": meta["random_score_cap4500"], "capped": True}
+    return {"expert": meta.get("expert_score"), "random": meta.get("random_score"), "capped": False}
+
+
+@app.function(image=atari_image, gpu="L4", cpu=4, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def play_atari_game(game: str, model: str, episodes: int = 3, max_steps: int = 4500, seed: int = 100_000,
+                    random_episodes: int = 10):
+    """One Atari game with a checkpoint, greedy, at the settings of ``modal_atari_train.play_atari`` (same seeds,
+    step cap, auto-FIRE and frame count from the checkpoint), so the numbers compare with ``atari_eval``'s.
+    ``normalized`` is (model - random) / (expert - random) against the expert data's baseline, when there is one."""
+    from laya.atari_train import game_actions, model_policy, play, random_policy
+
+    t0 = time.time()
+    actions = game_actions(game)
+    rnd = play(game, random_policy(len(actions), seed), random_episodes, max_steps, seed)
+    agent = _load_policy_agent(model)
+    frames = int(agent.cfg.get("atari_frames", 1))
+    res = play(game, model_policy(agent, game, actions, False, seed, frames), episodes, max_steps, seed)
+    base = _atari_baseline(game)
+    norm = None
+    if base["expert"] is not None and base["random"] is not None and base["expert"] != base["random"]:
+        norm = (res["mean_score"] - base["random"]) / (base["expert"] - base["random"])
+    out = {"game": game, "model": model, "frames": frames, "model_score": res["mean_score"], "model_scores": res["scores"],
+           "model_steps": res["steps"], "model_capped": res["capped"], "actions": res["actions"],
+           "random_score": rnd["mean_score"], "expert_score": base["expert"], "baseline_random": base["random"],
+           "baseline_capped": base["capped"], "normalized": norm, "seconds": round(time.time() - t0, 1)}
+    print(json.dumps(out))
+    return out
+
+
+def _git_state() -> dict:
+    """The local checkout's commit and whether it has uncommitted changes: the code the Modal images carry."""
+    def git(*args):
+        try:
+            return subprocess.run(["git", *args], capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    return {"commit": git("rev-parse", "HEAD"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty": bool(git("status", "--porcelain", "--untracked-files=no"))}
+
+
+def _games_spawn(model: str, atari_games: str, atari_episodes: int, doom_episodes: int, maze_sizes: str,
+                 maze_episodes: int, snake_sizes: str, snake_episodes: int) -> dict:
+    """Start every game of the suite, with its baselines, and return the call handles."""
+    calls = {"atari": [play_atari_game.spawn(g, model, atari_episodes) for g in atari_games.split(",") if g],
+             "doom": {p: play_doom.spawn(p, "", doom_episodes) for p in ("expert", "random", "always_attack")},
+             "grid": []}
+    calls["doom"]["model"] = play_doom.spawn("model", model, doom_episodes)
+    for game, sizes, episodes in (("maze", maze_sizes, maze_episodes), ("snake", snake_sizes, snake_episodes)):
+        for size in [int(s) for s in sizes.split(",") if s]:
+            calls["grid"] += [play_grid_baseline.spawn(game, p, episodes, size) for p in ("expert", "random")]
+            calls["grid"].append(play_grid.spawn(game, model, episodes, size))
+    return calls
+
+
+_ERRORS: list = []  # what ``_get`` swallowed during this local run, for the results file
+
+
+def _get(call, what: str):
+    """A call's result, or ``None`` with the error printed and recorded in ``_ERRORS``: one broken game or set
+    should not lose the rest."""
+    try:
+        return call.get()
+    except Exception as e:
+        print("%s failed: %s" % (what, repr(e)[:300]))
+        _ERRORS.append({"what": what, "error": repr(e)[:1000]})
+        return None
+
+
+def _games_collect(calls: dict) -> dict:
+    out = {"atari": [], "doom": {}, "maze": [], "snake": []}
+    for c in calls["atari"]:
+        r = _get(c, "atari game")
+        if r:
+            out["atari"].append(r)
+    for p, c in calls["doom"].items():
+        r = _get(c, "doom " + p)
+        if r:
+            out["doom"][p] = r
+    for c in calls["grid"]:
+        r = _get(c, "grid game")
+        if r:
+            out[r["game"]].append(r)
+    return out
+
+
+def _games_print(results: dict) -> None:
+    print("\n== Atari (greedy)")
+    print("%-10s %10s %10s %10s %8s  %s" % ("game", "model", "random", "expert", "norm", "top actions"))
+    for r in results["atari"]:
+        top = ", ".join("%s %d%%" % (a, 100 * n / max(1, sum(r["actions"].values())))
+                        for a, n in sorted(r["actions"].items(), key=lambda kv: -kv[1])[:3])
+        f = lambda v, fmt="%.1f": "-" if v is None else fmt % v  # noqa: E731
+        print("%-10s %10.1f %10.1f %10s %8s  %s" % (r["game"], r["model_score"], r["random_score"], f(r["expert_score"]),
+                                                   f(r["normalized"], "%.2f"), top))
+    print("\n== ViZDoom basic")
+    print("%-32s %12s %10s %10s" % ("policy", "mean reward", "kill rate", "steps/ep"))
+    for r in results["doom"].values():
+        print("%-32s %12.1f %9.0f%% %10.1f" % (r["policy"], r["mean_reward"], 100 * r["kill_rate"], r["mean_steps"]))
+    for game in ("maze", "snake"):
+        print("\n== %s" % game.capitalize())
+        print(_grid_header(game))
+        for r in results[game]:
+            print(_grid_row(r))
+
+
+@app.local_entrypoint()
+def games_eval(model: str, atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
+               doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
+               snake_episodes: int = 20, out: str = ""):
+    """modal run modal_app.py::games_eval --model <run>/best [--out games.json]  -- the games suite on one checkpoint.
+
+    Atari (Freeway, Breakout, Galaxian by default), ViZDoom ``basic``, Maze at each size and Snake, all in parallel,
+    with each game's baselines on the same seeds: random (and the expert data's score) for Atari; the scripted
+    expert, random and always-attack for Doom; the BFS expert and random for Maze and Snake. ``out`` gets every
+    result plus the git commit the code came from. ``full_eval`` runs this together with the dataset evals.
+    """
+    calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes, snake_sizes,
+                         snake_episodes)
+    results = dict({"model": model, "code": _git_state()}, **_games_collect(calls))
+    _games_print(results)
+    if out:
+        with open(out, "w") as f:
+            json.dump(results, f, indent=2)
+        print("\nwrote", out)
+
+
+@app.function(image=image, timeout=10 * 60, volumes={"/ckpt": ckpt_vol})
+def save_eval_results(run_name: str, filename: str, payload: dict) -> str:
+    """Write a ``full_eval`` result next to the run: ``<run dir>/evals/<filename>``, where the run dir is the
+    checkpoint's parent (``<run>/best`` -> ``<run>/evals/``), so ``publish`` never uploads it with the weights."""
+    ckpt_vol.reload()
+    ckpt = _ckpt_path(run_name)
+    evals = os.path.join(os.path.dirname(ckpt.rstrip("/")), "evals")
+    os.makedirs(evals, exist_ok=True)
+    path = os.path.join(evals, filename)
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    ckpt_vol.commit()
+    return path
+
+
+def _datasets_print(evals: dict) -> None:
+    """One line per dataset from ``evaluate``'s calibrated metrics (the model as it would be used)."""
+    cal = evals["val_calibrated"]
+    print("%-30s %6s %7s %6s %6s  %s" % ("dataset", "n", "acc", "ECE", "NLL", "vs human votes (prior)"))
+    for name in sorted(cal, key=lambda n: (n == "all", n)):
+        m = cal[name]
+        extra = []
+        for key in ("xent", "soft_xent"):
+            if key in m:
+                extra.append("%s %.3f%s" % (key, m[key], " (%.3f)" % m["prior_" + key] if "prior_" + key in m else ""))
+        if "mae" in m:
+            extra.append("mae %.2f" % m["mae"])
+        print("%-30s %6d %6.1f%% %6.3f %6.3f  %s" % (name, m["n"], 100 * m["acc"], m["ece"], m["nll"], ", ".join(extra)))
+
+
+@app.local_entrypoint()
+def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str = "vqa,cauldron,score,eval",
+              val_split: str = "val", atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
+              doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
+              snake_episodes: int = 20, out: str = "", save: bool = True):
+    """modal run modal_app.py::full_eval --model <run>/best  -- every eval on one checkpoint, in parallel, one file.
+
+    ``parts`` picks from ``datasets`` (``evaluate`` over ``datasets``: accuracy, ECE, NLL, and the human-vote and
+    ordinal metrics), ``games`` (the ``games_eval`` suite) and ``latency`` (``bench_latency``); they all run at
+    once. The combined result, with the git commit and each dataset's meta.json, is written to ``out`` (default
+    ``eval-results/<run>-<commit>.json``) and, unless ``--no-save``, to ``<run>/evals/`` on the checkpoint volume
+    next to the checkpoint. ``scripts/eval_report.py`` turns result files into Markdown; the ``eval`` GitHub
+    Actions workflow runs each part as its own job and posts that report on the pull request.
+    """
+    import datetime
+
+    wanted = [p.strip() for p in parts.split(",") if p.strip()]
+    unknown = set(wanted) - {"datasets", "games", "latency"}
+    if unknown or not wanted:
+        raise SystemExit("--parts takes datasets, games and latency (got %r)" % parts)
+    code = _git_state()
+    t0 = time.time()
+    _ERRORS.clear()
+    ds_call = evaluate.spawn(model, ",".join(_expand_datasets(datasets)), val_split) if "datasets" in wanted else None
+    lat_call = bench_latency.spawn(model) if "latency" in wanted else None
+    game_calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes,
+                              snake_sizes, snake_episodes) if "games" in wanted else None
+    results = {"model": model, "code": code, "parts": wanted, "val_split": val_split,
+               "started": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    results["datasets"] = _get(ds_call, "evaluate") if ds_call else None
+    results["latency"] = _get(lat_call, "bench_latency") if lat_call else None
+    results["games"] = _games_collect(game_calls) if game_calls else None
+    results["minutes"] = round((time.time() - t0) / 60, 1)
+    results["errors"] = list(_ERRORS)
+
+    if results["datasets"]:
+        print("\n== Datasets (%s split, calibrated)" % val_split)
+        _datasets_print(results["datasets"])
+    if results["latency"]:
+        lat = results["latency"]
+        print("\n== Latency: median %.1f ms, p90 %.1f ms per predict (L4, bf16)" % (lat["median_ms"], lat["p90_ms"]))
+    if results["games"]:
+        _games_print(results["games"])
+
+    tag = "" if len(wanted) == 3 else "-" + "-".join(wanted)
+    stem = "%s-%s%s%s" % (model.replace("/", "-"), (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "", tag)
+    out = out or os.path.join("eval-results", stem + ".json")
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(results, f, indent=2)
+    print("\nwrote", out)
+    failed = [p for p in wanted if not results[p] or (p == "games" and not any(results["games"].values()))]
+    if save:
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        leaf = model.rstrip("/").rsplit("/", 1)[-1]  # best / last share the run's evals/
+        name = "%s-%s-%s%s%s.json" % (leaf, stamp, (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "", tag)
+        path = _get(save_eval_results.spawn(model, name, results), "save to volume")
+        if path:
+            print("saved", path, "on laya-checkpoints")
+    if failed:
+        raise SystemExit("full_eval: %s produced no results (see the errors above)" % ", ".join(failed))

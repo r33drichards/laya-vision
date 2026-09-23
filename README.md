@@ -36,6 +36,8 @@ Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/la
 
 Accuracies are on the official validation splits (VQAv2 yes/no is a re-split of the official val set by image, so not comparable to published VQAv2 numbers). Calibrated ECE is 0.02 to 0.03 for all three over their full validation sets. The original checkpoint is ahead on ScienceQA because it made 12 passes over that one train split; the others made 3 to 4 as one of 19 to 23 sets, and are far broader: the recommended one averages 75% over 26 validation sets, and 93.7% on IconQA, 91.8% on DVQA, 89.9% on Hateful Memes.
 
+The full scorecard for the recommended checkpoint covers 34 validation sets, human-vote calibration, the games suite and latency: [docs/evals/laya-vision.md](docs/evals/laya-vision.md).
+
 The recommended checkpoint is the only one whose `score` answers mean anything. On held-out rubric data it scores 54% over 5 levels on VLFeedback response grading (prior-only baseline 27.5%), is 0.8 levels off on average against 1.4 for the baseline, and 0.38 levels off on 3-level damage severity. Full tables, the ordinal metrics and what each run changed are in [docs/score-results.md](docs/score-results.md).
 
 ## How it works
@@ -54,32 +56,52 @@ Everything is a prepared dataset on the `laya-datasets` Modal volume: `/data/vqa
 
 - **The Cauldron** (`laya/cauldron.py`, `prepare_cauldron`): the 19 subsets of [HuggingFaceM4/the_cauldron](https://huggingface.co/datasets/HuggingFaceM4/the_cauldron) whose answers are closed. Lettered choices and option lists become `choice`, yes/no turns become `noul`, RAVEN's letters become an 8-way `choice`; numbers, captions and free text are skipped. 270k questions.
 - **Rubric-scored sets** (`laya/rubric.py`, `prepare_score`): VLFeedback (response helpfulness and visual faithfulness, 1 to 5), AVA (photo aesthetics, human vote histograms as soft targets), RichHF-18K (generated-image plausibility, alignment, aesthetics, overall) and CrisisMMD (damage severity). Each level is a short rubric clause in the style you would write for `predict`, with several instruction phrasings per question. How they were cleaned, and why, is in [docs/score-data.md](docs/score-data.md).
+- **Held-out evaluation sets** (`laya/evalsets.py`, `prepare_eval`): KonIQ-10k photo quality and EvalMuse-40K prompt alignment as `score` questions, CIFAR-10H and FER+ as `choice`, VizWiz answerability and POPE (random, popular, adversarial) as `noul`. KonIQ, EvalMuse, CIFAR-10H, FER+ and VizWiz keep each image's human vote histogram as a soft target, so `evaluate` also reports cross-entropy against how people actually split (`soft_xent`, `xent`) next to the same number for the set's average histogram (`prior_…`). Evaluation only, except KonIQ, EvalMuse and FER+, which have train splits. KonIQ and FER+ also get their official test split (`evaluate --val-split test`).
 - **The original three** (`aokvqa`, `scienceqa`, `vqav2_yesno`): the official train splits, prepared on the [`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment) branch.
 - **Games**: frames auto-labelled by a scripted expert or a trained agent; see below.
 
 ## Running it on Modal
 
-`modal_app.py` expects the volumes `laya-hf-cache`, `laya-datasets` and `laya-checkpoints`, and a `huggingface-thaitea` secret for the publish jobs. Dataset arguments take names or the groups `vqa`, `cauldron` and `score`.
+`modal_app.py` expects the volumes `laya-hf-cache`, `laya-datasets` and `laya-checkpoints`, and a `huggingface-thaitea` secret for the publish jobs. Dataset arguments take names or the groups `vqa`, `cauldron`, `score` and `eval`.
 
 ```bash
 modal run modal_app.py::try_model --image photo.jpg --questions q.json --run cauldron-score-2ep-bidir-full/best
 modal run modal_app.py::test                                              # GPU tests + latency, both backbones
 modal run modal_app.py::prepare_cauldron                                  # -> /data/vqa/cauldron_<subset>
 modal run modal_app.py::prepare_score                                     # -> /data/vqa/score_<name>
+modal run modal_app.py::prepare_eval                                      # -> /data/vqa/eval_<name>
 modal run --detach modal_app.py::finetune_long --run-name my-run --epochs 2 --max-passes 4 --max-minutes 240 \
     --option-attention bidirectional --mix score_vlfeedback=3 --datasets cauldron,score --val-datasets vqa,cauldron,score
 modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name my-run --datasets cauldron
+modal run --detach modal_app.py::full_eval --model my-run/best          # every eval below at once, one results JSON
 modal run modal_app.py::evaluate --run-name my-run/best                   # every prepared val set, raw and calibrated
+modal run modal_app.py::evaluate --run-name my-run/best --datasets eval   # only the held-out evaluation sets
 modal run --detach modal_app.py::split_bench                              # SmolVLM2, image splitting off / 1024 / 2048
+modal run modal_app.py::games_eval --model my-run/best --out games.json   # Atari, ViZDoom, Maze, Snake + baselines
 modal run modal_app.py::publish --repo user/name --run my-run/best --card hf_model_card_score.md
 modal run modal_app.py::publish_space                                     # push space/ to the demo Space
 ```
+
+`full_eval` runs the whole suite on one checkpoint in parallel and saves one file. That covers the `evaluate` dataset groups (`vqa,cauldron,score,eval`), the games suite and `bench_latency`. It writes the results to `eval-results/<run>-<commit>.json` locally, and to `<run>/evals/` on the checkpoint volume, beside the weights but outside the folder `publish` uploads. The file records the git commit it ran from, and each dataset's `meta.json`. To evaluate a branch's checkpoint, run it from that branch's checkout, since the Modal images ship the local `laya/` code. `--parts datasets,games,latency`, `--datasets` and `--val-split test` narrow it down. `python scripts/eval_report.py <result files> --doc docs/evals/<name>.md` turns results into a Markdown report whose charts are Mermaid blocks GitHub renders; `--html` writes the same as a standalone page.
+
+The same suite runs from GitHub Actions with the `eval` workflow (`.github/workflows/eval.yml`). Start it from Actions → eval → Run workflow, on the branch whose code trained the checkpoint, or with `gh workflow run eval.yml --ref <branch> -f model=<run>/best`.
+- The datasets, games and latency parts run as parallel jobs, and each job's log is the live Modal output.
+- The results go to the run summary and to a comment on the branch's open pull request. Re-running for the same checkpoint updates that comment.
+- It needs the `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` repository secrets.
 
 `finetune_long` keeps data, objective, schedule and evaluation identical across backbones, which is what makes the checkpoints above comparable. It also takes `--backbone HuggingFaceTB/SmolVLM2-256M-Video-Instruct` (same size and code path as SmolVLM), `--split-edge` to turn on the processor's image splitting (the image is resized to that longest edge and cut into 512 tiles plus a global view: up to 5 views at 1024, 17 at 2048, against 1 without) and `--max-len` for the sequence cap, which is 1024 by default and raised to fit the tiles when splitting. `split_bench` trains one SmolVLM2 run per split setting on a six-set subset and writes accuracy per set, tokens per question and L4 latency to `/ckpt/smolvlm2/split-bench/results.md`. Results: splitting at 1024 gained about 1 point for 35% more latency, and 2048 gained nothing for 2.5× the latency ([docs/split-bench.md](docs/split-bench.md)). Runs save under `/ckpt/smolvlm/` or `/ckpt/modernvbert/` with a `best/` and `last/` checkpoint and a `metrics.json` of every evaluation. Locally, `python -m laya.vlm_train --synthetic --steps 3` is a smoke run.
 
 ## Playing games
 
 The screen is the image and the options are the game's buttons. `examples/atari_live.py` and `examples/vizdoom_live.py` let you watch a checkpoint play in a local window. Trained for 7 minutes on 20,000 auto-labelled frames, it plays ViZDoom `basic` at expert level (mean reward +75.4 against the expert's +75.8 over 50 unseen episodes); the Atari work, with a two-frame input and DAgger rounds, is in [docs/game-training.md](docs/game-training.md).
+
+`modal run modal_app.py::games_eval --model <run>/best` scores a checkpoint on the games suite in one go:
+- Atari Freeway, Breakout and Galaxian, at `atari_eval`'s settings, against random play and, where expert data exists, the expert. Galaxian has no expert data, so it is compared with random only.
+- ViZDoom `basic`, against the scripted expert, random and always-attack.
+- Maze, at 4×4, 6×6 and 8×8 cells: solve rate, and path efficiency against the BFS shortest path.
+- Snake, on a 10×10 board: food eaten and steps survived, against a greedy BFS expert and random.
+
+Maze and Snake are small seeded games in `laya/gridgames.py`, so every checkpoint plays the same levels. `maze_eval` and `snake_eval` compare several checkpoints on one game.
 
 ## What didn't work
 

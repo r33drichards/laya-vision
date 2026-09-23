@@ -92,6 +92,13 @@ CRITERIA = {
         "good",
         "excellent",
     ],
+    "quality": [
+        "bad: heavily blurred, noisy, badly exposed or distorted",
+        "poor: clearly visible blur, noise or exposure problems",
+        "fair: acceptable, with some visible flaws",
+        "good: sharp and well exposed, minor flaws at most",
+        "excellent: technically flawless",
+    ],
     "damage": [
         "little or no damage",
         "mild damage: some visible harm to buildings, roads or objects",
@@ -134,6 +141,11 @@ INSTRUCTIONS = {
         "Rate the overall quality of this generated image for its prompt.",
         "How good is this image overall, given the prompt?",
         "Grade the image's overall quality, taking the prompt into account.",
+    ],
+    "quality": [
+        "How good is the technical quality of this photo?",
+        "Rate the image quality: sharpness, noise, exposure and distortions.",
+        "Grade how technically clean this picture is.",
     ],
     "damage": [
         "How much damage does the scene in the photo show?",
