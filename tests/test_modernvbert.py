@@ -40,6 +40,12 @@ class _Cfg:
         self.model_type = model_type
 
 
+
+def same_but_checkpoint(a, b):
+    """Two predict outputs agree on everything except which checkpoint produced them (a reload changes its id)."""
+    strip = lambda r: dict(r, provenance={k: v for k, v in r["provenance"].items() if k != "checkpoint"})  # noqa: E731
+    return strip(a) == strip(b)
+
 def test_readout_follows_the_backbone(agent):
     """The family is decided by the backbone's model_type, recorded in the config and left on the processor."""
     assert readout_for(_Cfg("modernvbert")) == "mask"
@@ -47,7 +53,7 @@ def test_readout_follows_the_backbone(agent):
     assert agent.model.readout == agent.cfg["readout"] == processor_readout(agent.processor) == "mask"
     assert agent.model.encoder.config.model_type == "modernvbert"
     with pytest.raises(ValueError):
-        VLMDecisionModel(agent.model.encoder, readout="mask", option_attention="bidirectional")
+        VLMDecisionModel(agent.model.encoder, readout="mask", option_attention="block")
     with pytest.raises(ValueError):
         VLMDecisionModel(agent.model.encoder, readout="eos")
 
@@ -169,7 +175,7 @@ def test_save_load_roundtrip(agent, tmp_path, include_backbone):
     assert loaded.cfg["readout"] == loaded.model.readout == processor_readout(loaded.processor) == "mask"
     assert loaded.cfg["backbone"] == MODERNVBERT_BACKBONE
     after = [loaded.predict(state, QUESTIONS), loaded.predict("plain text", QUESTIONS)]
-    assert after == before
+    assert all(same_but_checkpoint(a, b) for a, b in zip(after, before))
     assert loaded.cfg["temperature"] == [1.3, 0.8, 1.1]
 
 
@@ -199,7 +205,7 @@ def test_train_and_predict_at_256(tmp_path):
     a.save(str(tmp_path))
     loaded = VLMAgent(str(tmp_path), device=DEVICE)
     assert loaded.cfg["image_size"] == 256 and loaded.prep.backend == "gpu" and loaded.model.readout == "mask"
-    assert loaded.predict(state, QUESTIONS) == res
+    assert same_but_checkpoint(loaded.predict(state, QUESTIONS), res)
 
 
 def test_latency(agent):
@@ -214,3 +220,39 @@ def test_latency(agent):
             ts.append((time.perf_counter() - t0) * 1000)
         ts.sort()
         print("\nmodernvbert latency %s state, 1 noul question, %s: median %.1f ms (min %.1f, max %.1f)" % (name, DEVICE, ts[2], ts[0], ts[-1]))
+
+
+def test_mask_builder_and_text_sequence_report_what_they_cut(agent):
+    """The ``[MASK]`` sequence and the text-only ``build_sequence`` it copies report the same kinds of cut."""
+    from test_vlm import LONG, NO_CUT, TRUNCATION_QUESTIONS
+
+    from laya.common import build_sequence, truncation_answer
+
+    proc, tok = agent.processor, agent.processor.tokenizer
+    for qid, check in (
+        ("long_option", lambda t: t == dict(NO_CUT, options=[1])),
+        ("same_after_cut", lambda t: t["options"] == [0, 1] and t["indistinguishable"] == [[0, 1]]),
+        ("many_options", lambda t: t["options"] == list(range(30)) and not t["indistinguishable"]),
+        ("long_instructions", lambda t: t["instructions_tokens_dropped"] > 100 and not t["options"]),
+    ):
+        q = VLMAgent._to_internal(TRUNCATION_QUESTIONS[qid])
+        order = list(reversed(range(len(render_options(q)))))
+        assert check(build_vlm_inputs(proc, "x", q, option_order=order)["truncation"]), qid
+        report = {}
+        build_sequence(tok, "x", q, 512, 192, option_order=order, report=report)
+        assert check(report), qid
+    q = VLMAgent._to_internal(QUESTIONS["is_red"])
+    state = {"image": square((0, 0, 255)), "note": "word " * 3000}
+    for left in (False, True):
+        it = build_vlm_inputs(proc, state, q, truncate_left=left)
+        assert it["truncation"]["state_tokens_dropped"] > 1500 and len(it["ids"]) == 1024
+        report = {}
+        ids, _ = build_sequence(tok, {"note": state["note"]}, q, 512, 192, truncate_left=left, report=report)
+        assert report["state_tokens_dropped"] > 2000 and len(ids) == 512
+    report = {}
+    build_sequence(tok, "a short state", VLMAgent._to_internal(QUESTIONS["color"]), report=report)
+    assert report == NO_CUT and truncation_answer(report, VLMAgent._to_internal(QUESTIONS["color"])) is None
+    t = agent.predict({"image": square((0, 0, 255))}, {"s": TRUNCATION_QUESTIONS["same_after_cut"]})["answers"]["s"]
+    assert t["truncated"]["indistinguishable"] == [[LONG + "alpha", LONG + "beta"]]
+    with pytest.raises(ValueError, match="'s' would be truncated"):
+        agent.predict("x", {"s": TRUNCATION_QUESTIONS["same_after_cut"]}, strict=True)

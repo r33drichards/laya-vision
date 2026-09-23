@@ -29,7 +29,7 @@ without seeing the competitors. This introduces option-order bias. Mitigations:
   * train with random ``option_order`` (``vlm_train.py`` does this),
   * average over ``n_permutations`` orders at inference (``VLMAgent.predict(..., n_permutations=K)``),
   * the optional head transformer (``head_layers > 0``) is bidirectional over the whole sequence,
-  * ``option_attention="bidirectional"`` passes a custom 4D mask that lets the option block attend to
+  * ``option_attention="block"`` passes a custom 4D mask that lets the option block attend to
     itself in both directions (the pretrained backbone never saw this pattern; it needs fine-tuning).
 
 ModernVBERT (``readout="mask"``) needs none of that. It is ModernBERT-150M plus a SigLIP2 vision tower behind
@@ -44,19 +44,29 @@ the act head pools ``[CLS]``. Every marker sees the whole sequence, so there is 
 mitigate: ``n_permutations`` and ``option_attention`` are accepted and do nothing useful. ``readout`` is chosen
 from the backbone's ``model_type`` (``readout_for``), recorded in ``vlm_agent_config.json``, and left on the
 processor as ``laya_readout`` so the sequence builders follow it (``ImagePrep`` does the same for the pixels).
+
+Provenance: a Hub checkpoint or backbone can be pinned (``VLMAgent(..., revision=..., backbone_revision=...)``);
+the commit actually loaded is recorded (``VLMAgent.source``, ``cfg["backbone_revision"]``, written to
+``vlm_agent_config.json`` by ``save``), and every ``predict`` result carries a ``provenance`` block: the prompt
+format version, a hash of the exact input ids, the checkpoint and backbone revisions, dtype, device, library
+versions, and the option attention, permutation count and temperatures used.
 """
+import hashlib
 import inspect
 import json
 import math
 import os
 import random
+import warnings
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 
+from .calibration import Calibration, calibrate_records, checkpoint_identity, resolve_temperature
 from .common import QTYPES, confidence_from_probs, render_options, serialize_state, temp_bucket
+from .common import truncation_answer, truncation_error, truncation_report
 from .preprocess import ImagePrep, as_uint8_chw, prefix_ids
 
 DEFAULT_BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
@@ -64,6 +74,10 @@ DEFAULT_BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 SMOLVLM2_BACKBONE = "HuggingFaceTB/SmolVLM2-256M-Video-Instruct"
 MODERNVBERT_BACKBONE = "ModernVBERT/modernvbert"
 READOUTS = ("terminator", "mask")
+#: ``"causal"``: plain causal mask. ``"block"``: causal prefix, the option block attends to itself both ways
+OPTION_ATTENTIONS = ("causal", "block")
+#: deprecated spellings still accepted (and found in older ``vlm_agent_config.json`` files)
+OPTION_ATTENTION_ALIASES = {"bidirectional": "block"}
 #: backbone ``model_type`` values that are bidirectional encoders and take the ``"mask"`` readout
 BIDIRECTIONAL_MODEL_TYPES = ("modernvbert",)
 CONFIG_NAME = "vlm_agent_config.json"
@@ -78,6 +92,41 @@ OPTION_END = "\n"
 # tokenizer's ``[CLS] ... [SEP]``; the question and options then follow ``laya.common.build_sequence``
 MASK_PREFIX_TEXT = "[CLS]User:"
 MASK_QUESTION_TEXT = " %s question: %s"
+#: Version of the prompt format above (the text framing, option rendering and truncation in ``build_vlm_inputs``
+#: and ``_mask_inputs``), reported in ``predict``'s ``provenance``. Bump it in the same commit as any change that
+#: can alter the input ids built for some (state, question): framing strings, option bullets or terminators,
+#: budgets, truncation order, image-token expansion. A refactor that leaves every id unchanged does not bump it.
+PROMPT_FORMAT_VERSION = "1"
+
+
+def input_ids_sha256(rows: Sequence[Sequence[int]]) -> str:
+    """sha256 over token-id rows (each as its length, int64 LE, then its ids, int32 LE): the hash ``predict``
+    reports over all its rows and the row-level evidence files report per row (``input_ids_sha256([ids])``)."""
+    h = hashlib.sha256()
+    for ids in rows:
+        h.update(np.asarray(len(ids), dtype="<i8").tobytes())
+        h.update(np.asarray(ids, dtype="<i4").tobytes())
+    return h.hexdigest()
+
+
+def snapshot_revision(path: str) -> Optional[str]:
+    """The commit a Hub snapshot directory holds (``.../snapshots/<sha>``), or None for any other path."""
+    head, sha = os.path.split(os.path.normpath(path))
+    if os.path.basename(head) == "snapshots" and len(sha) == 40 and all(c in "0123456789abcdef" for c in sha):
+        return sha
+    return None
+
+
+def normalize_option_attention(value: str) -> str:
+    """``"causal"`` or ``"block"``; the deprecated ``"bidirectional"`` maps to ``"block"`` with a warning."""
+    if value in OPTION_ATTENTION_ALIASES:
+        new = OPTION_ATTENTION_ALIASES[value]
+        warnings.warn("option_attention=%r is deprecated, use %r (the same mask: causal prefix, the option block "
+                      "attends to itself both ways)" % (value, new), DeprecationWarning, stacklevel=3)
+        return new
+    if value not in OPTION_ATTENTIONS:
+        raise ValueError("option_attention must be one of %s, got %r" % (OPTION_ATTENTIONS, value))
+    return value
 
 
 def readout_for(config) -> str:
@@ -213,7 +262,8 @@ def build_vlm_inputs(
 ) -> Dict[str, Any]:
     """Build one VLM sequence for an internal question ``q = {"t", "ins", "crit"}``.
 
-    Returns ``{"ids", "markers", "option_span", "pixel_values", "pixel_attention_mask", "raw_images", "n_images"}``.
+    Returns ``{"ids", "markers", "option_span", "pixel_values", "pixel_attention_mask", "raw_images", "n_images",
+    "truncation"}``, the last saying what was cut to fit the budgets (``laya.common.truncation_report``).
     ``markers[j]`` indexes the readout token of the j-th option in ``option_order`` order: the ``\\n``
     terminating its line (``readout="terminator"``, causal backbones) or the ``[MASK]`` opening it
     (``readout="mask"``, ModernVBERT). ``readout`` defaults to what the processor was bound to
@@ -241,8 +291,10 @@ def build_vlm_inputs(
 
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
-    opt_ids = [enc(OPTION_BULLET + opts[i].replace(OPTION_END, " "))[:48] for i in order]
+    full = [enc(OPTION_BULLET + opts[i].replace(OPTION_END, " ")) for i in order]
+    opt_ids = [o[:48] for o in full]
     head_ids = enc(QUESTION_TEXT % (q["t"], str(q["ins"]).replace("<end_of_utterance>", " ")))
+    n_head = len(head_ids)
     opt_budget = head_max_len - sum(len(o) + 1 for o in opt_ids)
     if opt_budget < 16:
         per = max(4, (head_max_len - 16) // max(1, len(opt_ids)) - 1)
@@ -263,7 +315,8 @@ def build_vlm_inputs(
 
     room = max(0, max_len - len(prefix["ids"]) - len(tail))
     st = enc(text) if text else []
-    st = st[-room:] if truncate_left else st[:room]
+    n_state = len(st)
+    st = st[len(st) - room:] if truncate_left else st[:room]  # not st[-room:]: that keeps all of it at room=0
     off = len(prefix["ids"]) + len(st)
     if len(prefix["ids"]) + len(tail) > max_len:
         raise ValueError("question + options + images exceed max_len=%d" % max_len)
@@ -275,6 +328,7 @@ def build_vlm_inputs(
         "pixel_attention_mask": prefix["pixel_attention_mask"],
         "raw_images": prefix.get("raw_images"),
         "n_images": prefix["n_images"],
+        "truncation": truncation_report(order, full, opt_ids, n_head - len(head_ids), n_state - len(st)),
     }
 
 
@@ -296,8 +350,10 @@ def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int,
 
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
-    opt_ids = [[mask_id] + enc(" " + clean(opts[i]))[:48] for i in order]
+    full = [[mask_id] + enc(" " + clean(opts[i])) for i in order]
+    opt_ids = [o[:49] for o in full]  # [MASK] + 48 option tokens
     head_ids = enc(MASK_QUESTION_TEXT % (q["t"], clean(str(q["ins"]))))
+    n_head = len(head_ids)
     opt_budget = head_max_len - sum(len(o) for o in opt_ids)
     if opt_budget < 16:
         per = max(4, (head_max_len - 16) // max(1, len(opt_ids)))
@@ -316,9 +372,10 @@ def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int,
     if len(ids) > max_len:
         raise ValueError("question + options + images exceed max_len=%d" % max_len)
     st = enc(clean(text)) if text else []
+    n_state = len(st)
     if st:
         room = max(0, max_len - len(ids) - 1)
-        st = st[-room:] if truncate_left else st[:room]
+        st = st[len(st) - room:] if truncate_left else st[:room]  # not st[-room:]: that keeps all of it at room=0
         ids = ids + st + [sep_id]
     return {
         "ids": ids,
@@ -328,6 +385,7 @@ def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int,
         "pixel_attention_mask": prefix["pixel_attention_mask"],
         "raw_images": prefix.get("raw_images"),
         "n_images": prefix["n_images"],
+        "truncation": truncation_report(order, full, opt_ids, n_head - len(head_ids), n_state - len(st)),
     }
 
 
@@ -400,16 +458,24 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
     return res
 
 
-def option_block_mask(attention_mask: torch.Tensor, option_span: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    """Additive 4D mask: causal everywhere, bidirectional inside each row's option span, padding keys masked."""
+def option_block_mask(attention_mask: torch.Tensor, option_span: Optional[torch.Tensor], dtype: torch.dtype,
+                      query_start: int = 0) -> torch.Tensor:
+    """Additive 4D mask: causal everywhere, bidirectional inside each row's option span, padding keys masked.
+
+    ``option_span=None`` gives the plain causal mask. ``query_start`` keeps only the query rows from that position
+    on (``[B, 1, L - query_start, L]``): the mask for a suffix run over a cached prefix of that length, whose keys
+    are the prefix plus the suffix (``VLMDecisionModel.forward_prefixed``).
+    """
     B, L = attention_mask.shape
     pos = torch.arange(L, device=attention_mask.device)
-    allowed = pos[None, :, None] >= pos[None, None, :]
-    s, e = option_span[:, 0, None], option_span[:, 1, None]
-    in_span = (pos[None] >= s) & (pos[None] < e)
-    allowed = allowed | (in_span[:, :, None] & in_span[:, None, :])
+    qpos = pos[query_start:]
+    allowed = (qpos[None, :, None] >= pos[None, None, :]).expand(B, -1, -1)
+    if option_span is not None:
+        s, e = option_span[:, 0, None], option_span[:, 1, None]
+        in_q, in_k = (qpos[None] >= s) & (qpos[None] < e), (pos[None] >= s) & (pos[None] < e)
+        allowed = allowed | (in_q[:, :, None] & in_k[:, None, :])
     allowed = allowed & attention_mask.bool()[:, None, :]
-    mask = torch.zeros((B, 1, L, L), dtype=dtype, device=attention_mask.device)
+    mask = torch.zeros((B, 1, L - query_start, L), dtype=dtype, device=attention_mask.device)
     return mask.masked_fill(~allowed[:, None], torch.finfo(dtype).min)
 
 
@@ -439,8 +505,7 @@ class VLMDecisionModel(nn.Module):
         readout: str = "terminator",
     ):
         super().__init__()
-        if option_attention not in ("causal", "bidirectional"):
-            raise ValueError("option_attention must be 'causal' or 'bidirectional'")
+        option_attention = normalize_option_attention(option_attention)
         if readout not in READOUTS:
             raise ValueError("readout must be one of %s, got %r" % (READOUTS, readout))
         if readout == "mask" and option_attention != "causal":
@@ -519,9 +584,9 @@ class VLMDecisionModel(nn.Module):
         attn, enc_kw = attention_mask, {}
         if self.readout == "terminator":
             enc_kw["use_cache"] = False
-            if self.option_attention == "bidirectional":
+            if self.option_attention == "block":
                 if option_span is None:
-                    raise ValueError("option_attention='bidirectional' requires option_span")
+                    raise ValueError("option_attention='block' requires option_span")
                 attn = option_block_mask(attention_mask, option_span, self.encoder.dtype)
         h = self.encoder(
             input_ids=input_ids,
@@ -533,6 +598,53 @@ class VLMDecisionModel(nn.Module):
         ).last_hidden_state
         if detach_encoder:
             h = h.detach()
+        return self._readout(h, attention_mask, marker_pos, marker_mask, qtype)
+
+    def encode_prefix(self, input_ids: torch.Tensor, image_hidden_states: Optional[torch.Tensor] = None) -> Dict:
+        """Prefill a prefix shared by every row (``input_ids`` ``[1, P]``: the image run and the state) once.
+
+        Returns ``{"h": last_hidden_state [1, P, d], "kv": [(keys, values)] per layer}`` for ``forward_prefixed``.
+        The images are merged here and only here; the suffixes are text. Causal readout only: the prefix's hidden
+        states must not depend on what follows it.
+        """
+        if self.readout != "terminator":
+            raise ValueError("prefix caching needs the causal 'terminator' readout")
+        if image_hidden_states is not None:
+            image_hidden_states = image_hidden_states.to(self.encoder.get_input_embeddings().weight.dtype)
+        out = self.encoder(input_ids=input_ids, attention_mask=torch.ones_like(input_ids),
+                           image_hidden_states=image_hidden_states, use_cache=True)
+        return {"h": out.last_hidden_state, "kv": [(lay.keys, lay.values) for lay in out.past_key_values.layers]}
+
+    def forward_prefixed(self, prefix: Dict, input_ids, attention_mask, marker_pos, marker_mask, qtype, option_span=None):
+        """``forward`` for rows that all start with the prefix ``encode_prefix`` cached, computing only the suffixes.
+
+        Takes the same full-row batch as ``forward`` (``input_ids[:, :P]`` must be the prefix; markers, spans and
+        the padding mask stay in full-row coordinates). The cache is replicated across the batch, the suffixes run
+        through the text model with explicit positions ``P..`` and a 4D mask over prefix + suffix keys (causal, or
+        ``option_block_mask`` for ``"block"``: the option span must lie wholly in the suffix), and the cached
+        prefix hidden states are put back in front so the head sees the same sequence ``forward`` would build.
+        """
+        from transformers import DynamicCache
+
+        B, P = input_ids.size(0), prefix["h"].size(1)
+        span = None
+        if self.option_attention == "block":
+            if option_span is None:
+                raise ValueError("option_attention='block' requires option_span")
+            if int(option_span[:, 0].min()) < P:
+                raise ValueError("the option span must start after the cached prefix")
+            span = option_span
+        cache = DynamicCache(ddp_cache_data=[(k.expand(B, -1, -1, -1), v.expand(B, -1, -1, -1)) for k, v in prefix["kv"]])
+        suffix = input_ids[:, P:]
+        pos = torch.arange(P, input_ids.size(1), device=input_ids.device)[None].expand(B, -1)
+        mask = option_block_mask(attention_mask, span, self.encoder.dtype, query_start=P)
+        h = self.encoder.text_model(input_ids=suffix, attention_mask=mask, position_ids=pos, past_key_values=cache,
+                                    use_cache=True).last_hidden_state
+        h = torch.cat([prefix["h"].expand(B, -1, -1), h], 1)
+        return self._readout(h, attention_mask, marker_pos, marker_mask, qtype)
+
+    def _readout(self, h, attention_mask, marker_pos, marker_mask, qtype):
+        """Backbone hidden states ``[B, L, d]`` -> ``(option logits, act logits)``: head transformer, scorer, act head."""
         h = h.float()
         h = h + self.type_emb(qtype)[:, None, :]
         if self.head is not None:
@@ -590,20 +702,26 @@ def set_trainable(model: VLMDecisionModel, mode: str = "head", n_last: int = 4, 
 
 
 def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.dtype = torch.float32,
-                    prep: Optional[ImagePrep] = None) -> VLMDecisionModel:
-    """Build from pretrained backbone weights, or (``backbone_dir``) an architecture-only config to load into."""
+                    prep: Optional[ImagePrep] = None, revision: Optional[str] = None,
+                    token: Optional[str] = None) -> VLMDecisionModel:
+    """Build from pretrained backbone weights, or (``backbone_dir``) an architecture-only config to load into.
+
+    ``revision`` pins the pretrained backbone (default: ``cfg["backbone_revision"]``, else the Hub's default
+    branch); the commit actually loaded is ``model.encoder.config._commit_hash`` (None for a local backbone)."""
     from transformers import AutoConfig, AutoModel
 
     if backbone_dir and os.path.exists(backbone_dir):
         bcfg = AutoConfig.from_pretrained(backbone_dir)
         backbone = AutoModel.from_config(bcfg, attn_implementation="sdpa", dtype=dtype)
     else:
-        backbone = AutoModel.from_pretrained(cfg["backbone"], attn_implementation="sdpa", dtype=dtype)
+        backbone = AutoModel.from_pretrained(cfg["backbone"], attn_implementation="sdpa", dtype=dtype,
+                                             revision=revision or cfg.get("backbone_revision"), token=token)
     return VLMDecisionModel(
         backbone,
         cfg.get("head_layers", 2),
         cfg.get("n_act", 2),
-        option_attention=cfg.get("option_attention", "causal"),
+        # a saved config may carry the deprecated spelling; that is the file's, not the caller's, so no warning
+        option_attention=OPTION_ATTENTION_ALIASES.get(cfg.get("option_attention"), cfg.get("option_attention", "causal")),
         prep=prep,
         readout=cfg.get("readout") or readout_for(backbone.config),
     )
@@ -640,6 +758,32 @@ def _permutations(k: int, n: int) -> List[List[int]]:
     return perms[:n]
 
 
+#: with a cached prefix, ``VLMAgent.predict`` runs this many times ``batch_size`` suffix rows per pass
+SUFFIX_BATCH_FACTOR = 4
+
+
+def shared_prefix_len(rows: List[Dict], n_min: int, block: bool = False) -> int:
+    """Length of the token prefix every row's ``ids`` share, for ``VLMAgent.predict``'s prefix cache; 0 if none.
+
+    Not simply the image run plus the state text: ``build_vlm_inputs`` cuts the state to the room its question's
+    tail leaves, so rows with long questions may carry less of it. The longest common prefix handles that (it
+    stops where the shortest cut ends) and, with causal attention, also takes in whatever the rows share past the
+    state (one question under several option orders shares its whole question text). With ``block`` attention
+    it stops at the first option span, whose tokens see forward. At least one token of every row is left to the
+    suffix; a prefix shorter than ``n_min`` (the image run, which only the prefix pass can merge) returns 0, and
+    the caller takes the full path.
+    """
+    ref = rows[0]["ids"]
+    n = min(len(r["ids"]) for r in rows) - 1
+    for r in rows[1:]:
+        ids = r["ids"]
+        if ids[:n] != ref[:n]:
+            n = next(i for i in range(n) if ids[i] != ref[i])
+    if block:
+        n = min([n] + [r["option_span"][0] for r in rows])
+    return n if n >= max(1, n_min) else 0
+
+
 class VLMAgent:
     """Image+text decision runtime with the same ``predict(state, questions)`` API as ``laya.Agent``.
 
@@ -648,6 +792,11 @@ class VLMAgent:
     ``VLMAgent("path/or/hub-id")``. ``backbone=SMOLVLM2_BACKBONE`` builds on SmolVLM2 instead. A fresh agent
     takes config overrides as keywords, e.g. ``image_split_edge=2048`` for the processor's image splitting (see
     ``laya.preprocess``), which also raises ``max_len`` (``default_max_len``) unless one is given.
+
+    ``revision`` pins a Hub checkpoint (a branch, tag or, reproducibly, a 40-character commit) and
+    ``backbone_revision`` the pretrained backbone of a fresh or head-only agent. The commits actually loaded are
+    recorded: ``source`` (``{"id", "revision"}`` of the checkpoint; revision None for a local directory) and
+    ``cfg["backbone_revision"]``, which ``save`` writes and a head-only reload then pins to.
     """
 
     def __init__(
@@ -657,11 +806,19 @@ class VLMAgent:
         device: Optional[str] = None,
         token: Optional[str] = None,
         dtype: Optional[str] = None,
+        revision: Optional[str] = None,
+        backbone_revision: Optional[str] = None,
         **cfg_overrides,
     ):
         from transformers import AutoProcessor
 
         self.device = _resolve_device(device)
+        self.source = {"id": model_id_or_path, "revision": None}
+        self._static_provenance = None
+        if backbone_revision:
+            cfg_overrides["backbone_revision"] = backbone_revision
+        if "option_attention" in cfg_overrides:
+            cfg_overrides["option_attention"] = normalize_option_attention(cfg_overrides["option_attention"])
         if model_id_or_path is None:
             self.cfg = {
                 "backbone": backbone or DEFAULT_BACKBONE,
@@ -680,14 +837,17 @@ class VLMAgent:
             self.cfg.update(self.prep.to_config())
             if not cfg_overrides.get("max_len"):
                 self.cfg["max_len"] = default_max_len(self.prep)
-            self.processor = AutoProcessor.from_pretrained(self.cfg["backbone"], token=token)
+            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep, token=token)
+            self.cfg["backbone_revision"] = self._backbone_commit()
+            self.processor = AutoProcessor.from_pretrained(self.cfg["backbone"], token=token,
+                                                           revision=self.cfg["backbone_revision"])
             self.prep.apply(self.processor)
-            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep)
         else:
-            self._load(model_id_or_path, token, dtype, cfg_overrides)
+            self._load(model_id_or_path, token, dtype, cfg_overrides, revision)
         # the sequence builders only ever see the processor, so it carries the readout and the sequence cap like
         # it carries the prep (the training loader and ``collect_logits`` follow the checkpoint without being told)
         self.cfg["readout"] = self.processor.laya_readout = self.model.readout
+        self.cfg["option_attention"] = self.model.option_attention
         self.processor.laya_max_len = self.cfg.get("max_len", 1024)
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
@@ -697,7 +857,11 @@ class VLMAgent:
     def _torch_dtype(self) -> torch.dtype:
         return torch.bfloat16 if self.cfg.get("dtype") == "bf16" else torch.float32
 
-    def _load(self, model_id_or_path: str, token, dtype, overrides):
+    def _backbone_commit(self) -> Optional[str]:
+        """The backbone commit the weights came from: what the Hub load resolved, else what the config recorded."""
+        return getattr(self.model.encoder.config, "_commit_hash", None) or self.cfg.get("backbone_revision")
+
+    def _load(self, model_id_or_path: str, token, dtype, overrides, revision: Optional[str] = None):
         from safetensors.torch import load_file
         from transformers import AutoProcessor
 
@@ -705,7 +869,8 @@ class VLMAgent:
         if not os.path.exists(model_dir):
             from huggingface_hub import snapshot_download
 
-            model_dir = snapshot_download(model_id_or_path, token=token or os.environ.get("HF_TOKEN"))
+            model_dir = snapshot_download(model_id_or_path, revision=revision, token=token or os.environ.get("HF_TOKEN"))
+            self.source["revision"] = snapshot_revision(model_dir) or revision
         cfg_path = os.path.join(model_dir, CONFIG_NAME)
         if not os.path.exists(cfg_path):
             raise FileNotFoundError("%r does not contain %s" % (model_id_or_path, CONFIG_NAME))
@@ -715,7 +880,8 @@ class VLMAgent:
             self.cfg["dtype"] = dtype
         self.cfg.update(overrides)
         proc_dir = os.path.join(model_dir, "processor")
-        self.processor = AutoProcessor.from_pretrained(proc_dir if os.path.exists(proc_dir) else self.cfg["backbone"])
+        self.processor = AutoProcessor.from_pretrained(proc_dir) if os.path.exists(proc_dir) else \
+            AutoProcessor.from_pretrained(self.cfg["backbone"], revision=self.cfg.get("backbone_revision"))
         # honour the checkpoint's recorded input resolution and preprocessing path; a config written before
         # those keys existed means 512 through the Hugging Face processor, which is what it was trained with
         self.prep = ImagePrep.from_config(self.cfg, default_backend="processor")
@@ -729,7 +895,8 @@ class VLMAgent:
             self.model.load_state_dict(load_file(full), strict=True)
         else:
             # head-only checkpoint: backbone comes from the pretrained id in the config
-            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep)
+            self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep, token=token)
+            self.cfg["backbone_revision"] = self._backbone_commit()
             missing, unexpected = self.model.load_state_dict(load_file(os.path.join(model_dir, HEAD_WEIGHTS_NAME)), strict=False)
             bad = [k for k in missing if not k.startswith("encoder.")] + list(unexpected)
             if bad:
@@ -748,6 +915,8 @@ class VLMAgent:
             temperature_by_options=dict(self.temperature_by_options),
             **self.prep.to_config(),
         )
+        if self.source["id"] is not None:
+            cfg["loaded_from"] = dict(self.source)
         with open(os.path.join(path, CONFIG_NAME), "w") as f:
             json.dump(cfg, f, indent=2)
         self.processor.save_pretrained(os.path.join(path, "processor"))
@@ -776,13 +945,46 @@ class VLMAgent:
         questions: Dict[str, Dict[str, Any]],
         n_permutations: int = 1,
         batch_size: int = 8,
+        prefix_cache: Optional[bool] = None,
+        temperature: Any = None,
+        calibration: Optional[Calibration] = None,
+        strict_calibration: bool = False,
+        _raw_logits: Optional[Dict[str, np.ndarray]] = None,
+        strict: bool = False,
     ) -> Dict[str, Any]:
         """Evaluate typed questions over a text / JSON / image state. Same output schema as ``Agent.predict``.
 
         Images are encoded once and their features reused for every question row. ``n_permutations > 1``
         scores each question under several option orders and averages the logits (in label order) to
         reduce the causal option-order bias (pointless with the ``"mask"`` readout, which has none).
+
+        ``prefix_cache`` (causal ``"terminator"`` readout only): every row (question x option order) starts with
+        the same image run and state text, so that shared prefix is run through the backbone once, its key/value
+        cache is replicated across the batch, and only each row's suffix is computed
+        (``VLMDecisionModel.encode_prefix`` / ``forward_prefixed``). The suffix rows are short, so up to
+        ``SUFFIX_BATCH_FACTOR * batch_size`` of them go in one pass. The result matches the full path to float
+        rounding. ``True`` forces it, ``False`` forces the full path (every row runs the whole sequence, as the
+        ``"mask"`` readout always does), and ``None`` picks: the cache costs one extra backbone pass, which pays on
+        a CPU as soon as two rows share the prefix (compute-bound), but on CUDA a small backbone pass takes about
+        the same time at any batch size up to a few thousand tokens (launch-bound), so there it is used only when
+        the full path would need more than one pass (more than ``batch_size`` rows). See docs/architecture.md.
+
+        ``temperature`` (a number for every type, or ``{"choice": T, ...}``) or ``calibration`` (from ``calibrate``)
+        replaces the checkpoint's temperatures for this call only; types not given keep the checkpoint's. The
+        answer (argmax) never changes, only the probabilities. A calibration fitted for a different checkpoint
+        warns, or raises with ``strict_calibration=True``. ``_raw_logits``, if a dict, receives each question's
+        permutation-averaged logits before any temperature (used by ``calibrate``).
+
+        Inputs are cut to fit the checkpoint's budgets: each option to 48 tokens (then evenly when all of them
+        exceed ``head_max_len``), the instructions to what ``head_max_len`` leaves, the state's text to what
+        ``max_len`` leaves. An answer whose question was cut carries ``"truncated": {"options": [labels cut],
+        "indistinguishable": [[label, label], ...] (identical once cut), "instructions": bool,
+        "instructions_tokens_dropped": n, "state_tokens_dropped": n}``; the key is absent when nothing was cut.
+        ``strict=True`` raises ``ValueError`` (naming the question and what would be cut) instead.
         """
+        t_override = resolve_temperature(temperature, calibration)
+        if calibration is not None:
+            calibration.check(checkpoint_identity(self), strict=strict_calibration)
         images, _ = split_state(state)
         prefix = vlm_prefix(self.processor, images, self.prep)
         img_feats = None
@@ -796,41 +998,49 @@ class VLMAgent:
         ids = list(questions.keys())
         internal = {qid: self._to_internal(questions[qid]) for qid in ids}
         rows = []
+        truncated = {}
+        max_len, head_max_len = self.cfg.get("max_len", 1024), self.cfg.get("head_max_len", 256)
         for qid in ids:
             q = internal[qid]
             k = len(render_options(q))
             for order in _permutations(k, max(1, n_permutations)):
-                it = build_vlm_inputs(
-                    self.processor, state, q, self.cfg.get("max_len", 1024), self.cfg.get("head_max_len", 256),
-                    option_order=order, prefix=prefix,
-                )
+                it = build_vlm_inputs(self.processor, state, q, max_len, head_max_len, option_order=order, prefix=prefix)
                 if len(it["markers"]) != k:
                     raise ValueError("question %r options exceed head_max_len" % qid)
+                if qid not in truncated:  # the cuts do not depend on the option order: report the first one's
+                    truncated[qid] = truncation_answer(it["truncation"], q)
+                    if strict and truncated[qid]:
+                        raise truncation_error(qid, truncated[qid], max_len, head_max_len)
                 it.update(qtype=QTYPES[q["t"]], qid=qid, order=order)
                 rows.append(it)
 
+        cached, step = None, batch_size
+        if prefix_cache is None:
+            prefix_cache = len(rows) > (batch_size if self.device.type == "cuda" else 1)
+        if prefix_cache and self.model.readout == "terminator":
+            n = shared_prefix_len(rows, len(prefix["ids"]), self.model.option_attention == "block")
+            if n:
+                cached = self.model.encode_prefix(torch.tensor([rows[0]["ids"][:n]], device=self.device), img_feats)
+                step = SUFFIX_BATCH_FACTOR * batch_size
+
         row_logits = []
         n_tokens = 0
-        for s in range(0, len(rows), batch_size):
-            chunk = rows[s : s + batch_size]
+        for s in range(0, len(rows), step):
+            chunk = rows[s : s + step]
             b = collate_vlm(chunk, self.processor.tokenizer.pad_token_id, with_pixels=False)
             n_tokens += int(b["attention_mask"].sum())
-            feats = img_feats.repeat(len(chunk), 1, 1) if img_feats is not None else None
-            logits, act = self.model(
-                b["input_ids"].to(self.device),
-                b["attention_mask"].to(self.device),
-                b["marker_pos"].to(self.device),
-                b["marker_mask"].to(self.device),
-                b["qtype"].to(self.device),
-                image_hidden_states=feats,
-                option_span=b["option_span"].to(self.device),
-            )
+            args = [b[k].to(self.device) for k in ("input_ids", "attention_mask", "marker_pos", "marker_mask", "qtype")]
+            if cached is not None:
+                logits, act = self.model.forward_prefixed(cached, *args, option_span=b["option_span"].to(self.device))
+            else:
+                feats = img_feats.repeat(len(chunk), 1, 1) if img_feats is not None else None
+                logits, act = self.model(*args, image_hidden_states=feats, option_span=b["option_span"].to(self.device))
             act = torch.softmax(act.float(), -1).cpu().numpy()
             logits = logits.float().cpu().numpy()
             for r in range(len(chunk)):
                 row_logits.append((logits[r], act[r]))
 
-        answers = {}
+        answers, temps_used = {}, {}
         for qid in ids:
             q = internal[qid]
             k = len(render_options(q))
@@ -842,7 +1052,10 @@ class VLMAgent:
                 act_sum += float(ac[0])
                 n += 1
             qt = QTYPES[q["t"]]
-            t_scale = self.temperature_by_options.get(temp_bucket(qt, k), self.temperature[qt])
+            if _raw_logits is not None:
+                _raw_logits[qid] = z_sum / n
+            t_scale = t_override.get(qt, self._checkpoint_temperature(qt, k))
+            temps_used[qid] = float(t_scale)
             z = (z_sum / n) / max(1e-3, float(t_scale))
             p = np.exp(z - z.max())
             p = p / p.sum()
@@ -873,14 +1086,114 @@ class VLMAgent:
                     "confidence": round(max(float(p[1]), 1.0 - float(p[1])), 4),
                     "action": ext,
                 }
+            if truncated[qid]:
+                answers[qid]["truncated"] = truncated[qid]
 
         return {
             "model": "laya-vlm",
             "answers": answers,
             "usage": {"input_tokens": n_tokens, "output_tokens": 0, "images": len(images)},
+            "provenance": self.provenance(rows, n_permutations, temps_used),
         }
 
     system_one = predict
+
+    def _checkpoint_temperature(self, qt: int, k: int) -> float:
+        """The stored temperature for a question type with ``k`` options (per-option-count bucket first)."""
+        return float(self.temperature_by_options.get(temp_bucket(qt, k), self.temperature[qt]))
+
+    def calibrate(
+        self,
+        rows: Sequence[Dict[str, Any]],
+        group_key: Optional[str] = "image_id",
+        folds: int = 5,
+        per_type: bool = True,
+        bootstrap: int = 1000,
+        seed: int = 0,
+        min_rows: int = 30,
+        n_permutations: int = 1,
+        batch_size: int = 8,
+    ) -> Calibration:
+        """Fit temperatures on your own labelled rows and report whether confidence got more honest.
+
+        Each row is one state with its questions and labels::
+
+            {"state": {"image": img, ...}, "questions": {qid: qdef}, "labels": {qid: label}, "image_id": "a17"}
+
+        or, one question per row, ``{"state": ..., "question": qdef, "label": label, "image_id": ...}``. A label is
+        the option name for ``choice``, the level index for ``score`` and a bool for ``noul``; questions without a
+        label are skipped. ``group_key`` names the row field that groups related rows (several questions or crops of
+        one image): folds and bootstrap resamples keep a group together, and a row without it is its own group.
+
+        The model runs once per row (with ``n_permutations``, as ``predict`` would), then ``laya.calibration`` fits
+        ``T`` per type (a type with fewer than ``min_rows`` questions shares a pooled ``T``; under ``min_rows`` in
+        total the checkpoint's are kept) and reports raw, checkpoint-temperature and out-of-fold fitted ECE with
+        95% group-bootstrap intervals, NLL and accuracy (identical across all three). Nothing on the agent changes;
+        pass the result to ``predict(..., calibration=cal)`` or ``cal.save(path)``.
+        """
+        records, ungrouped = [], 0
+        for i, row in enumerate(rows):
+            if "questions" in row:
+                questions, labels = row["questions"], row.get("labels", {})
+            else:
+                questions, labels = {"q": row["question"]}, {"q": row.get("label")}
+            questions = {qid: q for qid, q in questions.items() if labels.get(qid) is not None}
+            if not questions:
+                continue
+            group = row.get(group_key) if group_key else None
+            if group is None:
+                group, ungrouped = ("__row__", i), ungrouped + 1
+            raw = {}
+            self.predict(row["state"], questions, n_permutations=n_permutations, batch_size=batch_size, _raw_logits=raw)
+            for qid, qdef in questions.items():
+                q = self._to_internal(qdef)
+                qt, k = QTYPES[q["t"]], len(raw[qid])
+                records.append({"logits": raw[qid], "label": _label_index(q, labels[qid], qid), "qtype": qt,
+                                "group": group, "checkpoint_t": self._checkpoint_temperature(qt, k)})
+        if ungrouped:
+            warnings.warn("%d rows have no %r; each is treated as its own group, so related rows may leak across "
+                          "folds" % (ungrouped, group_key), stacklevel=2)
+        return calibrate_records(records, group_key, folds, per_type, bootstrap, seed, min_rows,
+                                 checkpoint=checkpoint_identity(self), n_permutations=n_permutations)
+
+
+    def provenance(self, rows: Sequence[Dict], n_permutations: int, temperatures: Dict[str, float]) -> Dict[str, Any]:
+        """``predict``'s ``provenance`` block: what produced these numbers. The per-agent part is built once;
+        per call it adds one sha256 over every scored row's input ids (``input_ids_sha256``, rows in question
+        then permutation order), the permutation count and the temperature each question was divided by."""
+        if self._static_provenance is None:
+            import transformers
+
+            self._static_provenance = {
+                "prompt_format_version": PROMPT_FORMAT_VERSION,
+                "checkpoint": dict(self.source),
+                "backbone": {"id": self.cfg.get("backbone"), "revision": self.cfg.get("backbone_revision")},
+                "dtype": str(self.model.encoder.dtype).replace("torch.", ""),
+                "device": self.device.type,
+                "torch": str(torch.__version__),
+                "transformers": str(transformers.__version__),
+                "readout": self.model.readout,
+                "option_attention": self.model.option_attention,
+            }
+        return dict(self._static_provenance, input_ids_sha256=input_ids_sha256([it["ids"] for it in rows]),
+                    n_rows=len(rows), n_permutations=max(1, n_permutations), temperatures=temperatures)
+
+
+def _label_index(q: Dict, label: Any, qid: str) -> int:
+    """A user label as an option index: option name (``choice``), level index (``score``), bool (``noul``)."""
+    k = len(render_options(q))
+    if q["t"] == "choice" and isinstance(label, str):
+        keys = list(q["crit"].keys())
+        if label not in keys:
+            raise ValueError("label %r for %r is not one of its options %s" % (label, qid, keys))
+        return keys.index(label)
+    if q["t"] == "noul" and isinstance(label, (bool, np.bool_)):
+        return int(bool(label))
+    if isinstance(label, (int, np.integer)) and not isinstance(label, (bool, np.bool_)) and 0 <= int(label) < k:
+        return int(label)
+    raise ValueError("label %r for %s question %r: expected %s" % (
+        label, q["t"], qid, {"choice": "an option name", "score": "a level index 0..%d" % (k - 1),
+                             "noul": "True or False"}[q["t"]]))
 
 
 def load_vlm(
@@ -888,7 +1201,11 @@ def load_vlm(
     backbone: Optional[str] = None,
     device: Optional[str] = None,
     token: Optional[str] = None,
+    revision: Optional[str] = None,
+    backbone_revision: Optional[str] = None,
     **kwargs,
 ) -> VLMAgent:
-    """Load a saved VLM agent, or build a fresh one on ``backbone`` (its head is untrained)."""
-    return VLMAgent(model_id_or_path, backbone=backbone, device=device, token=token, **kwargs)
+    """Load a saved VLM agent, or build a fresh one on ``backbone`` (its head is untrained). ``revision`` /
+    ``backbone_revision`` pin the Hub checkpoint / backbone (see ``VLMAgent``)."""
+    return VLMAgent(model_id_or_path, backbone=backbone, device=device, token=token, revision=revision,
+                    backbone_revision=backbone_revision, **kwargs)

@@ -1,6 +1,7 @@
 """Laya: Fast, non-autoregressive System 1 decision engine with calibrated probabilities."""
 
 from .agent import Agent, RLAgent, load
+from .calibration import Calibration
 from .common import (
     QTYPES,
     QTYPE_NAMES,
@@ -22,6 +23,7 @@ __all__ = [
     "VLMAgent",
     "VLMDecisionModel",
     "load_vlm",
+    "Calibration",
     "clean_email_body",
     "email_questions",
     "email_state",

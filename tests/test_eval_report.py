@@ -38,6 +38,11 @@ def test_group_of():
         ["vqa", "cauldron", "cauldronfull", "score", "eval"]
 
 
+
+def test_datasets_heading_names_the_gpu_when_recorded():
+    assert R.datasets_section(dict(_datasets(), gpu="NVIDIA L4"), "val")[0] == "#### Datasets (val split, calibrated, NVIDIA L4)"
+    assert R.datasets_section(_datasets(), "val")[0] == "#### Datasets (val split, calibrated)"  # older results
+
 def test_merge_takes_each_part_from_its_file():
     parts = [{"model": "m", "code": CODE, "datasets": _datasets(), "games": None, "latency": None, "val_split": "test"},
              {"model": "m", "code": CODE, "datasets": None, "games": _games(), "latency": None,

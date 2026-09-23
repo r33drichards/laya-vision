@@ -67,7 +67,8 @@ def _vs_votes(m: Dict) -> str:
 def datasets_section(ds: Dict, split: str) -> List[str]:
     cal = ds["val_calibrated"]
     names = sorted(n for n in cal if n != "all")
-    lines = ["#### Datasets (%s split, calibrated)" % split, ""]
+    gpu = (", %s" % ds["gpu"]) if ds.get("gpu") else ""  # results from before evaluate recorded it have none
+    lines = ["#### Datasets (%s split, calibrated%s)" % (split, gpu), ""]
     groups: Dict[str, List[str]] = {}
     for n in names:
         groups.setdefault(group_of(n), []).append(n)

@@ -32,7 +32,7 @@ import numpy as np
 import torch
 
 from .common import QTYPES, ece_score, proper_reward, render_options
-from .vlm import VLMAgent, VLMDecisionModel, build_vlm_inputs, collate_vlm, set_trainable
+from .vlm import VLMAgent, VLMDecisionModel, build_vlm_inputs, collate_vlm, input_ids_sha256, set_trainable
 
 # ---------------------------------------------------------------------------------------------------------
 # Examples: {"state": ..., "q": {"t", "ins", "crit"}, "target": [prob per option in label order]}
@@ -518,15 +518,16 @@ def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] =
 
 
 class _EvalItems(torch.utils.data.Dataset):
-    def __init__(self, processor, examples, pairs):
-        self.processor, self.examples, self.pairs = processor, examples, pairs
+    def __init__(self, processor, examples, pairs, transform=None):
+        self.processor, self.examples, self.pairs, self.transform = processor, examples, pairs, transform
 
     def __len__(self):
         return len(self.pairs)
 
     def __getitem__(self, j):
         i, order = self.pairs[j]
-        it = make_item(self.processor, self.examples[i], random.Random(0), shuffle=False, order=order)
+        ex = self.transform(self.examples[i]) if self.transform else self.examples[i]
+        it = make_item(self.processor, ex, random.Random(0), shuffle=False, order=order)
         it["index"] = i
         return it
 
@@ -535,6 +536,7 @@ def _collate_eval(items, pad_id):
     b = collate_vlm(items, pad_id)
     b["index"] = [it["index"] for it in items]
     b["order"] = [it["order"] for it in items]
+    b["ids_sha256"] = [input_ids_sha256([it["ids"]]) for it in items]
     return b
 
 
@@ -547,12 +549,16 @@ def collect_logits(
     num_workers: int = 0,
     device=None,
     orders: Optional[Callable[[int], List[List[int]]]] = None,
+    transform: Optional[Callable[[Dict], Dict]] = None,
 ) -> List[Dict]:
     """Label-order logits per example.
 
-    ``orders(k)`` gives the option orders to score each k-option example under (default: identity only).
+    ``orders(k)`` gives the option orders to score each k-option example under (default: the example's own
+    ``"order"`` if it has one, else identity). ``transform(example)`` is applied in the loader just before
+    tokenizing, e.g. ``laya.robustness.realize`` to perturb the images without storing them.
     ``"logits"`` is the mean over orders (as in ``VLMAgent.predict(n_permutations=...)``); ``"logits_per_order"``
-    keeps each order's logits (label order), aligned with ``orders(k)``.
+    keeps each order's logits (label order), aligned with ``orders(k)``, and ``"input_ids_sha256"`` the hash of
+    each order's input ids (``laya.vlm.input_ids_sha256``), for row-level evidence files.
     """
     device = torch.device(device or next(model.parameters()).device)
     model.eval()
@@ -560,14 +566,15 @@ def collect_logits(
     pairs = []
     for i, ex in enumerate(examples):
         k = len(ex["target"])
-        for order in (orders(k) if orders else [list(range(k))]):
+        for order in (orders(k) if orders else [ex.get("order") or list(range(k))]):
             pairs.append((i, order))
     loader = torch.utils.data.DataLoader(
-        _EvalItems(processor, examples, pairs), batch_size=batch_size, num_workers=num_workers,
+        _EvalItems(processor, examples, pairs, transform), batch_size=batch_size, num_workers=num_workers,
         collate_fn=functools.partial(_collate_eval, pad_id=processor.tokenizer.pad_token_id),
         worker_init_fn=_single_thread_worker,
     )
     per_ex: Dict[int, List[torch.Tensor]] = {}
+    hashes: Dict[int, List[str]] = {}
     for batch in loader:
         b = _to(batch, device, model.encoder.dtype)
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
@@ -578,10 +585,12 @@ def collect_logits(
             z = torch.empty(k)
             z[torch.tensor(order)] = logits[r, :k]  # marker j scored option order[j]
             per_ex.setdefault(i, []).append(z)
+            hashes.setdefault(i, []).append(batch["ids_sha256"][r])
     out = []
     for i, ex in enumerate(examples):
         zs = per_ex[i]
-        out.append({"logits": torch.stack(zs).mean(0), "logits_per_order": zs, "target": torch.tensor(ex["target"]),
+        out.append({"logits": torch.stack(zs).mean(0), "logits_per_order": zs, "input_ids_sha256": hashes[i],
+                    "target": torch.tensor(ex["target"]),
                     "qtype": QTYPES[ex["q"]["t"]], "dataset": ex.get("dataset", "_"),
                     "label": ex.get("label", int(np.argmax(ex["target"])))})
     return out
