@@ -42,6 +42,10 @@ LR_BACKBONE = 1e-5
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
 
+# games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
+GAME_FRAC = 0.25
+CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
+
 
 # -- helpers ------------------------------------------------------------------------------------------------------
 
@@ -88,6 +92,14 @@ def build(ctx):
     if IMAGE_SIZE:
         set_image_size(agent, IMAGE_SIZE)
     ctx.data = ctx.train_examples(TRAIN_SETS) if TRAIN_SETS else ctx.train_examples()
+    ctx.mix = MIX
+    if GAME_FRAC:
+        import toolkit
+
+        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
+        for g in CONTROL_GAMES:
+            games += toolkit.control_examples(g, 5000)
+        ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
     return agent
 
 
@@ -95,5 +107,5 @@ def train(agent, ctx):
     from laya.vlm_train import train as train_loop
 
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
-               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=MIX,
+               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
                max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
