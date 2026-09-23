@@ -24,6 +24,11 @@
     modal run modal_app.py::publish_space            # push space/ to the thaitea/laya-vision-demo Space
     modal run modal_app.py::prepare_doom_basic       # auto-labelled ViZDoom "basic" frames -> /data/vqa/doom_basic
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
+    modal run modal_app.py::maze_eval --models <run>/best     # Maze at 4x4 / 6x6 / 8x8 cells: BFS expert, random, models
+    modal run modal_app.py::snake_eval --models <run>/best    # Snake on a 10x10 board: greedy expert, random, models
+    modal run modal_app.py::games_eval --model <run>/best --out games.json
+                                                     # the games suite on one checkpoint: Atari Freeway / Breakout /
+                                                     # Galaxian, ViZDoom basic, Maze, Snake, with baselines, in parallel
 
 Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
@@ -44,7 +49,7 @@ them, and ``--val-split test`` reads the official test split where one exists (K
 ``score`` and ``eval`` (``DATASET_GROUPS``).
 
 Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
-(``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``--init-from``)
+(``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``games_eval``, ``--init-from``)
 the name is relative to /ckpt/smolvlm as before, or to /ckpt, so a ModernVBERT run is ``modernvbert/<run>/best``.
 """
 import json
@@ -1620,3 +1625,193 @@ def doom_eval(models: str = "all3-3ep/best", episodes: int = 50):
     for c in calls:
         r = c.get()
         print("%-32s %12.1f %9.0f%% %10.1f  %s" % (r["policy"], r["mean_reward"], 100 * r["kill_rate"], r["mean_steps"], r["actions"]))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Maze and Snake (laya.gridgames), and the games suite: Atari, ViZDoom, Maze and Snake on one checkpoint
+# ---------------------------------------------------------------------------------------------------------
+
+GRID_SEED = 200_000  # eval episodes use seeds GRID_SEED + i; keep training data off this range
+SUITE_ATARI_GAMES = ("Freeway", "Breakout", "Galaxian")
+
+
+def _load_policy_agent(model: str):
+    from laya.vlm import VLMAgent
+
+    path = _ckpt_path(model)
+    return VLMAgent(path if os.path.exists(path) else model, device="cuda", dtype="bf16")
+
+
+def _play_grid(game: str, policy: str, model: str, episodes: int, size: int, seed: int, max_steps: int) -> dict:
+    from laya import gridgames
+
+    t0 = time.time()
+    if policy == "model":
+        fn = gridgames.model_policy(_load_policy_agent(model), game)
+    elif policy == "expert":
+        fn = gridgames.expert_policy
+    else:
+        fn = gridgames.random_policy(seed)
+    out = gridgames.play_episodes(game, fn, episodes, size, seed, max_steps)
+    out.update(policy="model:" + model if policy == "model" else policy, seconds=round(time.time() - t0, 1))
+    print(json.dumps({k: v for k, v in out.items() if k != "results"}))
+    return out
+
+
+@app.function(image=image, cpu=2, timeout=30 * 60)
+def play_grid_baseline(game: str, policy: str = "expert", episodes: int = 50, size: int = 0, seed: int = GRID_SEED,
+                       max_steps: int = 0):
+    """``expert`` or ``random`` on Maze / Snake, on the same seeded episodes as ``play_grid``."""
+    return _play_grid(game, policy, "", episodes, size, seed, max_steps)
+
+
+@app.function(image=image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+def play_grid(game: str, model: str, episodes: int = 50, size: int = 0, seed: int = GRID_SEED, max_steps: int = 0):
+    """Play ``episodes`` of Maze or Snake (``laya.gridgames``) with a checkpoint (bf16): each step the rendered
+    screen and ``laya.games.maze_question`` / ``snake_question`` go to ``predict`` and its choice is the move.
+    Episode i uses seed ``seed + i``, so every checkpoint and baseline plays the same levels."""
+    return _play_grid(game, "model", model, episodes, size, seed, max_steps)
+
+
+def _grid_row(r: dict) -> str:
+    if r["game"] == "maze":
+        return "%-32s %5d %10.0f%% %11.2f %10.1f" % (r["policy"], r["size"], 100 * r["solve_rate"], r["efficiency"], r["mean_steps"])
+    return "%-32s %5d %10.1f %11d %10.1f  %s" % (r["policy"], r["size"], r["mean_eaten"], r["max_eaten"], r["mean_steps"], r["ends"])
+
+
+def _grid_header(game: str) -> str:
+    if game == "maze":
+        return "%-32s %5s %11s %11s %10s" % ("policy", "size", "solved", "efficiency", "steps/ep")
+    return "%-32s %5s %10s %11s %10s  %s" % ("policy", "size", "food/ep", "max food", "steps/ep", "ends")
+
+
+def _grid_eval(game: str, models: str, sizes: str, episodes: int) -> list:
+    calls = []
+    for size in [int(s) for s in sizes.split(",") if s]:
+        calls += [play_grid_baseline.spawn(game, p, episodes, size) for p in ("expert", "random")]
+        calls += [play_grid.spawn(game, m, episodes, size) for m in models.split(",") if m]
+    results = [c.get() for c in calls]
+    print(_grid_header(game))
+    for r in results:
+        print(_grid_row(r))
+    return results
+
+
+@app.local_entrypoint()
+def maze_eval(models: str = "cauldron-score-2ep-bidir-full/best", sizes: str = "4,6,8", episodes: int = 50):
+    """modal run modal_app.py::maze_eval --models a/best,b/best [--sizes 4,6,8,12]  -- expert, random, each model."""
+    _grid_eval("maze", models, sizes, episodes)
+
+
+@app.local_entrypoint()
+def snake_eval(models: str = "cauldron-score-2ep-bidir-full/best", sizes: str = "10", episodes: int = 20):
+    """modal run modal_app.py::snake_eval --models a/best,b/best [--sizes 8,10]  -- expert, random, each model."""
+    _grid_eval("snake", models, sizes, episodes)
+
+
+atari_image = _with_local_code(base_image.pip_install("ale-py", "gymnasium"))
+
+
+def _atari_baseline(game: str) -> dict:
+    """Expert and random scores from the expert data's meta.json, as ``modal_atari_train.expert_baseline`` reads
+    them (the 4,500-step-capped scores when present); ``None`` for a game without expert data, e.g. Galaxian."""
+    try:
+        with open(os.path.join("/data/atari/expert", game, "meta.json")) as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return {"expert": None, "random": None, "capped": False}
+    if meta.get("expert_score_cap4500") is not None and meta.get("random_score_cap4500") is not None:
+        return {"expert": meta["expert_score_cap4500"], "random": meta["random_score_cap4500"], "capped": True}
+    return {"expert": meta.get("expert_score"), "random": meta.get("random_score"), "capped": False}
+
+
+@app.function(image=atari_image, gpu="L4", cpu=4, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def play_atari_game(game: str, model: str, episodes: int = 3, max_steps: int = 4500, seed: int = 100_000,
+                    random_episodes: int = 10):
+    """One Atari game with a checkpoint, greedy, at the settings of ``modal_atari_train.play_atari`` (same seeds,
+    step cap, auto-FIRE and frame count from the checkpoint), so the numbers compare with ``atari_eval``'s.
+    ``normalized`` is (model - random) / (expert - random) against the expert data's baseline, when there is one."""
+    from laya.atari_train import game_actions, model_policy, play, random_policy
+
+    t0 = time.time()
+    actions = game_actions(game)
+    rnd = play(game, random_policy(len(actions), seed), random_episodes, max_steps, seed)
+    agent = _load_policy_agent(model)
+    frames = int(agent.cfg.get("atari_frames", 1))
+    res = play(game, model_policy(agent, game, actions, False, seed, frames), episodes, max_steps, seed)
+    base = _atari_baseline(game)
+    norm = None
+    if base["expert"] is not None and base["random"] is not None and base["expert"] != base["random"]:
+        norm = (res["mean_score"] - base["random"]) / (base["expert"] - base["random"])
+    out = {"game": game, "model": model, "frames": frames, "model_score": res["mean_score"], "model_scores": res["scores"],
+           "model_steps": res["steps"], "model_capped": res["capped"], "actions": res["actions"],
+           "random_score": rnd["mean_score"], "expert_score": base["expert"], "baseline_random": base["random"],
+           "baseline_capped": base["capped"], "normalized": norm, "seconds": round(time.time() - t0, 1)}
+    print(json.dumps(out))
+    return out
+
+
+def _git_state() -> dict:
+    """The local checkout's commit and whether it has uncommitted changes: the code the Modal images carry."""
+    def git(*args):
+        try:
+            return subprocess.run(["git", *args], capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    return {"commit": git("rev-parse", "HEAD"), "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+            "dirty": bool(git("status", "--porcelain", "--untracked-files=no"))}
+
+
+@app.local_entrypoint()
+def games_eval(model: str, atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
+               doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
+               snake_episodes: int = 20, out: str = ""):
+    """modal run modal_app.py::games_eval --model <run>/best [--out games.json]  -- the games suite on one checkpoint.
+
+    Atari (Freeway, Breakout, Galaxian by default), ViZDoom ``basic``, Maze at each size and Snake, all in parallel,
+    with each game's baselines on the same seeds: random (and the expert data's score) for Atari; the scripted
+    expert, random and always-attack for Doom; the BFS expert and random for Maze and Snake. ``out`` gets every
+    result plus the git commit the code came from.
+    """
+    atari = [play_atari_game.spawn(g, model, atari_episodes) for g in atari_games.split(",") if g]
+    doom = {p: play_doom.spawn(p, "", doom_episodes) for p in ("expert", "random", "always_attack")}
+    doom["model"] = play_doom.spawn("model", model, doom_episodes)
+    grid = []
+    for game, sizes, episodes in (("maze", maze_sizes, maze_episodes), ("snake", snake_sizes, snake_episodes)):
+        for size in [int(s) for s in sizes.split(",") if s]:
+            grid += [play_grid_baseline.spawn(game, p, episodes, size) for p in ("expert", "random")]
+            grid.append(play_grid.spawn(game, model, episodes, size))
+    results = {"model": model, "code": _git_state(), "atari": [], "doom": {}, "maze": [], "snake": []}
+    for c in atari:
+        try:
+            results["atari"].append(c.get())
+        except Exception as e:  # one broken game should not lose the rest of the suite
+            print("atari failed:", repr(e)[:300])
+    for p, c in doom.items():
+        results["doom"][p] = c.get()
+    for c in grid:
+        r = c.get()
+        results[r["game"]].append(r)
+
+    print("\n== Atari (%d episodes, greedy)" % atari_episodes)
+    print("%-10s %10s %10s %10s %8s  %s" % ("game", "model", "random", "expert", "norm", "top actions"))
+    for r in results["atari"]:
+        top = ", ".join("%s %d%%" % (a, 100 * n / max(1, sum(r["actions"].values())))
+                        for a, n in sorted(r["actions"].items(), key=lambda kv: -kv[1])[:3])
+        f = lambda v, fmt="%.1f": "-" if v is None else fmt % v  # noqa: E731
+        print("%-10s %10.1f %10.1f %10s %8s  %s" % (r["game"], r["model_score"], r["random_score"], f(r["expert_score"]),
+                                                   f(r["normalized"], "%.2f"), top))
+    print("\n== ViZDoom basic (%d episodes)" % doom_episodes)
+    print("%-32s %12s %10s %10s" % ("policy", "mean reward", "kill rate", "steps/ep"))
+    for r in results["doom"].values():
+        print("%-32s %12.1f %9.0f%% %10.1f" % (r["policy"], r["mean_reward"], 100 * r["kill_rate"], r["mean_steps"]))
+    for game in ("maze", "snake"):
+        print("\n== %s" % game.capitalize())
+        print(_grid_header(game))
+        for r in results[game]:
+            print(_grid_row(r))
+    if out:
+        with open(out, "w") as f:
+            json.dump(results, f, indent=2)
+        print("\nwrote", out)

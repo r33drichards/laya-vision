@@ -74,6 +74,7 @@ modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvber
 modal run modal_app.py::evaluate --run-name my-run/best                   # every prepared val set, raw and calibrated
 modal run modal_app.py::evaluate --run-name my-run/best --datasets eval   # only the held-out evaluation sets
 modal run --detach modal_app.py::split_bench                              # SmolVLM2, image splitting off / 1024 / 2048
+modal run modal_app.py::games_eval --model my-run/best --out games.json   # Atari, ViZDoom, Maze, Snake + baselines
 modal run modal_app.py::publish --repo user/name --run my-run/best --card hf_model_card_score.md
 modal run modal_app.py::publish_space                                     # push space/ to the demo Space
 ```
@@ -83,6 +84,14 @@ modal run modal_app.py::publish_space                                     # push
 ## Playing games
 
 The screen is the image and the options are the game's buttons. `examples/atari_live.py` and `examples/vizdoom_live.py` let you watch a checkpoint play in a local window. Trained for 7 minutes on 20,000 auto-labelled frames, it plays ViZDoom `basic` at expert level (mean reward +75.4 against the expert's +75.8 over 50 unseen episodes); the Atari work, with a two-frame input and DAgger rounds, is in [docs/game-training.md](docs/game-training.md).
+
+`modal run modal_app.py::games_eval --model <run>/best` scores a checkpoint on the games suite in one go:
+- Atari Freeway, Breakout and Galaxian, at `atari_eval`'s settings, against random play and, where expert data exists, the expert. Galaxian has no expert data, so it is compared with random only.
+- ViZDoom `basic`, against the scripted expert, random and always-attack.
+- Maze, at 4×4, 6×6 and 8×8 cells: solve rate, and path efficiency against the BFS shortest path.
+- Snake, on a 10×10 board: food eaten and steps survived, against a greedy BFS expert and random.
+
+Maze and Snake are small seeded games in `laya/gridgames.py`, so every checkpoint plays the same levels. `maze_eval` and `snake_eval` compare several checkpoints on one game.
 
 ## What didn't work
 

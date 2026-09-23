@@ -1,7 +1,8 @@
 """Question builders for playing games with the image model, shared by training-data generation and the live
 viewers (``examples/atari_live.py``, ``examples/vizdoom_live.py``) so both ask exactly the same question.
 
-Each game step is one ``choice`` question: the screen is the image, the options are the game's actions.
+Each game step is one ``choice`` question: the screen is the image, the options are the game's actions. Atari
+and ViZDoom run in their emulators; Maze and Snake are ``laya.gridgames``.
 """
 from typing import Dict, List, Optional, Sequence
 
@@ -49,6 +50,30 @@ def atari_question(game: str, actions: Sequence[str]) -> Dict:
         "instructions": "You are playing the Atari game %s. %s Which action should the player take now?"
                         % (game, ATARI_GOALS.get(game, "Score as many points as possible.")),
         "criteria": {a: ATARI_ACTIONS.get(a, a.lower()) for a in actions},
+    }}
+
+
+GRID_MOVES = {"UP": "move up", "DOWN": "move down", "LEFT": "move left", "RIGHT": "move right"}
+
+
+def maze_question() -> Dict:
+    """The question for ``laya.gridgames.Maze``: the blue square walks the white corridors to the green one."""
+    return {"action": {
+        "type": "choice",
+        "instructions": "You are the blue square in a maze. Black cells are walls; move along the white corridors "
+                        "to reach the green square. Which way should you move now?",
+        "criteria": dict(GRID_MOVES),
+    }}
+
+
+def snake_question() -> Dict:
+    """The question for ``laya.gridgames.Snake``: the dark green head leads the light green body."""
+    return {"action": {
+        "type": "choice",
+        "instructions": "You are playing Snake. The dark green square is the snake's head and the light green "
+                        "squares are its body. Eat the red food, and do not run into the black walls or your own "
+                        "body. Which way should the snake move now?",
+        "criteria": dict(GRID_MOVES),
     }}
 
 
