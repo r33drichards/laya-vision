@@ -114,8 +114,9 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
 - **Atari** `normalized` = (model - random) / (expert - random). A checkpoint not trained on a game plays at
   random-level or degenerate constant-action policies (look at the top actions); ViZDoom "identical to
   always-attack" means it only shoots.
-- **Latency** from `bench_latency` includes CPU preprocessing, so it reads higher (~79 ms) than the
-  forward-pass-only ~41 ms in the README.
+- **Latency** from `bench_latency` times the whole `predict` call, CPU preprocessing included: 79 ms median on the
+  last run against ~41 ms in the README's checkpoint table. Preprocessing is the likely difference (not yet
+  confirmed), so compare latencies only within `bench_latency` runs.
 
 ## 7. Adding an eval
 
