@@ -31,7 +31,8 @@ CASES = [
     {"name": "readme-example", "n_images": 1, "state": {"note": "customer says it arrived broken"},
      "questions": {
          "damage": {"type": "score", "instructions": "How much damage does the item show?",
-                    "criteria": ["none", "cosmetic: scratches or dents", "functional: parts broken or missing", "destroyed"]},
+                    "criteria": ["none", "cosmetic: scratches or dents", "functional: parts broken or missing",
+                                 "destroyed"]},
          "category": {"type": "choice", "instructions": "What kind of item is this?",
                       "criteria": ["electronics", "clothing", "furniture", "food", "other"]},
          "outdoors": {"type": "noul", "instructions": "Was the photo taken outdoors?"}}},
@@ -48,7 +49,8 @@ CASES = [
      "questions": {"c": {"type": "choice", "instructions": "Which?", "criteria": ["a", "b"]}}},
     {"name": "many-long-options", "n_images": 1, "state": {"k": "v"},
      "questions": {"many": {"type": "choice", "instructions": "Pick the best description. " * 40,
-                            "criteria": ["option %d: " % i + "a rather long description of it " * 6 for i in range(12)]}}},
+                            "criteria": ["option %d: " % i + "a rather long description of it " * 6
+                                         for i in range(12)]}}},
 ]
 
 
