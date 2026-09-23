@@ -93,6 +93,13 @@ The same suite runs from GitHub Actions with the `eval` workflow (`.github/workf
 
 `finetune_long` keeps data, objective, schedule and evaluation identical across backbones, which is what makes the checkpoints above comparable. It also takes `--backbone HuggingFaceTB/SmolVLM2-256M-Video-Instruct` (same size and code path as SmolVLM), `--split-edge` to turn on the processor's image splitting (the image is resized to that longest edge and cut into 512 tiles plus a global view: up to 5 views at 1024, 17 at 2048, against 1 without) and `--max-len` for the sequence cap, which is 1024 by default and raised to fit the tiles when splitting. `split_bench` trains one SmolVLM2 run per split setting on a six-set subset and writes accuracy per set, tokens per question and L4 latency to `/ckpt/smolvlm2/split-bench/results.md`. Results: splitting at 1024 gained about 1 point for 35% more latency, and 2048 gained nothing for 2.5× the latency ([docs/split-bench.md](docs/split-bench.md)). Runs save under `/ckpt/smolvlm/` or `/ckpt/modernvbert/` with a `best/` and `last/` checkpoint and a `metrics.json` of every evaluation. Locally, `python -m laya.vlm_train --synthetic --steps 3` is a smoke run.
 
+### Telemetry
+
+The training, eval, latency and game jobs send traces, metrics and their stdout logs over OTLP/HTTP to the collector named in the `laya-otel` Modal secret (`OTEL_EXPORTER_OTLP_ENDPOINT`). The collector is a `grafana/otel-lgtm` stack, so the data shows up in Grafana under Tempo, Prometheus and Loki.
+- Each job call is one trace, named after the function, with the run, backbone or game as attributes.
+- Training reports `laya_train_*` gauges: loss, reward, learning rates, throughput and data wait. Evals report `laya_eval_*` (acc, ECE, NLL, ... by `dataset` and `split`), and final scores are `laya_final_*`. A job's numeric results, such as `median_ms` or `kill_rate`, become `laya_result_*`.
+- Without the secret, run with `LAYA_OTEL_SECRET= modal run ...` and telemetry stays off. Locally, `pip install -e .[otel]` and set `OTEL_EXPORTER_OTLP_ENDPOINT` (see `laya/telemetry.py`).
+
 ## Playing games
 
 The screen is the image and the options are the game's buttons. `examples/atari_live.py` and `examples/vizdoom_live.py` let you watch a checkpoint play in a local window. Trained for 7 minutes on 20,000 auto-labelled frames, it plays ViZDoom `basic` at expert level (mean reward +75.4 against the expert's +75.8 over 50 unseen episodes); the Atari work, with a two-frame input and DAgger rounds, is in [docs/game-training.md](docs/game-training.md).

@@ -55,6 +55,7 @@ Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write unde
 (``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``games_eval``, ``--init-from``)
 the name is relative to /ckpt/smolvlm as before, or to /ckpt, so a ModernVBERT run is ``modernvbert/<run>/best``.
 """
+import functools
 import json
 import os
 import subprocess
@@ -83,8 +84,30 @@ base_image = (
         "pytest",
         "num2words",
     )
+    .pip_install("opentelemetry-sdk==1.44.0", "opentelemetry-exporter-otlp-proto-http==1.44.0")  # laya.telemetry
     .env({"HF_HOME": "/cache/hf", "TOKENIZERS_PARALLELISM": "false"})
 )
+
+# Traces, metrics and stdout logs of the jobs below go to the OTLP collector named by OTEL_EXPORTER_OTLP_ENDPOINT
+# in this Modal secret (laya.telemetry). LAYA_OTEL_SECRET picks another secret; set it empty to run without one.
+_otel_secret = os.environ.get("LAYA_OTEL_SECRET", "laya-otel")
+OTEL = [modal.Secret.from_name(_otel_secret)] if _otel_secret else []
+
+
+def _traced(*attrs):
+    """``laya.telemetry.traced_job`` on a Modal function: a span per call named after it, with these arguments as
+    attributes, stdout as logs and numeric results as metrics. laya is imported in the container, not by the
+    client (it needs torch)."""
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            from laya import telemetry
+
+            return telemetry.traced_job(fn.__name__, attrs)(fn)(*args, **kwargs)
+
+        return wrapper
+
+    return deco
 
 
 def _with_local_code(img):
@@ -251,7 +274,9 @@ def _load_data(datasets: str, train_split: str, val_split: str, n_calib: int, ma
     memory=32768,
     timeout=40 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
+    secrets=OTEL,
 )
+@_traced("run_name", "backbone", "freeze")
 def finetune(
     datasets: str = ",".join(DATASETS),
     minutes: float = 18.0,
@@ -290,6 +315,7 @@ def finetune(
     """
     import torch
 
+    from laya import telemetry
     from laya.vlm import VLMAgent
     from laya.vlm_train import collect_logits, fit_temperatures_from, format_metrics, metrics_from, synthetic_examples, train
 
@@ -330,6 +356,7 @@ def finetune(
     def eval_fn(step):
         m = metrics_from(collect_logits(model, proc, small_val, **ev_kw))
         print("[eval step %d] %s" % (step, format_metrics(m)), flush=True)
+        telemetry.record_metrics("laya.eval", m, split="val")
         log["evals"].append({"step": step, **m})
 
     losses = train(
@@ -350,6 +377,8 @@ def finetune(
     log["temperature"] = temps
     log["val_raw"] = metrics_from(val_records)
     log["val_calibrated"] = metrics_from(val_records, temps)
+    telemetry.record_metrics("laya.final", log["val_raw"], split="val", calibrated="false")
+    telemetry.record_metrics("laya.final", log["val_calibrated"], split="val", calibrated="true")
     print("temperatures (choice, score, noul):", [round(t, 3) for t in temps])
     print("[final val, T=1]        " + format_metrics(log["val_raw"]))
     print("[final val, calibrated] " + format_metrics(log["val_calibrated"]))
@@ -371,7 +400,9 @@ def finetune(
     timeout=300 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
     retries=modal.Retries(max_retries=3, initial_delay=10.0),
+    secrets=OTEL,
 )
+@_traced("run_name", "backbone")
 def finetune_long(
     datasets: str = ",".join(DATASETS),
     epochs: float = 3.0,
@@ -456,6 +487,7 @@ def finetune_long(
 
     import torch
 
+    from laya import telemetry
     from laya.common import QTYPES
     from laya.vlm import VLMAgent, _permutations
     from laya.vlm_train import (collect_logits, cyclic_orders, fit_temperatures_from, format_metrics, metrics_from,
@@ -557,9 +589,14 @@ def finetune_long(
 
     def eval_fn(step):
         te = time.time()
-        val_m = metrics_from(collect_logits(model, proc, val_ex, **ev_kw))
-        tr_m = metrics_from(collect_logits(model, proc, train_eval, **ev_kw))
+        with telemetry.span("eval", step=step):
+            val_m = metrics_from(collect_logits(model, proc, val_ex, **ev_kw))
+            tr_m = metrics_from(collect_logits(model, proc, train_eval, **ev_kw))
         score = sum(val_m[n]["acc"] for n in val_names) / len(val_names)
+        telemetry.record_metrics("laya.eval", val_m, split="val")
+        telemetry.record_metrics("laya.eval", tr_m, split="train")
+        telemetry.record("laya.eval.mean_val_acc", score)
+        telemetry.record("laya.eval.epoch", step * batch_size / len(train_ex))
         row = {"step": step, "epoch": round(step * batch_size / len(train_ex), 2), "mean_val_acc": score,
                "val": val_m, "train": tr_m}
         log["evals"].append(row)
@@ -576,6 +613,7 @@ def finetune_long(
         write_log()
         ckpt_vol.commit()
         print("  eval + save took %.1f min" % ((time.time() - te) / 60), flush=True)
+        telemetry.record("laya.eval.duration_s", time.time() - te)
 
     def maybe_eval(step):
         # Called every few steps as a cheap probe (so ``crash_at_step`` can fire between evals); evaluates on
@@ -625,6 +663,8 @@ def finetune_long(
     val_records = collect_logits(model, proc, val_ex, **ev_kw)
     log["temperature"] = temps
     log["final"] = {"step": best["step"], "val_raw": metrics_from(val_records), "val_calibrated": metrics_from(val_records, temps)}
+    telemetry.record_metrics("laya.final", log["final"]["val_raw"], split="val", calibrated="false")
+    telemetry.record_metrics("laya.final", log["final"]["val_calibrated"], split="val", calibrated="true")
     print("temperatures (choice, score, noul):", [round(t, 3) for t in temps])
     print("[final val, T=1]        " + format_metrics(log["final"]["val_raw"]))
     print("[final val, calibrated] " + format_metrics(log["final"]["val_calibrated"]))
@@ -668,7 +708,9 @@ def finetune_long(
     memory=32768,
     timeout=60 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
+    secrets=OTEL,
 )
+@_traced("run_name", "val_split")
 def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS + EVAL_DATASETS),
              val_split: str = "val",
              max_val: int = 0):
@@ -677,6 +719,7 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     holdouts); sets that are not prepared are skipped."""
     import torch
 
+    from laya import telemetry
     from laya.vlm import VLMAgent
     from laya.vlm_train import collect_logits, format_metrics, metrics_from
 
@@ -691,6 +734,8 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     print("backbone %s, readout %s" % (agent.cfg["backbone"], agent.model.readout))
     records = collect_logits(agent.model, agent.processor, val_ex, batch_size=32, num_workers=14)
     raw, cal = metrics_from(records), metrics_from(records, agent.temperature)
+    telemetry.record_metrics("laya.final", raw, split=val_split, calibrated="false")
+    telemetry.record_metrics("laya.final", cal, split=val_split, calibrated="true")
     print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
     print("[val, T=1]        " + format_metrics(raw))
     print("[val, calibrated] " + format_metrics(cal))
@@ -713,7 +758,8 @@ def _public_question(q: dict) -> dict:
 
 
 @app.function(image=image, gpu="L4", cpu=4, memory=16384, timeout=60 * 60,
-              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
+@_traced("run_name", "dtype")
 def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = "bf16", seed: int = 0):
     """Time ``predict`` on real val images, one question each, as a user would call it: the checkpoint's own
     preprocessing on the CPU (the processor's resize and, with ``image_split_edge``, its tiling), then the forward
@@ -806,7 +852,8 @@ def _split_table(rows: list, names: list) -> str:
     return "\n".join(lines) + "\n"
 
 
-@app.function(image=image, cpu=1, memory=4096, timeout=24 * 60 * 60, volumes={"/ckpt": ckpt_vol})
+@app.function(image=image, cpu=1, memory=4096, timeout=24 * 60 * 60, volumes={"/ckpt": ckpt_vol}, secrets=OTEL)
+@_traced()
 def split_bench(
     bench: str = "split-bench",
     split_edges: str = "0,1024,2048",
@@ -1569,7 +1616,8 @@ def prepare_doom_basic(n_train: int = 20000, n_val: int = 2000, eps: float = 0.3
     return meta
 
 
-@app.function(image=doom_image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+@app.function(image=doom_image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
+@_traced("policy", "model")
 def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int = 50, tics: int = 4, seed: int = 50_000):
     """Play ``episodes`` of ViZDoom ``basic`` and report reward and kill rate.
 
@@ -1668,14 +1716,16 @@ def _play_grid(game: str, policy: str, model: str, episodes: int, size: int, see
     return out
 
 
-@app.function(image=image, cpu=2, timeout=30 * 60)
+@app.function(image=image, cpu=2, timeout=30 * 60, secrets=OTEL)
+@_traced("game", "policy", "size")
 def play_grid_baseline(game: str, policy: str = "expert", episodes: int = 50, size: int = 0, seed: int = GRID_SEED,
                        max_steps: int = 0):
     """``expert`` or ``random`` on Maze / Snake, on the same seeded episodes as ``play_grid``."""
     return _play_grid(game, policy, "", episodes, size, seed, max_steps)
 
 
-@app.function(image=image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+@app.function(image=image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
+@_traced("game", "model", "size")
 def play_grid(game: str, model: str, episodes: int = 50, size: int = 0, seed: int = GRID_SEED, max_steps: int = 0):
     """Play ``episodes`` of Maze or Snake (``laya.gridgames``) with a checkpoint (bf16): each step the rendered
     screen and ``laya.games.maze_question`` / ``snake_question`` go to ``predict`` and its choice is the move.
@@ -1736,7 +1786,8 @@ def _atari_baseline(game: str) -> dict:
 
 
 @app.function(image=atari_image, gpu="L4", cpu=4, timeout=60 * 60,
-              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
+@_traced("game", "model")
 def play_atari_game(game: str, model: str, episodes: int = 3, max_steps: int = 4500, seed: int = 100_000,
                     random_episodes: int = 10):
     """One Atari game with a checkpoint, greedy, at the settings of ``modal_atari_train.play_atari`` (same seeds,

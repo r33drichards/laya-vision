@@ -31,6 +31,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence
 import numpy as np
 import torch
 
+from . import telemetry
 from .common import QTYPES, ece_score, proper_reward, render_options
 from .vlm import VLMAgent, VLMDecisionModel, build_vlm_inputs, collate_vlm, set_trainable
 
@@ -400,6 +401,7 @@ def train(
         save_state_fn(step_, state(step_))
         model.train()
         save_s, t_state = time.time() - ts, time.time()
+        telemetry.record("laya.train.state_save_s", save_s)
 
     def save_due():
         # Beyond the floor, back off when writes are slow: state.pt never eats more than ~1/20 of the wall clock,
@@ -443,6 +445,13 @@ def train(
                   "data wait %.0f%%" % (step, (time.time() - t0) / 60, losses[-1], sum(recent) / len(recent),
                                         reward.item(), groups[0]["lr"], w_ce_now, sigma_now,
                                         100 * wait / max(1e-6, time.time() - t0)), flush=True)
+            elapsed = max(1e-6, time.time() - t0 - t_eval)
+            for key, v in (("step", step), ("loss", losses[-1]), ("loss_avg", sum(recent) / len(recent)),
+                           ("reward", reward.item()), ("lr_head", groups[0]["lr"]), ("lr_backbone", groups[-1]["lr"]),
+                           ("w_ce", w_ce_now), ("sigma", sigma_now), ("progress", progress),
+                           ("data_wait_frac", wait / elapsed), ("steps_per_s", step / elapsed),
+                           ("samples_per_s", step * batch_size / elapsed)):
+                telemetry.record("laya.train." + key, v)
         step += 1
         if eval_fn is not None and eval_every and step % eval_every == 0:
             te = time.time()
@@ -731,4 +740,5 @@ def main(argv: Optional[Iterable[str]] = None):
 
 
 if __name__ == "__main__":
-    main()
+    with telemetry.job("vlm_train"):
+        main()
