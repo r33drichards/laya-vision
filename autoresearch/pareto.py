@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """The keep / discard rule for autoresearch: a Pareto frontier over (quality up, params down, latency down).
 
+Latency is ``latency_x``: the experiment's median ``predict`` time divided by the base checkpoint's, both timed in
+the same L4 container (1.0 = as fast as the released model). Raw milliseconds swing by 50% between L4 hosts, so
+only the ratio is comparable across runs.
+
 Upstream autoresearch keeps an experiment when its single metric (val_bpb) improves. Here there are three
 objectives, so an experiment is kept when it extends the frontier: no already-kept result is at least as good on
 all three within the noise margins below. Kept results that the new one strictly beats on all three drop off the
@@ -29,7 +33,7 @@ EPS_LATENCY = 0.03    # relative
 # Hypervolume reference point, in units of the first (baseline) result: quality 0, 1.5x its params, 1.5x its latency.
 REF_SCALE = 1.5
 
-COLUMNS = ["commit", "quality", "macro_acc", "ece_hard", "params_m", "latency_ms", "status", "description"]
+COLUMNS = ["commit", "quality", "macro_acc", "ece_hard", "params_m", "latency_x", "status", "description"]
 
 
 def dominates(a: Dict, b: Dict, eps: bool = True) -> bool:
@@ -37,9 +41,9 @@ def dominates(a: Dict, b: Dict, eps: bool = True) -> bool:
     ``eps``): ``b`` then adds nothing ``a`` does not already offer."""
     if eps:
         return (a["quality"] >= b["quality"] - EPS_QUALITY and a["params_m"] <= b["params_m"] * (1 + EPS_PARAMS)
-                and a["latency_ms"] <= b["latency_ms"] * (1 + EPS_LATENCY))
-    return (a["quality"] >= b["quality"] and a["params_m"] <= b["params_m"] and a["latency_ms"] <= b["latency_ms"]
-            and (a["quality"] > b["quality"] or a["params_m"] < b["params_m"] or a["latency_ms"] < b["latency_ms"]))
+                and a["latency_x"] <= b["latency_x"] * (1 + EPS_LATENCY))
+    return (a["quality"] >= b["quality"] and a["params_m"] <= b["params_m"] and a["latency_x"] <= b["latency_x"]
+            and (a["quality"] > b["quality"] or a["params_m"] < b["params_m"] or a["latency_x"] < b["latency_x"]))
 
 
 def frontier(rows: Sequence[Dict]) -> List[Dict]:
@@ -58,7 +62,7 @@ def decide(front: Sequence[Dict], cand: Dict) -> Tuple[str, List[Dict]]:
 
 def _normalized(points: Sequence[Dict], base: Dict) -> List[Tuple[float, float, float]]:
     """(quality, params / base params, latency / base latency) per point."""
-    return [(p["quality"], p["params_m"] / base["params_m"], p["latency_ms"] / base["latency_ms"]) for p in points]
+    return [(p["quality"], p["params_m"] / base["params_m"], p["latency_x"] / base["latency_x"]) for p in points]
 
 
 def _hv2d(pts: Sequence[Tuple[float, float]], ref: Tuple[float, float]) -> float:
@@ -89,7 +93,7 @@ def read_tsv(path: str) -> List[Dict]:
     with open(path) as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
     for r in rows:
-        for k in ("quality", "macro_acc", "ece_hard", "params_m", "latency_ms"):
+        for k in ("quality", "macro_acc", "ece_hard", "params_m", "latency_x"):
             r[k] = float(r[k])
     return rows
 
@@ -112,11 +116,11 @@ def _cell(v) -> str:
 def row_from_result(res: Dict, commit: str, description: str) -> Dict:
     s = res["summary"]
     return {"commit": commit, "quality": s["quality"], "macro_acc": s["macro_acc"], "ece_hard": s["ece_hard"],
-            "params_m": s["params_m"], "latency_ms": s["latency_ms"], "status": "", "description": description}
+            "params_m": s["params_m"], "latency_x": s["latency_x"], "status": "", "description": description}
 
 
 def crash_row(commit: str, description: str) -> Dict:
-    return {"commit": commit, "quality": 0.0, "macro_acc": 0.0, "ece_hard": 0.0, "params_m": 0.0, "latency_ms": 0.0,
+    return {"commit": commit, "quality": 0.0, "macro_acc": 0.0, "ece_hard": 0.0, "params_m": 0.0, "latency_x": 0.0,
             "status": "crash", "description": description}
 
 
@@ -131,7 +135,7 @@ def show(rows: Sequence[Dict]) -> str:
         lines.append("frontier (%d):" % len(front))
         for r in sorted(front, key=lambda r: r["params_m"]):
             lines.append("  %s  quality %.4f  acc %.4f  ece %.4f  %7.1fM params  %6.1f ms  %s" % (
-                r["commit"], r["quality"], r["macro_acc"], r["ece_hard"], r["params_m"], r["latency_ms"], r["description"]))
+                r["commit"], r["quality"], r["macro_acc"], r["ece_hard"], r["params_m"], r["latency_x"], r["description"]))
     return "\n".join(lines)
 
 

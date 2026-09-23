@@ -13,14 +13,17 @@ then, identically for every experiment:
    really holds is measured (a layer an experiment drops has to be gone from the saved config too);
 3. scores the reloaded model on a fixed sample of every eval set (``EVAL_PER_SET`` seeded questions from each
    ``EVAL_DATASETS`` val split);
-4. counts its parameters and times ``predict`` on an L4 in bf16 on ``LATENCY_N`` fixed images.
+4. counts its parameters and times ``predict`` on an L4 in bf16 on ``LATENCY_N`` fixed images, alternating with the
+   ``REFERENCE`` checkpoint in the same container.
 
 The three objectives (see ``pareto.py``):
 
 * **quality** = macro accuracy over the eval sets minus the ECE pooled over the questions that have a single right
   answer (not the ones scored against human vote spreads, where ECE is not meaningful). Higher is better.
 * **params_m**: parameters of the saved model, in millions. Lower is better.
-* **latency_ms**: median ``predict`` time on the L4, preprocessing included. Lower is better.
+* **latency_x**: median ``predict`` time on the L4 (preprocessing included) divided by the ``REFERENCE``
+  checkpoint's, timed alternately in the same container: raw milliseconds swing by ~50% between L4 hosts (52 vs
+  76 ms for one model). Lower is better; the raw times are kept in the result JSON.
 
 The result lands in ``autoresearch/runs/<tag>/<commit>.json`` and ``pareto.py`` appends it to
 ``autoresearch/runs/<tag>/results.tsv`` as keep / discard.
@@ -73,6 +76,7 @@ LATENCY_N = 100            # images timed on the L4 (after 10 warm-up calls)
 N_CALIB = 100              # last train records per calibration set, held out from training
 TRAIN_POOL_PER_SET = 2000  # seeded train examples per trainable set in the pool
 SEED = 0
+REFERENCE = "cauldron-score-2ep-bidir-full/best"   # latency is reported relative to this checkpoint (= thaitea/laya-vision)
 POOL_VERSION = "v1"
 POOL_DIR = "/data/autoresearch/pool-" + POOL_VERSION
 
@@ -353,25 +357,37 @@ class Latency:
 
     @modal.method()
     def run(self, tag: str, commit: str) -> Dict:
+        """Median ``predict`` time of the experiment's checkpoint, as a ratio to the base checkpoint's: both are
+        loaded here and timed alternately on each case, so the L4 host's speed (raw times vary by ~50% between
+        hosts) cancels out."""
         import numpy as np
         import torch
 
         from laya.vlm import VLMAgent
 
         ckpt_vol.reload()
-        agent = VLMAgent(os.path.join(ROOT, tag, commit), device="cuda", dtype="bf16")
+        cand = VLMAgent(os.path.join(ROOT, tag, commit), device="cuda", dtype="bf16")
+        ref = VLMAgent(ckpt_path(REFERENCE), device="cuda", dtype="bf16")
         cases = self.cases
         for state, qs in cases[:10]:
-            agent.predict(state, qs)
-        ms = []
-        for state, qs in cases:
+            cand.predict(state, qs)
+            ref.predict(state, qs)
+
+        def timed(agent, state, qs):
             torch.cuda.synchronize()
             t = time.perf_counter()
             agent.predict(state, qs)
             torch.cuda.synchronize()
-            ms.append((time.perf_counter() - t) * 1000)
-        return {"latency_ms": float(np.median(ms)), "latency_p90_ms": float(np.percentile(ms, 90)), "n": len(ms),
-                "gpu": torch.cuda.get_device_name(0)}
+            return (time.perf_counter() - t) * 1000
+
+        ms, ref_ms = [], []
+        for i, (state, qs) in enumerate(cases):
+            pair = [(cand, ms), (ref, ref_ms)] if i % 2 == 0 else [(ref, ref_ms), (cand, ms)]
+            for agent, out in pair:
+                out.append(timed(agent, state, qs))
+        return {"latency_x": float(np.median(ms) / np.median(ref_ms)), "latency_ms": float(np.median(ms)),
+                "latency_ref_ms": float(np.median(ref_ms)), "latency_p90_ms": float(np.percentile(ms, 90)),
+                "n": len(ms), "gpu": torch.cuda.get_device_name(0)}
 
 
 @app.function(image=image, cpu=4, memory=8192, timeout=60 * 60, volumes={"/data": data_vol})
@@ -520,7 +536,7 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         json.dump(res, f, indent=2)
     s = res["summary"]
     print("---")
-    for k in ("quality", "macro_acc", "ece_hard", "params_m", "latency_ms", "latency_p90_ms"):
+    for k in ("quality", "macro_acc", "ece_hard", "params_m", "latency_x", "latency_ms", "latency_ref_ms"):
         print("%-17s %.4f" % (k + ":", s[k]))
     print("%-17s %.1f" % ("train_seconds:", res["train_s"]))
     print("%-17s %.1f" % ("total_seconds:", res["total_s"]))

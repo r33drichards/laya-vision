@@ -12,7 +12,7 @@ _spec.loader.exec_module(P)
 
 
 def pt(q, params, lat, commit="c", status="keep"):
-    return {"commit": commit, "quality": q, "macro_acc": q, "ece_hard": 0.0, "params_m": params, "latency_ms": lat,
+    return {"commit": commit, "quality": q, "macro_acc": q, "ece_hard": 0.0, "params_m": params, "latency_x": lat,
             "status": status, "description": ""}
 
 
@@ -56,7 +56,7 @@ def test_cli_appends_rows_and_decides(tmp_path, capsys):
     def result(q, params, lat):
         f = tmp_path / ("r%d.json" % len(list(tmp_path.iterdir())))
         f.write_text(json.dumps({"summary": {"quality": q, "macro_acc": q + 0.05, "ece_hard": 0.05,
-                                             "params_m": params, "latency_ms": lat}}))
+                                             "params_m": params, "latency_x": lat}}))
         return str(f)
     assert P.main(["add", result(0.70, 256.0, 80.0), "--tsv", tsv, "--commit", "aaa", "--desc", "baseline"]) == 0
     assert "status: keep" in capsys.readouterr().out

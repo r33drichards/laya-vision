@@ -12,7 +12,7 @@ all three:
 |---|---|---|
 | `quality` | macro accuracy over 34 eval sets (300 fixed questions each) minus the calibration error (ECE) on the questions with one right answer | higher |
 | `params_m` | parameters of the saved model, millions | lower |
-| `latency_ms` | median `predict` time on an L4 in bf16, preprocessing included | lower |
+| `latency_x` | median `predict` time on an L4 in bf16, preprocessing included, divided by the base checkpoint's timed in the same container (1.0 = as fast as the released model) | lower |
 
 Progress is the frontier's **hypervolume**: how much of the quality × size × latency space it covers. A smaller
 model that is only slightly worse is a win, as is a better model at the same size. `pareto.py` makes the keep /
@@ -57,7 +57,7 @@ The harness writes `autoresearch/runs/<tag>/<commit>.json` (every metric, per da
 `autoresearch/runs/<tag>/results.tsv`:
 
 ```
-commit	quality	macro_acc	ece_hard	params_m	latency_ms	status	description
+commit	quality	macro_acc	ece_hard	params_m	latency_x	status	description
 ```
 
 It also prunes saved checkpoints that are no longer on the frontier from `/ckpt/autoresearch/<tag>/`.
