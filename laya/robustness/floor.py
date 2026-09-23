@@ -19,15 +19,15 @@ and Cauldron / VQAv2 images carry several questions, so the independent floor un
 bound; the truth sits between the two. Deterministic given ``seed``; each cell gets its own stream seeded by
 ``(seed, dataset, family)``, so one cell's floor does not depend on which other cells exist. Offline on committed predictions::
 
-    python -m laya.robustness_floor results/robustness/predictions.jsonl.gz
+    python -m laya.robustness.floor results/robustness/predictions.jsonl.gz
 """
 import json
 from typing import Dict, Sequence
 
 import numpy as np
 
-from .common import ece_score
-from .robustness import FAMILIES, _ece, _seed_for
+from ..common import ece_score
+from . import FAMILIES, _ece, _seed_for
 
 BINS = 15  # ``robustness._ece`` calls ``ece_score`` with its default bin count
 

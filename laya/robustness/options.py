@@ -42,7 +42,7 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
-from . import robustness as R
+from .. import robustness as R
 
 FAMILIES = ("option_set", "abstain")
 VARIANTS = {"option_set": ("add_distractor", "drop_wrong"), "abstain": ("drop_gold", "add_none", "add_none_shuffled")}

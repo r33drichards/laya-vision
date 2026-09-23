@@ -34,7 +34,7 @@ from typing import Dict, List, Sequence
 
 import numpy as np
 
-from . import robustness as R
+from .. import robustness as R
 
 FAMILIES = ("inject_text", "inject_image")
 

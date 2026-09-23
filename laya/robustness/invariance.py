@@ -39,7 +39,7 @@ temperatures), ``max_abs_dlogit``, ``flip`` (argmax differs) and ``margin_ref`` 
 probability of the reference and of the condition, so how close a flip was to a tie is on record); per condition a
 summary with the max and mean of both and the flip count. Everything returned is JSON-able::
 
-    python -m laya.robustness_invariance --data-root <root> --datasets sq --n 50 --out invariance.json
+    python -m laya.robustness.invariance --data-root <root> --datasets sq --n 50 --out invariance.json
 """
 import copy
 import json
@@ -75,7 +75,7 @@ def _images_of(state) -> List:
 
 
 def _row(state, q: Dict, name: str) -> Dict:
-    from .common import render_options
+    from ..common import render_options
 
     k = len(render_options(q))
     return {"id": "hostile|" + name, "state": state, "q": q, "target": [1.0] + [0.0] * (k - 1), "label": 0,
@@ -121,7 +121,7 @@ def _prepare(rows: Sequence[Dict]) -> List[Dict]:
 
 
 def _collect(model, processor, rows: List[Dict], batch_size: int) -> List[np.ndarray]:
-    from .vlm_train import collect_logits
+    from ..vlm_train import collect_logits
 
     return [rec["logits"].double().numpy() for rec in collect_logits(model, processor, rows, batch_size=batch_size)]
 
@@ -180,7 +180,7 @@ def _margin(p: np.ndarray) -> float:
 
 def compare(rows: List[Dict], ref: List[np.ndarray], got: List[np.ndarray], temperatures: Sequence[float]) -> Dict:
     """Per-row deltas of ``got`` against ``ref`` (both label-order logits aligned with ``rows``) and their summary."""
-    from .common import QTYPES
+    from ..common import QTYPES
 
     per = []
     for r, a, b in zip(rows, ref, got):
@@ -211,7 +211,7 @@ def run_invariance(model_or_agent, rows: Sequence[Dict], processor=None, tempera
     ``{"conditions": {name: {"reference", "rows", "summary"}}, "summary": {name: summary}, "meta": {...}}``."""
     import torch
 
-    from .vlm import VLMAgent
+    from ..vlm import VLMAgent
 
     agent = model_or_agent if isinstance(model_or_agent, VLMAgent) else None
     model = agent.model if agent else model_or_agent
@@ -291,9 +291,9 @@ def main(argv=None):
 
     import torch
 
-    from . import robustness as R
-    from .vlm import VLMAgent
-    from .vlm_train import load_jsonl_examples
+    from .. import robustness as R
+    from ..vlm import VLMAgent
+    from ..vlm_train import load_jsonl_examples
 
     ap = argparse.ArgumentParser(description="Repeat / batch / prefix-cache invariance of a VLM checkpoint.")
     ap.add_argument("--model", default="", help="checkpoint path or Hub id (default: a fresh untrained agent)")

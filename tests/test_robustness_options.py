@@ -1,4 +1,4 @@
-"""``laya.robustness_options``: the option-set / abstention builders on hand-made rows (no model), the summary on
+"""``laya.robustness.options``: the option-set / abstention builders on hand-made rows (no model), the summary on
 synthetic predictions with known answers, then one end-to-end run through ``robustness.score_rows`` with the
 untrained SmolVLM-256M agent on a tiny on-disk dataset (CPU is fine)."""
 import json
@@ -9,7 +9,7 @@ import torch
 from PIL import Image
 
 from laya import robustness as R
-from laya import robustness_options as O
+from laya.robustness import options as O
 from laya.common import render_options
 from laya.vlm_train import load_jsonl_examples
 

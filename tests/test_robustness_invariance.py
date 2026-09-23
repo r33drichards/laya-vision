@@ -1,4 +1,4 @@
-"""``laya.robustness_invariance``: the hostile-neighbour builder and the comparison on hand-made logits (no model),
+"""``laya.robustness.invariance``: the hostile-neighbour builder and the comparison on hand-made logits (no model),
 then repeat / batch / padding / prefix-cache invariance end to end with the untrained SmolVLM-256M agent on a tiny
 on-disk dataset (CPU is fine). The model is deterministic in principle, so every condition must match its
 reference to float rounding and never flip an answer."""
@@ -10,7 +10,7 @@ import torch
 from PIL import Image
 
 from laya import robustness as R
-from laya import robustness_invariance as I
+from laya.robustness import invariance as I
 from laya.vlm_train import load_jsonl_examples
 
 #: tolerances for the fp32 CPU conditions. Measured on the 9-row set below with the untrained agent: every

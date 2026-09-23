@@ -1,4 +1,4 @@
-"""``laya.robustness_form``: the question-form builders on hand-made rows (no model), the summary on synthetic
+"""``laya.robustness.form``: the question-form builders on hand-made rows (no model), the summary on synthetic
 predictions with known answers, then one end-to-end run through ``laya.robustness.score_rows`` with the untrained
 SmolVLM-256M agent on a tiny on-disk dataset (CPU is fine)."""
 import json
@@ -8,7 +8,7 @@ import torch
 from PIL import Image
 
 from laya import robustness as R
-from laya import robustness_form as F
+from laya.robustness import form as F
 from laya.common import QTYPES, render_options
 from laya.vlm_train import load_jsonl_examples
 

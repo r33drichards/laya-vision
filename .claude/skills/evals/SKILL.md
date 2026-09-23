@@ -121,7 +121,7 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
   returns them. ECE under ~0.03 means probabilities can be taken at face value.
 - **ECE floor** (`ece_floor`, `ece_floor_p95` next to each set's `ece`, and on the pooled `all`): ECE on n rows is
   biased upward, so read it against the ECE a *perfectly calibrated* model scores on the same confidences and row
-  count (`laya.robustness_floor.ece_floor_fields`: correctness redrawn as Bernoulli(confidence) 200 times, same 15
+  count (`laya.robustness.floor.ece_floor_fields`: correctness redrawn as Bernoulli(confidence) 200 times, same 15
   bins, seeded by the set's name). On a few hundred rows the floor is ~0.05; on the 59k pooled rows ~0.005. An
   ECE at or under `ece_floor_p95` is sampling noise, not miscalibration; the report flags a hard-label set only
   above its p95 *and* above 0.03, and falls back to the fixed 0.10 for results from before the floor (they show no

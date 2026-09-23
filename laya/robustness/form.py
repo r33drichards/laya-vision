@@ -32,8 +32,8 @@ from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 
-from . import robustness as R
-from .common import render_options
+from .. import robustness as R
+from ..common import render_options
 
 FAMILIES = ("form_choice", "negation")
 

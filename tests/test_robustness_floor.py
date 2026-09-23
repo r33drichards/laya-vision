@@ -1,8 +1,8 @@
-"""``laya.robustness_floor``: the calibrated-ECE noise floor on synthetic prediction rows (no model)."""
+"""``laya.robustness.floor``: the calibrated-ECE noise floor on synthetic prediction rows (no model)."""
 import numpy as np
 
 from laya import robustness as R
-from laya import robustness_floor as F
+from laya.robustness import floor as F
 
 
 def synth(n, conf_fn, acc_fn, seed, dataset="toy", family="orig"):

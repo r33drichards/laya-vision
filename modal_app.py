@@ -7,7 +7,7 @@
                                                      # row-level val predictions -> results/raw/ + SHA256SUMS
                                                      # (checked by benchmarks/verify_published.py)
     modal run --detach modal_app.py::robustness_eval [--run <run>] [--n 300]  # perturbation robustness,
-                                                     # see laya/robustness.py -> results/robustness/
+                                                     # see laya/robustness/__init__.py -> results/robustness/
     modal run --detach modal_app.py::finetune_long   # ~3-epoch A100 run with per-epoch eval + best checkpoint
     modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name mvb-3ep
                                                      # the same run on the bidirectional backbone
@@ -947,7 +947,7 @@ def robustness_eval(run: str = "cauldron-score-2ep-bidir-full/best", datasets: s
 def invariance(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: str = ",".join(ROBUSTNESS_DATASETS),
                n_per_dataset: int = 50, seed: int = 0, batch_size: int = 32, bf16: bool = True, val_split: str = "val",
                tag: str = "", code_commit: str = ""):
-    """Repeat / batch / prefix-cache invariance (``laya.robustness_invariance``) of ``n_per_dataset`` seeded val
+    """Repeat / batch / prefix-cache invariance (``laya.robustness.invariance``) of ``n_per_dataset`` seeded val
     rows per set on the GPU. Precision per condition: the batch-path conditions (``collect_logits``) run under bf16
     autocast on CUDA (not switchable without changing ``collect_logits``); the ``predict`` conditions run in the
     checkpoint's dtype without autocast; ``predict_vs_batch`` is the gap between the two; ``bf16`` also casts the
@@ -958,7 +958,7 @@ def invariance(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
     import torch
 
     from laya import robustness as R
-    from laya.robustness_invariance import format_table, run_invariance
+    from laya.robustness.invariance import format_table, run_invariance
     from laya.vlm import VLMAgent
 
     out_dir = os.path.join(ROBUSTNESS_ROOT, "invariance",

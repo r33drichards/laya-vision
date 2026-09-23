@@ -75,7 +75,7 @@ def test_score_prior_is_the_mean_histogram():
 
 def test_ece_floor_is_opt_in_and_uses_the_reported_confidences():
     from laya.common import ece_score
-    from laya.robustness_floor import ece_floor_fields
+    from laya.robustness.floor import ece_floor_fields
 
     g = torch.Generator().manual_seed(0)
     recs = [rec((torch.randn(3, generator=g) * 2).tolist(), [1, 0, 0], "choice", "c") for _ in range(60)]

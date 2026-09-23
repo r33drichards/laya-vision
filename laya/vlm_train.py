@@ -637,7 +637,7 @@ def metrics_from(records: List[Dict], temperatures: Sequence[float] = (1.0, 1.0,
     """Accuracy, ECE (max-prob confidence, 15 bins), and NLL overall and per dataset.
 
     ``ece_floor_sims > 0`` adds ``ece_floor`` / ``ece_floor_p95`` to every group (``all`` included): the ECE a
-    perfectly calibrated model scores on the same confidences and row count (``laya.robustness_floor``, that many
+    perfectly calibrated model scores on the same confidences and row count (``laya.robustness.floor``, that many
     simulated draws, seeded per group name), computed from exactly the confidences and 15 bins its ``ece`` uses.
     The definition is the same for every question type (max probability; argmax == label, the most-voted answer
     on vote sets), so the floor is the null for the ``ece`` next to it everywhere. Rows are taken as independent;
@@ -685,7 +685,7 @@ def metrics_from(records: List[Dict], temperatures: Sequence[float] = (1.0, 1.0,
         out[name] = {"n": len(rows), "acc": float(a[:, 1].mean()) if rows else float("nan"),
                      "ece": ece_score(a[:, 0], a[:, 1]), "nll": float(a[:, 2].mean()) if rows else float("nan")}
         if ece_floor_sims > 0:
-            from .robustness_floor import ece_floor_fields
+            from .robustness.floor import ece_floor_fields
             out[name].update(ece_floor_fields(a[:, 0], name, n_sim=ece_floor_sims))
         if name in ordinal:
             o = np.array(ordinal[name])
