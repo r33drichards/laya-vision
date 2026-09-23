@@ -5,7 +5,7 @@
     modal run modal_atari_head.py::verify_all                    # re-check what is on the volume, print a table
 
 Writes only /data/atari/atari_head/<Game>/{train.jsonl, val.jsonl, images/, meta.json, _READY} on the
-``laya-datasets`` volume (see docs/atari-data-format.md). Conversion logic lives in ``laya/atari_data/atari_head.py``.
+``laya-datasets`` volume (see site-docs/reference/atari-data-format.md). Conversion logic lives in ``laya/atari_data/atari_head.py``.
 Never ``modal deploy`` this app.
 """
 import json

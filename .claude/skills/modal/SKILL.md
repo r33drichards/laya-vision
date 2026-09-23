@@ -97,7 +97,7 @@ Lessons from earlier runs:
 - **Preemption happens.** `finetune_long` saves `state.pt` and resumes from it, but a parent job that fans out work
   (`split_bench`) can be restarted from the top. After a preemption, its `results.md` / `results.json` may never
   be written. Rebuild the table from each run's `metrics.json` and run `bench_latency` on each `best` separately.
-  This happened in the split benchmark; see docs/split-bench.md.
+  This happened in the split benchmark; see site-docs/reference/results/split-bench.md.
 - **Confirm a run wasn't cut short:** compare `train_stats.steps` with `args.steps`. The `max_minutes` limit stops
   training quietly.
 - **Memory:** image splitting at 2048 means up to 17 views per image. `split_bench` defaults to `A100-80GB` so
@@ -111,6 +111,7 @@ Lessons from earlier runs:
 
 ## 5. After a run
 
-Copy the metrics you cite into `docs/<run>-metrics.json`, write the results into `docs/`, link them from the
+Copy the metrics you cite into `docs/<run>-metrics.json`, write the results up as a page in `site-docs/reference/results/`
+(and add it to the `nav` in `mkdocs.yml`), link them from the
 README, and commit. Stop any detached app you launched that is still running (`modal app stop -y <id>`) once
 its outputs are on the volume.

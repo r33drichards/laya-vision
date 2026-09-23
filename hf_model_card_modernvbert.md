@@ -21,7 +21,7 @@ This model makes calibrated, typed decisions about **one or more images plus opt
 
 It adds image input to [Laya](https://github.com/NandhaKishorM/laya) by replacing Laya's ModernBERT text encoder with [ModernVBERT](https://huggingface.co/ModernVBERT/modernvbert), a bidirectional ModernBERT-150M plus SigLIP2 vision encoder. Because the backbone is bidirectional, Laya's original readout carries over unchanged: each option is scored from a `[MASK]` marker that sees the whole sequence. Laya's `predict(state, questions)` API, proper-scoring-rule training and temperature calibration are also unchanged. A sibling checkpoint on a causal backbone is [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m).
 
-- **Code:** [github.com/r33drichards/laya-vision](https://github.com/r33drichards/laya-vision), see the "ModernVBERT experiment" and "Post-training on The Cauldron" sections and `docs/modernvbert-cauldron.md`.
+- **Code:** [github.com/r33drichards/laya-vision](https://github.com/r33drichards/laya-vision), see the "ModernVBERT experiment" and "Post-training on The Cauldron" sections and `site-docs/reference/results/modernvbert-cauldron.md`.
 - **Status:** experimental. This is an independent research fork, not affiliated with Convai Innovations, the authors of Laya, nor with the ModernVBERT authors.
 
 ## Usage
@@ -64,7 +64,7 @@ Scores are on full validation splits. "Calibrated" uses the per-type temperature
 
 \* The VQAv2 train/val split is a re-split of the official VQAv2 *validation* set by image (the only official split with answers), so these numbers are not comparable to published VQAv2 results.
 
-Per-subset holdout accuracy ranges from 93% (DVQA) and 86% (OCR-VQA) down to 40% (RAVEN, 8-way) and 27% (InterGPS geometry); the full table is in `training_metrics.json` and in the repo's `docs/modernvbert-cauldron.md`. Against the SmolVLM checkpoint, which was trained for 3 epochs on exactly the three official sets, this model is 3.4 points better on A-OKVQA and 7.6 and 1.6 points worse on ScienceQA and VQAv2 yes/no.
+Per-subset holdout accuracy ranges from 93% (DVQA) and 86% (OCR-VQA) down to 40% (RAVEN, 8-way) and 27% (InterGPS geometry); the full table is in `training_metrics.json` and in the repo's `site-docs/reference/results/modernvbert-cauldron.md`. Against the SmolVLM checkpoint, which was trained for 3 epochs on exactly the three official sets, this model is 3.4 points better on A-OKVQA and 7.6 and 1.6 points worse on ScienceQA and VQAv2 yes/no.
 
 - **Latency:** about 32 ms for one image question on an NVIDIA L4 (bf16), 48 ms in fp32. The image is encoded once per `predict` call and shared by every question.
 - **Option order:** across 4 rotations of the A-OKVQA option order, accuracy varies by 1.0 point. Averaging over orders (`n_permutations=4`) gives 66.4%.

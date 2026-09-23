@@ -1,4 +1,4 @@
-"""Atari-HEAD human play -> the shared Atari training-data format (``docs/atari-data-format.md``).
+"""Atari-HEAD human play -> the shared Atari training-data format (``site-docs/reference/atari-data-format.md``).
 
 Atari-HEAD v4 (Zhang et al. 2019, "Atari-HEAD: Atari Human Eye-Tracking and Demonstration Dataset",
 arXiv:1903.06754) is on Zenodo as record 3451402 under CC-BY-4.0: one ``<game>.zip`` per game plus

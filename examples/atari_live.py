@@ -9,7 +9,7 @@ actions picks the move. The window shows the game next to the model's action pro
     python examples/atari_live.py --model checkpoints/atari-dag2f-rlcd            # a trained two-frame model
     python examples/atari_live.py --model checkpoints/atari-8g-2f-512gpu --game Boxing   # device-side path
     python examples/atari_live.py --sample                # draw the action from the probabilities
-    python examples/atari_live.py --device cuda --cuda-graph --dtype bf16   # docs/game-caching.md
+    python examples/atari_live.py --device cuda --cuda-graph --dtype bf16   # site-docs/concepts/game-caching.md
 
 Keys: SPACE pause/resume, R restart episode, ESC or close the window to quit.
 By default FIRE is pressed automatically at the start of each game and after each lost life (the standard
@@ -89,7 +89,7 @@ def main():
                     help="weights dtype (default: the checkpoint's); bf16 makes the vision tower ~4.6x faster on a GPU")
     ap.add_argument("--cuda-graph", action="store_true",
                     help="run each decision as one captured CUDA graph (same answer, 3-5x faster at batch 1 in bf16 "
-                         "on an L4; see docs/game-caching.md). Runs eagerly, with no speedup, off CUDA")
+                         "on an L4; see site-docs/concepts/game-caching.md). Runs eagerly, with no speedup, off CUDA")
     args = ap.parse_args()
 
     gym.register_envs(ale_py)
