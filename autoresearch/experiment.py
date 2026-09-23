@@ -29,7 +29,7 @@ BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
 # size and latency: 0 keeps what the checkpoint has
-KEEP_TEXT_LAYERS = 20      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+KEEP_TEXT_LAYERS = 12      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
@@ -37,8 +37,8 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-LR_HEAD = 1e-4
-LR_BACKBONE = 2e-5
+LR_HEAD = 5e-5
+LR_BACKBONE = 1e-5
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
 
