@@ -161,7 +161,8 @@ def export_all(agent: VLMAgent, out: str, opset: int = 18, parts=("vision", "tex
     model = agent.model.float().eval()
     enc = model.encoder
     if model.readout != "terminator":
-        raise SystemExit("only the 'terminator' readout (SmolVLM) is exportable; this checkpoint uses %r" % model.readout)
+        raise SystemExit("only the 'terminator' readout (SmolVLM) is exportable; this checkpoint uses %r"
+                         % model.readout)
     if agent.prep.split_edge:
         raise SystemExit("image splitting (image_split_edge) is not supported by the browser export")
     os.makedirs(out, exist_ok=True)
@@ -194,7 +195,8 @@ def export_all(agent: VLMAgent, out: str, opset: int = 18, parts=("vision", "tex
         b = {"input_ids": ids, "attention_mask": torch.ones_like(ids), "marker_pos": torch.tensor([it["markers"]]),
              "marker_mask": torch.ones(1, len(it["markers"]), dtype=torch.bool), "qtype": torch.tensor([0])}
         lg, act = model(**b, image_hidden_states=got, option_span=span[None])
-    assert float((lg[0] - ref_l).abs().max()) < 1e-4 and float((act[0] - ref_a).abs().max()) < 1e-4, "text/head wrappers drifted"
+    drift = max(float((lg[0] - ref_l).abs().max()), float((act[0] - ref_a).abs().max()))
+    assert drift < 1e-4, "text/head wrappers drifted from the model's forward (%.2e)" % drift
     if "head" in parts:
         _export(head, (hid, torch.tensor(it["markers"]), torch.tensor([0])), os.path.join(out, "head.onnx"),
                 ["hidden", "marker_pos", "qtype"], ["logits", "act_logits"],
@@ -287,7 +289,8 @@ def write_config(agent: VLMAgent, out: str, source: str, ids: Dict[str, Any]) ->
 
 VALIDATION_QUESTIONS = {
     "damage": {"type": "score", "instructions": "How much damage does the item show?",
-               "criteria": ["none", "cosmetic: scratches or dents", "functional: parts broken or missing", "destroyed"]},
+               "criteria": ["none", "cosmetic: scratches or dents", "functional: parts broken or missing",
+                            "destroyed"]},
     "category": {"type": "choice", "instructions": "What kind of item is this?",
                  "criteria": ["electronics", "clothing", "furniture", "food", "other"]},
     "outdoors": {"type": "noul", "instructions": "Was the photo taken outdoors?"},
@@ -374,7 +377,9 @@ def _unrounded_torch(agent: VLMAgent, state, questions):
 
     images, _ = split_state(state)
     prefix = vlm_prefix(agent.processor, images, agent.prep)
-    feats = agent.model.encode_images(prefix["pixel_values"].float(), prefix["pixel_attention_mask"]) if images else None
+    feats = None
+    if images:
+        feats = agent.model.encode_images(prefix["pixel_values"].float(), prefix["pixel_attention_mask"])
     res = {}
     for qid, qdef in questions.items():
         q = VLMAgent._to_internal(qdef)
