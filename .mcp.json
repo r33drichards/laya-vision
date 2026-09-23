@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "grafana": {
+      "type": "http",
+      "url": "https://grafana-mcp-js-production.up.railway.app/mcp",
+      "headersHelper": "bash infra/telemetry/mcp-token.sh"
+    }
+  }
+}
