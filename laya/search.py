@@ -142,7 +142,7 @@ def _leaf_values(scored: Dict[str, Any], leaf: str) -> np.ndarray:
 
 
 class _Node:
-    __slots__ = ("env", "reward", "done", "children", "value", "prior", "N", "W", "q_min", "q_max")
+    __slots__ = ("env", "reward", "done", "children", "value", "prior", "N", "W")
 
     def __init__(self, env, reward: float = 0.0, done: bool = False):
         self.env, self.reward, self.done = env, reward, done
