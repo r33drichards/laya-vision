@@ -40,13 +40,14 @@ Snake (``snake_examples``)
     alive ``horizon`` steps later (or has won), else 0.
 Control (``control_examples``)
     Seeded ``laya.controlgames.ControlGame`` episodes of the epsilon-noisy scripted expert (random action with prob.
-    ``eps``). Images are ``ControlGame.render()`` exactly: the frame at step t with the frame at t-1 ghosted in (step
-    0 has no ghost, like the eval). Only a ``keep`` fraction of steps is rendered and kept. ``target``: one-hot on
-    the expert's action in that state, label-smoothed by ``smooth``. ``value`` with ``gamma = 1 - 1/VALUE_HORIZON``
-    and ``k`` steps from this frame to the episode's end: CartPole (survive to the time limit): 1 if the pole never
-    falls, else ``1 - gamma ** k``; Acrobot / MountainCar / LunarLander (reach the goal / land): ``gamma ** k`` if
-    the episode ends in success (terminated; for LunarLander terminated by landing, reward +100), else 0. A Monte
-    Carlo sample under the noisy expert.
+    ``eps``, per game in ``CONTROL_EPS``). Images are ``ControlGame.render()`` exactly: the frame at step t with the
+    frame at t-1 ghosted in (step 0 has no ghost, like the eval). Only a ``keep`` fraction of steps
+    (``CONTROL_KEEP``) is rendered and kept. ``target``: one-hot on the expert's action in that state,
+    label-smoothed by ``smooth``. ``value`` with ``gamma = 1 - 1/VALUE_HORIZON`` and ``k`` steps from this frame to
+    the episode's end: CartPole (survive to the time limit): 1 if the pole never falls, else ``1 - gamma ** k``;
+    Acrobot / MountainCar / LunarLander (reach the goal / land): ``gamma ** k`` if the episode ends in success
+    (terminated; for LunarLander terminated by landing, reward +100), else 0. A Monte Carlo sample under the noisy
+    expert.
 
 Symmetries (``flip``): Maze and Snake use all 8 symmetries of the square (mirror left-right, up-down, transpose),
 the actions mapped by moving each move's vector; CartPole, Acrobot and LunarLander a left-right mirror of the image
@@ -81,6 +82,10 @@ CONTROL_FLIPS = {"CartPole": {"LEFT": "RIGHT"}, "Acrobot": {"CLOCKWISE": "COUNTE
                  "LunarLander": {"LEFT_ENGINE": "RIGHT_ENGINE"}}
 VALUE_HORIZON = {"CartPole": 100, "Acrobot": 100, "MountainCar": 100, "LunarLander": 200}
 _SURVIVAL = {"CartPole"}
+# noise and the fraction of steps kept, per game: CartPole survives eps=0.3 and runs 500 steps, so keep few frames
+# of many episodes; LunarLander mostly crashes at eps=0.2, so less noise there
+CONTROL_EPS = {"CartPole": 0.3, "Acrobot": 0.2, "MountainCar": 0.2, "LunarLander": 0.1}
+CONTROL_KEEP = {"CartPole": 0.03, "Acrobot": 0.1, "MountainCar": 0.08, "LunarLander": 0.05}
 
 
 # -- shared ---------------------------------------------------------------------------------------------------------
@@ -152,10 +157,19 @@ def sym_target(target: Sequence[float], sym: int) -> List[float]:
 
 
 def _grid_png(grid: np.ndarray, sym: int) -> bytes:
-    from laya.gridgames import _cell_px, _render
+    """``laya.gridgames._render(grid)`` after symmetry ``sym`` as a palette PNG: the same RGB pixels once loaded
+    (``_load_image`` converts to RGB), about 5x faster to encode and 3x smaller than an RGB PNG."""
+    from PIL import Image
+
+    from laya.gridgames import _cell_px
 
     g = sym_grid(grid, sym)
-    return _png(_render(g, _cell_px(g.shape[0])))
+    px = _cell_px(g.shape[0])
+    colors, idx = np.unique(g.reshape(-1, 3), axis=0, return_inverse=True)
+    small = idx.reshape(g.shape[:2]).astype(np.uint8)
+    im = Image.fromarray(np.ascontiguousarray(small.repeat(px, 0).repeat(px, 1)), "P")
+    im.putpalette(colors.astype(np.uint8).tobytes())
+    return _png(im)
 
 
 def _bfs_dist(passable, src: Tuple[int, int], shape: Tuple[int, int]) -> Dict[Tuple[int, int], int]:
@@ -193,16 +207,18 @@ def _star(fa):
     return fn(*a)
 
 
-def _generate(episode_fn, n: int, seed: int, cfg: Dict, workers: int, per_ep: int) -> List[Dict]:
-    """Run episodes ``0, 1, ...`` in chunks until ``n`` examples; keep the first ``n`` in episode order."""
+def _generate(episode_fn, n: int, seed: int, cfg: Dict, workers: int, per_ep: float) -> List[Dict]:
+    """Run episodes ``0, 1, ...`` in rounds until ``n`` examples; keep the first ``n`` in episode order. The first
+    round uses the ``per_ep`` guess for half the need, later rounds the yield measured so far (little overshoot)."""
     out: List[Dict] = []
-    ep = 0
-    chunk = 8
+    ep, chunk = 0, 8
     while len(out) < n:
         need = n - len(out)
-        n_eps = max(1, math.ceil(need / max(1, per_ep) * 1.3))
+        rate = len(out) / ep if ep else per_ep
+        n_eps = max(1, math.ceil(need / max(0.5, rate) * (0.5 if not ep else 1.02)))
         _check_seeds(seed, ep + n_eps)
-        jobs = [(list(range(s, min(s + chunk, ep + n_eps))), seed, cfg) for s in range(ep, ep + n_eps, chunk)]
+        size = max(1, min(chunk, math.ceil(n_eps / max(1, workers or (os.cpu_count() or 1)))))
+        jobs = [(list(range(s, min(s + size, ep + n_eps))), seed, cfg) for s in range(ep, ep + n_eps, size)]
         for part in _run(episode_fn, jobs, workers):
             out.extend(part)
         ep += n_eps
@@ -273,7 +289,7 @@ def _maze_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
             ex = {"state": {"image": _grid_png(_maze_grid(wall, pos, goal), sym)},
                   "target": _smooth(sym_target(target, sym), cfg["smooth"]),
                   "label": GRID_ACTIONS.index(sym_action(expert, sym)),
-                  "id": "maze-%d-r%d-c%d-t%d-g%d" % (seed + i, pos[0], pos[1], t, sym)}
+                  "id": "maze-%d-n%d-r%d-c%d-t%d-g%d" % (seed + i, maze.size, pos[0], pos[1], t, sym)}
             if cfg["value"]:
                 ex["value"] = float(cfg["gamma"] ** d) if d <= cap - t else 0.0
             out.append(ex)
@@ -448,7 +464,7 @@ def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
             reward = env.step(a)
             keep_now = keep_next
         success, end = _control_success(game, env, reward), env.steps
-        env.close()
+        # no env.close(): pygame.quit() costs ~30 ms an episode, and the renderer is only a Surface here
         for t, expert, img in recs:
             k = end - t
             if game in _SURVIVAL:
@@ -469,17 +485,22 @@ def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
     return out
 
 
-def control_examples(game: str, n: int, seed: int = 0, eps: float = 0.2, keep: float = 0.1, smooth: float = 0.1,
+def control_examples(game: str, n: int, seed: int = 0, eps: Optional[float] = None, keep: Optional[float] = None,
+                     smooth: float = 0.1,
                      flip: bool = True, value: bool = True, workers: int = 0,
                      dataset: Optional[str] = None) -> List[Dict]:
     """``n`` examples of a ``laya.controlgames`` game from seeds ``seed, seed + 1, ...`` (below 100_000); see the
-    module docstring. Needs ``gymnasium[classic-control,box2d]`` (imported lazily)."""
+    module docstring. ``eps`` / ``keep`` default per game (``CONTROL_EPS`` / ``CONTROL_KEEP``). Needs
+    ``gymnasium[classic-control,box2d]`` (imported lazily)."""
     from laya.controlgames import GAMES
     from laya.games import control_question
 
     if game not in GAMES:
         raise ValueError("unknown control game %r (%s)" % (game, ", ".join(GAMES)))
-    per_ep = {"CartPole": 40, "Acrobot": 10, "MountainCar": 12, "LunarLander": 25}[game] * keep / 0.1
+    eps = CONTROL_EPS[game] if eps is None else eps
+    keep = CONTROL_KEEP[game] if keep is None else keep
+    mean_len = {"CartPole": 500, "Acrobot": 100, "MountainCar": 140, "LunarLander": 220}[game]
+    per_ep = mean_len * keep
     cfg = dict(game=game, eps=eps, keep=keep, smooth=smooth, flip=flip, value=value)
     out = _generate(_control_episodes, n, seed, cfg, workers, per_ep)
     q = _internal(control_question(game))
@@ -506,7 +527,8 @@ def examples_from_records(records: List[Dict], root: str, dataset: str) -> List[
 
 
 def game_mix(ctx_examples: List[Dict], game_examples: List[Dict], frac: float,
-             base_weights: Optional[Dict[str, float]] = None, alpha: float = 0.0) -> Tuple[List[Dict], Dict[str, float]]:
+             base_weights: Optional[Dict[str, float]] = None,
+             alpha: float = 0.0) -> Tuple[List[Dict], Dict[str, float]]:
     """Combine the VQA pool with game examples; returns ``(examples, mix_weights)`` for ``train(...,
     mix_weights=..., mix_alpha=alpha)`` so the game datasets together are drawn ``frac`` of the time (split
     equally between them) and the VQA datasets share the rest in the proportions ``base_weights`` / ``alpha`` gave
@@ -534,8 +556,8 @@ def game_mix(ctx_examples: List[Dict], game_examples: List[Dict], frac: float,
     sv = sum(wv.values())
     if not groups_g or frac == 0.0:
         return list(ctx_examples), {k: v for k, v in (base_weights or {}).items() if k in groups_v}
-    if not groups_v or sv == 0 or frac == 1.0:
-        frac = 1.0
+    if not groups_v or sv == 0 or frac == 1.0:  # games only (a zero weight would still leave a group in the mix)
+        return games, {k: 1.0 / len(groups_g) / float(len(g)) ** alpha for k, g in groups_g.items()}
     weights: Dict[str, float] = {}
     # group_weights multiplies by n ** alpha, so divide it out to land on the requested shares
     for k, v in wv.items():
@@ -547,4 +569,4 @@ def game_mix(ctx_examples: List[Dict], game_examples: List[Dict], frac: float,
 
 __all__ = ["maze_examples", "snake_examples", "control_examples", "examples_from_records", "game_mix",
            "maze_optimal_moves", "snake_moves", "sym_action", "sym_grid", "sym_pos", "sym_target",
-           "EVAL_SEED_FLOOR", "GRID_ACTIONS", "CONTROL_FLIPS", "VALUE_HORIZON"]
+           "EVAL_SEED_FLOOR", "GRID_ACTIONS", "CONTROL_FLIPS", "CONTROL_EPS", "CONTROL_KEEP", "VALUE_HORIZON"]
