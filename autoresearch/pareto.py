@@ -31,7 +31,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # on the pooled harness: quality 0.6691-0.6739, latency_x 0.998 / 1.007 on L4 hosts timing 52 / 77 ms raw). games is
 # deterministic for a given checkpoint (fixed seeds, greedy play) and the baseline repeated exactly (-0.0344 twice,
 # every game identical), but that baseline plays degenerately (0 on the mazes, Acrobot, MountainCar), so retraining
-# noise did not move it; 0.03 is one game moving 0.3 in the 10-game mean, kept until a stronger player is repeated.
+# noise did not move it; 0.03 is one game moving 0.3 in the 10-game mean. Retraining a stronger recipe (15 text
+# layers + game data) moved games by 0.013 (0.148 / 0.135: DoomBasic 0.78 / 0.66, every other game within 0.02).
 OBJECTIVES = (
     ("quality", "max", 0.005, False),
     ("games", "max", 0.03, False),

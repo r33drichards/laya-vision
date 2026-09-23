@@ -10,3 +10,5 @@ a430602	0.6750	0.7140	0.0390	0.1099	236.7113	0.9991	discard	exp: value head trai
 90f9087	0.6066	0.6405	0.0339	0.0967	236.5623	0.9656	keep	exp: 384px images (36 image tokens) on the 25% game mix
 ced98b7	0.6694	0.7075	0.0381	0.0821	201.1613	0.8322	keep	exp: keep 20 of 30 text layers on the 25% game mix
 3322bd6	0.6340	0.6573	0.0233	0.1477	183.4609	0.7684	keep	exp: keep 15 of 30 text layers on the 25% game mix
+7405aef	0.6317	0.6551	0.0234	0.1346	183.4609	0.7492	discard	repeat: 15 text layers (games noise)
+f03734b	0.5276	0.5449	0.0173	0.1204	165.7604	0.6576	keep	exp: keep 10 of 30 text layers on the 25% game mix
