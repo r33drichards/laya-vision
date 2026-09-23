@@ -618,3 +618,68 @@ def test_calibrate_and_temperature_override(agent, tmp_path):
         agent.predict(state, QUESTIONS, calibration=other)
     with pytest.raises(ValueError, match="different checkpoint"):
         agent.predict(state, QUESTIONS, calibration=other, strict_calibration=True)
+
+
+@pytest.mark.parametrize("frames,batch,attention,backend", [(1, 2, "causal", "gpu"), (2, 1, "causal", "gpu"),
+                                                             (1, 1, "block", "gpu"), (2, 2, "block", "processor")])
+def test_static_step_matches_action_probs(agent, frames, batch, attention, backend):
+    """``StaticStep`` (the CUDA-graph path, run eagerly here) gives ``action_probs``'s answer for the same frames.
+
+    It re-plumbs the forward (hoisted vision position ids, an index write instead of ``masked_scatter``, the heads
+    repeated), so this pins it to the model: same probabilities and P(act), and it follows each new frame.
+    """
+    from laya.atari_train import action_probs
+    from laya.games import atari_question
+    from laya.static_step import StaticStep
+
+    q = atari_question("Pong", ["NOOP", "FIRE", "RIGHT", "LEFT", "RIGHTFIRE", "LEFTFIRE"])["action"]
+    old = (agent.prep, agent.model.option_attention)
+    prep = ImagePrep(backend=backend).apply(agent.processor)
+    agent.prep = agent.model.prep = prep
+    agent.model.option_attention = attention
+    try:
+        step = StaticStep(agent, q, frames=frames, batch=batch)
+        for s in (0, 10):
+            cur = [frame(s + j) for j in range(batch)]
+            prev = [frame(s + 5 + j) for j in range(batch)] if frames == 2 else None
+            want, want_act = action_probs(agent, cur, q, prev, return_act=True)
+            got, got_act = step.probs(cur, prev, return_act=True)
+            assert got.shape == (batch, 6)
+            np.testing.assert_allclose(got, want, atol=2e-5)
+            np.testing.assert_allclose(got_act, want_act, atol=2e-5)
+        if frames == 1 and batch == 1:
+            ans = step.answer(cur[0])
+            ref = agent.predict({"image": cur[0]}, {"a": q})["answers"]["a"]
+            assert ans["choice"] == ref["choice"]
+            assert ans["probabilities"] == pytest.approx(ref["probabilities"], abs=1e-4)
+    finally:
+        agent.prep = agent.model.prep = old[0]
+        old[0].apply(agent.processor)
+        agent.model.option_attention = old[1]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA graphs need a CUDA device")
+def test_static_step_graph_replay_matches_eager(agent):
+    """Captured and replayed, the step gives the eager step's answer on every new frame (fp32: bit-identical)."""
+    from laya.games import doom_question
+    from laya.static_step import StaticStep
+
+    q = doom_question("basic", ["MOVE_LEFT", "MOVE_RIGHT", "ATTACK"])["action"]
+    eager = StaticStep(agent, q, capture=False)
+    graph = StaticStep(agent, q, capture=True)
+    for s in range(4):
+        f = frame(s, 240, 320)
+        np.testing.assert_allclose(graph.probs([f]), eager.probs([f]), atol=1e-6)
+    assert graph.graph is not None
+
+
+def test_model_policy_cuda_graph_flag_picks_the_same_actions(agent):
+    """``model_policy(cuda_graph=True)`` keeps one ``StaticStep`` per live-episode count and agrees with the default."""
+    from laya.atari_train import model_policy
+
+    actions = ["NOOP", "FIRE", "RIGHT", "LEFT"]
+    plain = model_policy(agent, "Breakout", actions, cuda_graph=False)
+    graphed = model_policy(agent, "Breakout", actions, cuda_graph=True)
+    for obs in ([frame(1), frame(2)], [frame(3)]):  # episodes finish: the batch shrinks
+        ids = list(range(len(obs)))
+        assert graphed(obs, obs, ids) == plain(obs, obs, ids)

@@ -9,6 +9,7 @@ actions picks the move. The window shows the game next to the model's action pro
     python examples/atari_live.py --model checkpoints/atari-dag2f-rlcd            # a trained two-frame model
     python examples/atari_live.py --model checkpoints/atari-8g-2f-512gpu --game Boxing   # device-side path
     python examples/atari_live.py --sample                # draw the action from the probabilities
+    python examples/atari_live.py --device cuda --cuda-graph --dtype bf16   # docs/game-caching.md
 
 Keys: SPACE pause/resume, R restart episode, ESC or close the window to quit.
 By default FIRE is pressed automatically at the start of each game and after each lost life (the standard
@@ -34,6 +35,7 @@ import torch
 
 import laya
 from laya.games import atari_question
+from laya.static_step import StaticStep
 
 SCALE, PANEL_W = 3, 420
 BG, FG, DIM, ACCENT, BAR = (18, 18, 24), (235, 235, 240), (140, 140, 155), (255, 196, 64), (80, 120, 220)
@@ -83,16 +85,22 @@ def main():
     ap.add_argument("--sample", action="store_true",
                     help="draw the action from the model's probabilities instead of taking the most likely one")
     ap.add_argument("--seed", type=int, default=0, help="episode and sampling seed")
+    ap.add_argument("--dtype", choices=("fp32", "bf16"), default=None,
+                    help="weights dtype (default: the checkpoint's); bf16 makes the vision tower ~4.6x faster on a GPU")
+    ap.add_argument("--cuda-graph", action="store_true",
+                    help="run each decision as one captured CUDA graph (same answer, 3-5x faster at batch 1 in bf16 "
+                         "on an L4; see docs/game-caching.md). Runs eagerly, with no speedup, off CUDA")
     args = ap.parse_args()
 
     gym.register_envs(ale_py)
     env = gym.make("ALE/%s-v5" % args.game)
     actions = env.unwrapped.get_action_meanings()
     print("loading %s on %s ..." % (args.model, args.device))
-    agent = laya.load_vlm(args.model, device=args.device)
+    agent = laya.load_vlm(args.model, device=args.device, dtype=args.dtype)
     n_frames = args.frames or int(agent.cfg.get("atari_frames", 1))
     print("%d frame(s) per decision, %s action" % (n_frames, "sampled" if args.sample else "top"))
     qs = atari_question(args.game, actions)
+    static = StaticStep(agent, qs["action"], frames=n_frames) if args.cuda_graph else None
     rng = np.random.default_rng(args.seed)
 
     pygame.init()
@@ -130,8 +138,11 @@ def main():
         t0 = time.perf_counter()
         # the raw uint8 observation goes in as-is: both preprocessing paths take it, and on the GPU path
         # this avoids a PIL round-trip that as_uint8_chw would only undo
-        state = {"images": [prev, obs]} if n_frames == 2 else {"image": obs}
-        ans = agent.predict(state, qs)["answers"]["action"]
+        if static is not None:
+            ans = static.answer(obs, prev if n_frames == 2 else None)
+        else:
+            state = {"images": [prev, obs]} if n_frames == 2 else {"image": obs}
+            ans = agent.predict(state, qs)["answers"]["action"]
         if args.sample:  # the panel highlights the action actually taken
             names, p = zip(*ans["probabilities"].items())
             p = np.asarray(p, dtype=float)

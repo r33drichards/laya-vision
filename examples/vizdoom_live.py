@@ -6,6 +6,7 @@ buttons picks the action (held for 4 tics). The window shows the game next to th
     pip install -e . torchvision vizdoom pygame
     python examples/vizdoom_live.py                        # "basic": shoot the monster in front of you
     python examples/vizdoom_live.py --scenario defend_the_center --device cpu
+    python examples/vizdoom_live.py --device cuda --cuda-graph --dtype bf16   # docs/game-caching.md
 
 Scenarios: basic, defend_the_center, defend_the_line, health_gathering, take_cover, predict_position,
 deadly_corridor, my_way_home. Keys: SPACE pause/resume, R new episode, ESC or close the window to quit.
@@ -23,6 +24,7 @@ from PIL import Image
 
 import laya
 from laya.games import doom_buttons, doom_question
+from laya.static_step import StaticStep
 from atari_live import PANEL_W, draw
 
 SCALE = 2
@@ -35,6 +37,11 @@ def main():
     ap.add_argument("--model", default="thaitea/laya-vision-smolvlm-256m")
     ap.add_argument("--tics", type=int, default=4, help="game tics each chosen action is held for")
     ap.add_argument("--steps", type=int, default=0, help="quit after this many steps in total (0 = run until closed)")
+    ap.add_argument("--dtype", choices=("fp32", "bf16"), default=None,
+                    help="weights dtype (default: the checkpoint's); bf16 makes the vision tower ~4.6x faster on a GPU")
+    ap.add_argument("--cuda-graph", action="store_true",
+                    help="run each decision as one captured CUDA graph (same answer, 3-5x faster at batch 1 in bf16 "
+                         "on an L4; see docs/game-caching.md). Runs eagerly, with no speedup, off CUDA")
     args = ap.parse_args()
 
     game = vzd.DoomGame()
@@ -48,8 +55,9 @@ def main():
     one_hot = {b: [i == j for j in range(len(buttons))] for i, b in enumerate(buttons)}
 
     print("loading %s on %s ..." % (args.model, args.device))
-    agent = laya.load_vlm(args.model, device=args.device)
+    agent = laya.load_vlm(args.model, device=args.device, dtype=args.dtype)
     qs = doom_question(args.scenario, buttons)
+    static = StaticStep(agent, qs["action"]) if args.cuda_graph else None
     print("buttons:", buttons)
 
     pygame.init()
@@ -77,7 +85,10 @@ def main():
             time.sleep(0.05)
             continue
         t0 = time.perf_counter()
-        ans = agent.predict({"image": Image.fromarray(obs)}, qs)["answers"]["action"]
+        if static is not None:
+            ans = static.answer(obs)
+        else:
+            ans = agent.predict({"image": Image.fromarray(obs)}, qs)["answers"]["action"]
         ms = 0.8 * ms + 0.2 * (time.perf_counter() - t0) * 1000 if ms else (time.perf_counter() - t0) * 1000
         counts[ans["choice"]] += 1
         game.make_action(one_hot[ans["choice"]], args.tics)

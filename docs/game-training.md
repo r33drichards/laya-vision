@@ -387,6 +387,15 @@ Reproducing the two runs:
     modal run --detach modal_atari_train.py::atari_eval --model atari-8g-2f-512gpu/best --episodes 10 \
         --games Breakout,Pong,Freeway,SpaceInvaders,Enduro,Boxing,Qbert,MsPacman
 
+### Caching the fixed question
+
+Every step asks the same question, so could its part of the sequence be cached? Not as keys/values: it comes
+after the image, and at batch 1 on a GPU the language model costs the same ~24 ms for 150 or 300 tokens anyway.
+What pays is capturing the whole fixed-shape decision as one CUDA graph: `--cuda-graph` in both live viewers and
+`model_policy(..., cuda_graph=True)`: ~11 ms per decision at batch 1 in bf16 on an L4, 3.4-5.0x fewer, with the same
+answer. The measurements and the question-first layout that was considered and rejected are in
+[game-caching.md](game-caching.md).
+
 ### Is the dataset's full-size PNG decode worth avoiding?
 
 No. The PNGs decode in **1.14 ms/frame** once the Modal volume has served them; the 72-283 ms/frame a naive timing
