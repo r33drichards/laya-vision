@@ -934,6 +934,98 @@ def robustness_eval(run: str = "cauldron-score-2ep-bidir-full/best", datasets: s
     print("copied %s -> %s" % (res["out_dir"], out))
 
 
+@app.function(image=image, gpu="L4", cpu=8, memory=32768, timeout=40 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol})
+def invariance(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: str = ",".join(ROBUSTNESS_DATASETS),
+               n_per_dataset: int = 50, seed: int = 0, batch_size: int = 32, bf16: bool = True, val_split: str = "val",
+               tag: str = "", code_commit: str = ""):
+    """Repeat / batch / prefix-cache invariance (``laya.robustness_invariance``) of ``n_per_dataset`` seeded val
+    rows per set on the GPU. Precision per condition: the batch-path conditions (``collect_logits``) run under bf16
+    autocast on CUDA (not switchable without changing ``collect_logits``); the ``predict`` conditions run in the
+    checkpoint's dtype without autocast; ``predict_vs_batch`` is the gap between the two; ``bf16`` also casts the
+    backbone weights to bf16 (still under autocast). Writes ``invariance.json`` to
+    ``ROBUSTNESS_ROOT/invariance/<tag>/`` (a new directory; the job refuses an existing one) and returns it."""
+    import hashlib
+
+    import torch
+
+    from laya import robustness as R
+    from laya.robustness_invariance import format_table, run_invariance
+    from laya.vlm import VLMAgent
+
+    out_dir = os.path.join(ROBUSTNESS_ROOT, "invariance",
+                           tag or "%s-n%d-s%d" % (run_name.replace("/", "_"), n_per_dataset, seed))
+    ckpt_vol.reload()
+    if os.path.exists(out_dir):
+        raise SystemExit("%s exists; pass a new --tag" % out_dir)
+    t0 = time.time()
+    gpu = torch.cuda.get_device_name(0)
+    print("GPU:", gpu)
+    data_vol.reload()
+    rows = []
+    for name in _ready(datasets):
+        src = R.source_rows(_load_split(name, val_split, 0), n=n_per_dataset, seed=seed, dataset=name)
+        print("dataset %s: %d source rows" % (name, len(src)))
+        rows += src
+    path = _ckpt_path(run_name)
+    files = {}
+    for fname in sorted(os.listdir(path)):
+        fp = os.path.join(path, fname)
+        if os.path.isfile(fp):
+            h = hashlib.sha256()
+            with open(fp, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 22), b""):
+                    h.update(chunk)
+            files[fname] = h.hexdigest()
+    agent = VLMAgent(path, device="cuda")
+    print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
+    res = run_invariance(agent, rows, batch_size=batch_size, bf16=bf16)
+    print(format_table(res))
+    model_dtype = str(agent.model.encoder.dtype).replace("torch.", "")
+    precision = {c: ("bf16 autocast, %s weights (collect_logits)" % model_dtype) for c in
+                 ("repeat", "batched", "batched_reversed", "hostile")}
+    precision.update({c: "%s, no autocast (predict)" % model_dtype for c in
+                      ("predict_repeat", "predict_multi", "predict_multi_hostile", "predict_prefix_cache",
+                       "predict_multi_prefix_cache")})
+    precision["predict_vs_batch"] = "%s no autocast (predict) vs bf16 autocast (collect_logits)" % model_dtype
+    precision["bf16"] = "bf16 backbone weights + bf16 autocast vs %s weights + bf16 autocast" % model_dtype
+    res["meta"].update(
+        run=run_name, checkpoint_path=path, checkpoint_files_sha256=files, checkpoint_source=dict(agent.source),
+        backbone={"id": agent.cfg.get("backbone"), "revision": agent.cfg.get("backbone_revision")},
+        model_dtype=model_dtype, precision={c: p for c, p in precision.items() if c in res["conditions"]},
+        fp32_batch_path_without_autocast="not measured: collect_logits enables bf16 autocast on every CUDA call",
+        datasets=sorted({r["dataset"] for r in rows}), n_per_dataset=n_per_dataset, seed=seed, val_split=val_split,
+        gpu=gpu, code_commit=code_commit, minutes=(time.time() - t0) / 60)
+    os.makedirs(out_dir)
+    with open(os.path.join(out_dir, "invariance.json"), "w") as f:
+        json.dump(res, f, indent=1)
+    ckpt_vol.commit()
+    print("wrote %s in %.1f min" % (out_dir, res["meta"]["minutes"]))
+    return {"meta": res["meta"], "summary": res["summary"], "out_dir": out_dir}
+
+
+@app.local_entrypoint()
+def invariance_eval(run: str = "cauldron-score-2ep-bidir-full/best", datasets: str = ",".join(ROBUSTNESS_DATASETS),
+                    n: int = 50, seed: int = 0, batch_size: int = 32, bf16: bool = True, tag: str = "",
+                    out: str = "results/robustness/invariance"):
+    """Run ``invariance`` (``modal run --detach`` keeps it going if this client drops), then copy
+    ``invariance.json`` from the volume into ``out`` (refusing to overwrite). After a dropped client:
+    ``modal volume get laya-checkpoints smolvlm/robustness/invariance/<tag>/invariance.json <out>/``."""
+    if os.path.exists(os.path.join(out, "invariance.json")):
+        raise SystemExit("%s already holds invariance.json; pass a new --out" % out)
+    commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True,
+                           text=True).stdout
+    res = invariance.remote(run, datasets, n, seed, batch_size, bf16, tag=tag,
+                            code_commit=commit + ("-dirty" if dirty.strip() else ""))
+    rel = os.path.relpath(res["out_dir"], "/ckpt")
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, "invariance.json"), "wb") as f:
+        for chunk in ckpt_vol.read_file(rel + "/invariance.json"):
+            f.write(chunk)
+    print("copied %s -> %s" % (res["out_dir"], out))
+
+
 def _public_question(q: dict) -> dict:
     """An internal ``{"t", "ins", "crit"}`` question back in ``predict``'s input format."""
     crit = q["crit"]
