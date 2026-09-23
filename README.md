@@ -64,6 +64,8 @@ Everything is a prepared dataset on the `laya-datasets` Modal volume: `/data/vqa
 
 `modal_app.py` expects the volumes `laya-hf-cache`, `laya-datasets` and `laya-checkpoints`, and a `huggingface-thaitea` secret for the publish jobs. Dataset arguments take names or the groups `vqa`, `cauldron`, `score` and `eval`.
 
+From a Claude Code on the web session, run `bash .claude/skills/modal/check.sh` first: the CLI needs `modal[api-proxy-support]` to get through the session's proxy. The `modal` skill in [.claude/skills/modal](.claude/skills/modal/SKILL.md) covers setup, a smoke test, detached runs and reading results off the volumes.
+
 ```bash
 modal run modal_app.py::try_model --image photo.jpg --questions q.json --run cauldron-score-2ep-bidir-full/best
 modal run modal_app.py::test                                              # GPU tests + latency, both backbones
