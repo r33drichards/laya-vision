@@ -33,6 +33,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # every game identical), but that baseline plays degenerately (0 on the mazes, Acrobot, MountainCar), so retraining
 # noise did not move it; 0.03 is one game moving 0.3 in the 10-game mean. Retraining a stronger recipe (15 text
 # layers + game data) moved games by 0.013 (0.148 / 0.135: DoomBasic 0.78 / 0.66, every other game within 0.02).
+# On a real player (sep23-v2, 20 layers, games 45%) a repeat moved games by 0.003 (0.2375 / 0.2409) while single
+# games moved up to 0.12 (Acrobot 0.24 / 0.16, MountainCar 0.31 / 0.43), which the 10-game mean averages out.
 # latency_x was 3% from the full model timed twice; the 15-layer architecture timed three times gave 0.768 / 0.749 /
 # 0.733 (4.6% spread, host noise alone: 9a06403 changed only the LR and was kept on latency), so the margin is 5%.
 OBJECTIVES = (
