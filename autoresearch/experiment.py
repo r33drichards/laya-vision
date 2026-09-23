@@ -44,7 +44,7 @@ WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.25
-CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
+CONTROL_GAMES = ("LunarLander",)  # CartPole, Acrobot, MountainCar do not take off in 5 min
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
@@ -96,7 +96,7 @@ def build(ctx):
     if GAME_FRAC:
         import toolkit
 
-        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
+        games = toolkit.snake_examples(20000) + ctx.game_examples()  # no Maze: too slow to learn in 5 min
         for g in CONTROL_GAMES:
             games += toolkit.control_examples(g, 5000)
         ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
