@@ -43,7 +43,7 @@ BATCH_SIZE = 32
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
-GAME_FRAC = 0.45
+GAME_FRAC = 0.55
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
