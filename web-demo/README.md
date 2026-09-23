@@ -101,7 +101,7 @@ Checked on Linux, CPU only, in this repository's test setup:
   | Variant | Size | max \|Δp\| | max \|Δlogit\| | same top answer |
   |---|---|---|---|---|
   | fp32 | 948 MB | 2.0e-6 | 2.5e-5 | 9/9 |
-  | fp16 | 475 MB | 1.8e-3 | 1.9e-2 | 9/9 |
+  | fp16 | 475 MB | 2.5e-3 | 3.2e-2 | 9/9 |
   | q8 | 355 MB | 1.8e-2 | 0.25 | 9/9 |
   | q4 | 252 MB | 0.17 | 1.7 | 6/9 |
   | int8 dynamic (dropped) | 329 MB | 0.62 | 5.3 | 5/9 |
