@@ -60,10 +60,15 @@ import io
 import math
 import os
 import random
+import sys
 from collections import deque
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if os.path.isdir(os.path.join(_REPO, "laya")) and _REPO not in sys.path:
+    sys.path.append(_REPO)  # ``import toolkit`` from autoresearch/ still finds the laya package
 
 EVAL_SEED_FLOOR = 100_000   # every eval seed range starts at or above this (Atari 100_000, grid/control 200_000)
 PNG_LEVEL = 1               # zlib level: flat game screens compress well even at the fastest setting
