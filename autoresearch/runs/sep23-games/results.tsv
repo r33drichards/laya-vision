@@ -17,3 +17,4 @@ c44f30c	0.4406	0.4584	0.0178	0.0986	155.1094	0.7256	keep	exp: keep 8 of 12 visio
 9e330f0	0.6690	0.7143	0.0453	0.1466	236.5623	1.0057	discard	exp: game share only to games that learn in 5 min (drop Maze, CartPole, Acrobot, MountainCar)
 6fd560b	0.4485	0.4702	0.0217	0.0155	183.4609	0.7517	discard	exp: 15 text layers spread across the stack (0,2,..,29) instead of the first 15
 9a06403	0.6349	0.6607	0.0258	0.1432	183.4609	0.7326	keep	exp: 2x LR on the 15-layer recipe (cut models have more to recover)
+32144a6	0.6208	0.6481	0.0272	0.1435	183.4609	0.7609	discard	exp: distil the full-size frontier point (a82ec1d) into the 15-layer recipe, inside the budget
