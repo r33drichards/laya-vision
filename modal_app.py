@@ -1787,19 +1787,24 @@ def _games_spawn(model: str, atari_games: str, atari_episodes: int, doom_episode
     return calls
 
 
+_ERRORS: list = []  # what ``_get`` swallowed during this local run, for the results file
+
+
 def _get(call, what: str):
-    """A call's result, or ``None`` with the error printed: one broken game or set should not lose the rest."""
+    """A call's result, or ``None`` with the error printed and recorded in ``_ERRORS``: one broken game or set
+    should not lose the rest."""
     try:
         return call.get()
     except Exception as e:
         print("%s failed: %s" % (what, repr(e)[:300]))
+        _ERRORS.append({"what": what, "error": repr(e)[:1000]})
         return None
 
 
 def _games_collect(calls: dict) -> dict:
     out = {"atari": [], "doom": {}, "maze": [], "snake": []}
     for c in calls["atari"]:
-        r = _get(c, "atari")
+        r = _get(c, "atari game")
         if r:
             out["atari"].append(r)
     for p, c in calls["doom"].items():
@@ -1885,32 +1890,39 @@ def _datasets_print(evals: dict) -> None:
 
 
 @app.local_entrypoint()
-def full_eval(model: str, datasets: str = "vqa,cauldron,score,eval", val_split: str = "val", games: bool = True,
-              latency: bool = True, atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
+def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str = "vqa,cauldron,score,eval",
+              val_split: str = "val", atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
               doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
               snake_episodes: int = 20, out: str = "", save: bool = True):
     """modal run modal_app.py::full_eval --model <run>/best  -- every eval on one checkpoint, in parallel, one file.
 
-    The dataset evals (``evaluate`` over ``datasets``: accuracy, ECE, NLL, and the human-vote and ordinal metrics),
-    the games suite (``games_eval``) and ``bench_latency`` all run at once; ``--no-games`` / ``--no-latency`` skip
-    those parts. The combined result, with the git commit and each dataset's meta.json, is written to ``out``
-    (default ``eval-results/<run>-<commit>.json``) and, unless ``--no-save``, to ``<run>/evals/`` on the
-    checkpoint volume next to the checkpoint.
+    ``parts`` picks from ``datasets`` (``evaluate`` over ``datasets``: accuracy, ECE, NLL, and the human-vote and
+    ordinal metrics), ``games`` (the ``games_eval`` suite) and ``latency`` (``bench_latency``); they all run at
+    once. The combined result, with the git commit and each dataset's meta.json, is written to ``out`` (default
+    ``eval-results/<run>-<commit>.json``) and, unless ``--no-save``, to ``<run>/evals/`` on the checkpoint volume
+    next to the checkpoint. ``scripts/eval_report.py`` turns result files into Markdown; the ``eval`` GitHub
+    Actions workflow runs each part as its own job and posts that report on the pull request.
     """
     import datetime
 
+    wanted = [p.strip() for p in parts.split(",") if p.strip()]
+    unknown = set(wanted) - {"datasets", "games", "latency"}
+    if unknown or not wanted:
+        raise SystemExit("--parts takes datasets, games and latency (got %r)" % parts)
     code = _git_state()
     t0 = time.time()
-    ds_call = evaluate.spawn(model, ",".join(_expand_datasets(datasets)), val_split)
-    lat_call = bench_latency.spawn(model) if latency else None
+    _ERRORS.clear()
+    ds_call = evaluate.spawn(model, ",".join(_expand_datasets(datasets)), val_split) if "datasets" in wanted else None
+    lat_call = bench_latency.spawn(model) if "latency" in wanted else None
     game_calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes,
-                              snake_sizes, snake_episodes) if games else None
-    results = {"model": model, "code": code, "val_split": val_split,
+                              snake_sizes, snake_episodes) if "games" in wanted else None
+    results = {"model": model, "code": code, "parts": wanted, "val_split": val_split,
                "started": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
-    results["datasets"] = _get(ds_call, "evaluate")
+    results["datasets"] = _get(ds_call, "evaluate") if ds_call else None
     results["latency"] = _get(lat_call, "bench_latency") if lat_call else None
     results["games"] = _games_collect(game_calls) if game_calls else None
     results["minutes"] = round((time.time() - t0) / 60, 1)
+    results["errors"] = list(_ERRORS)
 
     if results["datasets"]:
         print("\n== Datasets (%s split, calibrated)" % val_split)
@@ -1921,16 +1933,20 @@ def full_eval(model: str, datasets: str = "vqa,cauldron,score,eval", val_split: 
     if results["games"]:
         _games_print(results["games"])
 
-    stem = "%s-%s%s" % (model.replace("/", "-"), (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "")
+    tag = "" if len(wanted) == 3 else "-" + "-".join(wanted)
+    stem = "%s-%s%s%s" % (model.replace("/", "-"), (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "", tag)
     out = out or os.path.join("eval-results", stem + ".json")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     with open(out, "w") as f:
         json.dump(results, f, indent=2)
     print("\nwrote", out)
+    failed = [p for p in wanted if not results[p] or (p == "games" and not any(results["games"].values()))]
     if save:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         leaf = model.rstrip("/").rsplit("/", 1)[-1]  # best / last share the run's evals/
-        name = "%s-%s-%s%s.json" % (leaf, stamp, (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "")
+        name = "%s-%s-%s%s%s.json" % (leaf, stamp, (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "", tag)
         path = _get(save_eval_results.spawn(model, name, results), "save to volume")
         if path:
             print("saved", path, "on laya-checkpoints")
+    if failed:
+        raise SystemExit("full_eval: %s produced no results (see the errors above)" % ", ".join(failed))

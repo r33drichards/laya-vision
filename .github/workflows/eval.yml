@@ -1,0 +1,170 @@
+# Run the eval suite on a checkpoint from the laya-checkpoints Modal volume, stream the Modal logs into this run,
+# and post the results on the branch's pull request.
+#
+#   Actions -> eval -> Run workflow, pick the branch whose code trained the checkpoint, fill in the checkpoint
+#   gh workflow run eval.yml --ref <branch> -f model=cauldron-score-2ep-bidir-full/best [-f games=false] [-f pr=15]
+#
+# Each part (datasets, games, latency) is its own job running `modal run modal_app.py::full_eval --parts <part>`
+# without --detach, so the Modal containers' output is that job's log, and cancelling the run stops the Modal
+# app. The report job merges the parts' result files (scripts/eval_report.py), writes them to the run summary,
+# and creates or updates one comment per checkpoint on the pull request.
+#
+# Needs the repository secrets MODAL_TOKEN_ID and MODAL_TOKEN_SECRET (modal token new, or a service user's token).
+name: eval
+run-name: eval ${{ inputs.model }} on ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Checkpoint on the laya-checkpoints volume, e.g. cauldron-score-2ep-bidir-full/best"
+        required: true
+        type: string
+      datasets:
+        description: "Run the dataset evals (evaluate)"
+        type: boolean
+        default: true
+      games:
+        description: "Run the games suite (Atari, ViZDoom, Maze, Snake)"
+        type: boolean
+        default: true
+      latency:
+        description: "Run the latency benchmark"
+        type: boolean
+        default: true
+      dataset_groups:
+        description: "Dataset groups or names for the dataset evals"
+        type: string
+        default: vqa,cauldron,score,eval
+      val_split:
+        description: "Split for the dataset evals (test exists for KonIQ and FER+)"
+        type: choice
+        options: [val, test]
+        default: val
+      pr:
+        description: "Pull request to comment on (default: the open PR for this branch; none = no comment)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  issues: write  # PR comments go through the issues API
+  pull-requests: write
+
+concurrency:
+  group: eval-${{ github.ref }}-${{ inputs.model }}
+  cancel-in-progress: false
+
+jobs:
+  part:
+    name: ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [datasets, games, latency]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      PYTHONUNBUFFERED: "1"
+      MODEL: ${{ inputs.model }}
+      PART: ${{ matrix.part }}
+      ENABLED: ${{ (matrix.part == 'datasets' && inputs.datasets) || (matrix.part == 'games' && inputs.games) || (matrix.part == 'latency' && inputs.latency) }}
+      DATASETS: ${{ inputs.dataset_groups }}
+      VAL_SPLIT: ${{ inputs.val_split }}
+    steps:
+      - name: Skip
+        if: env.ENABLED != 'true'
+        run: echo "$PART not requested"
+      - uses: actions/checkout@v4
+        if: env.ENABLED == 'true'
+      - uses: actions/setup-python@v5
+        if: env.ENABLED == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install the Modal client
+        if: env.ENABLED == 'true'
+        run: pip install "modal>=1.5,<2"
+      - name: Run ${{ matrix.part }} on Modal
+        if: env.ENABLED == 'true'
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "::error::Set the MODAL_TOKEN_ID and MODAL_TOKEN_SECRET repository secrets"; exit 1
+          fi
+          modal run modal_app.py::full_eval --model "$MODEL" --parts "$PART" \
+            --datasets "$DATASETS" --val-split "$VAL_SPLIT" --out "eval-results/$PART.json"
+      - uses: actions/upload-artifact@v4
+        if: always() && env.ENABLED == 'true'
+        with:
+          name: eval-${{ matrix.part }}
+          path: eval-results/${{ matrix.part }}.json
+          if-no-files-found: ignore
+
+  report:
+    needs: part
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODEL: ${{ inputs.model }}
+      PR_INPUT: ${{ inputs.pr }}
+      BRANCH: ${{ github.ref_name }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: eval-*
+          path: eval-results
+          merge-multiple: true
+      - name: Part results
+        id: parts
+        run: |
+          # the matrix job's result is shared, so derive each part's state from its requested flag and its file
+          status=""
+          for part in datasets games latency; do
+            case "$part" in
+              datasets) on="${{ inputs.datasets }}" ;;
+              games) on="${{ inputs.games }}" ;;
+              latency) on="${{ inputs.latency }}" ;;
+            esac
+            if [ "$on" != "true" ]; then s=skipped
+            elif [ -f "eval-results/$part.json" ]; then s=success
+            else s=failure; fi
+            status="$status$part=$s,"
+          done
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "$status"
+      - name: Build the report
+        env:
+          STATUS: ${{ steps.parts.outputs.status }}
+        run: |
+          shopt -s nullglob
+          python scripts/eval_report.py eval-results/*.json --model "$MODEL" --run-url "$RUN_URL" --status "$STATUS" > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment on the pull request
+        run: |
+          pr="$PR_INPUT"
+          if [ -z "$pr" ]; then
+            pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          fi
+          if [ -z "$pr" ] || [ "$pr" = "none" ]; then
+            echo "No pull request for $BRANCH; the report is in the run summary."; exit 0
+          fi
+          marker="<!-- laya-eval model=$MODEL -->"
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$pr/comments" \
+                 --jq ".[] | select(.body | startswith(\"$marker\")) | .id" | tail -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@report.md > /dev/null
+            echo "Updated the comment on #$pr"
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -F body=@report.md > /dev/null
+            echo "Commented on #$pr"
+          fi
+      - name: Fail if a requested part failed
+        run: |
+          case "${{ steps.parts.outputs.status }}" in
+            *failure*) echo "::error::A requested part produced no results: ${{ steps.parts.outputs.status }}"; exit 1 ;;
+          esac
