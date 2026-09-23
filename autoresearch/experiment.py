@@ -45,6 +45,8 @@ WARMUP_STEPS = 20
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.25
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
+VALUE_HEAD = True         # add a state-value head trained on the game examples' "value" targets
+W_VALUE = 1.0             # its loss weight (autogo: 1:1 with the policy beat 0.25)
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
@@ -82,7 +84,7 @@ def build(ctx):
     from laya.vlm import VLMAgent
 
     if INIT:
-        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device)
+        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device, **({"value_head": True} if VALUE_HEAD else {}))
     else:
         agent = VLMAgent(backbone=BACKBONE, device=ctx.device, option_attention=OPTION_ATTENTION)
     if KEEP_TEXT_LAYERS:
@@ -108,4 +110,4 @@ def train(agent, ctx):
 
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
-               max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
+               w_value=W_VALUE if VALUE_HEAD else 0.0, max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
