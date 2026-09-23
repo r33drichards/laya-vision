@@ -1,4 +1,4 @@
-"""The fixed autoresearch harness for Laya Vision: train an experiment for 5 minutes, then measure it.
+"""The fixed autoresearch harness for Laya Vision: train an experiment for 15 minutes, then measure it.
 
     modal run autoresearch/harness.py --tag <tag> [--desc "what this experiment tries"]
 
@@ -40,7 +40,7 @@ data. ``modal run autoresearch/harness.py --prepare-pool`` builds the pool once,
 pickles of examples with the encoded image bytes inline:
 
 * ``train``: ``TRAIN_POOL_PER_SET`` seeded examples of each ``TRAINABLE_DATASETS`` train split, calibration tail
-  excluded. A 5-minute experiment sees ~30k samples, so a 46k pool is enough, and every experiment trains from
+  excluded. A 15-minute experiment sees ~90k samples, about two passes over the 46k pool, and every experiment trains from
   the same one;
 * ``calib``: the last ``N_CALIB`` train records of each ``CALIB_DATASETS`` set;
 * ``eval``: ``EVAL_PER_SET`` seeded val examples of each ``EVAL_DATASETS`` set.
@@ -75,7 +75,7 @@ for _p in (REPO, os.path.join(REPO, "autoresearch")):  # the laya package to shi
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-TIME_BUDGET = 300          # seconds of training, as upstream
+TIME_BUDGET = 900          # seconds of training (upstream: 300; 5 minutes starved the games, see program.md)
 EVAL_PER_SET = 300         # seeded questions per eval set
 LATENCY_N = 100            # images timed on the L4 (after 10 warm-up calls)
 N_CALIB = 100              # last train records per calibration set, held out from training
@@ -277,7 +277,7 @@ def _log(t_start: float, msg: str) -> None:
     print("[harness %6.1f s] %s" % (time.time() - t_start, msg), flush=True)
 
 
-@app.cls(image=image, gpu="H100", cpu=16, memory=65536, timeout=45 * 60, volumes=VOLUMES,
+@app.cls(image=image, gpu="H100", cpu=16, memory=65536, timeout=60 * 60, volumes=VOLUMES,
          enable_memory_snapshot=True, single_use_containers=True)
 class TrainEval:
     @modal.enter(snap=True)

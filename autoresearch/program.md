@@ -1,6 +1,6 @@
 # autoresearch for Laya Vision
 
-Autonomous research on the Laya Vision decision model: you edit one file, the harness trains it for 5 minutes on an
+Autonomous research on the Laya Vision decision model: you edit one file, the harness trains it for 15 minutes on an
 H100 and measures it, and you keep what pushes the Pareto frontier out. Adapted from
 [karpathy/autoresearch](https://github.com/karpathy/autoresearch) (see `UPSTREAM.md`).
 
@@ -51,7 +51,7 @@ grep -A12 "^---" autoresearch/runs/<tag>/run.log        # the summary and the ke
 
 Never pass `--detach`: the local entrypoint collects the result, decides and writes the files. The first run of a
 new harness version deploys it and snapshots the loaded data (slower); later runs restore that snapshot. A run is
-5 minutes of training plus loading, calibration and eval, then the L4 latency job and the four games jobs (one per
+15 minutes of training plus loading, calibration and eval, then the L4 latency job and the four games jobs (one per
 family) in parallel.
 Start it as a background shell command and wait for it; do not let its output into your context.
 
@@ -95,15 +95,15 @@ You CANNOT:
   no val splits, no `eval_*` sets, no calibration tail;
 - use test-time search (`agent.cfg["search"]`): the benchmark plays the saved model greedy, one forward per move.
   Search during training is fine (rollouts, `laya.search`, expert relabelling inside `train()`, all within the
-  5-minute budget, on training seeds below 100,000): only what the model learned is scored;
-- exceed the 5-minute training budget (the harness fails runs over budget + 60 s);
+  15-minute budget, on training seeds below 100,000): only what the model learned is scored;
+- exceed the 15-minute training budget (the harness fails runs over budget + 60 s);
 - add dependencies beyond what the harness image installs.
 
 A change only counts if it survives `agent.save` and reload. The harness measures the checkpoint it reloads from
 disk, so an architecture change must also be written into the backbone config, as the helpers in `experiment.py`
 do.
 
-## What the games budget buys (measured, tag sep23-games)
+## What the games budget buys (measured at 5 minutes, tag sep23-games)
 
 Why Maze, CartPole, Acrobot and MountainCar stay at 0 while ViZDoom and LunarLander learn, tested by competing
 hypotheses (plumbing, perception, labels, LR, data size, drift) rather than by guessing:
@@ -117,7 +117,7 @@ hypotheses (plumbing, perception, labels, LR, data size, drift) rather than by g
   LunarLander all their gain.
 - So not covariate shift yet: DAgger helps a policy that fits the expert's states and drifts; these do not fit them.
 
-Within 5 minutes, points of `games` are far cheaper from ViZDoom and LunarLander than from the mazes. Judge a
+Within 5 minutes, points of `games` were far cheaper from ViZDoom and LunarLander than from the mazes. Judge a
 game-data change by per-move accuracy on training and unseen frames, not by game score alone: score floors at 0
 until accuracy is high.
 
@@ -137,7 +137,7 @@ architecture plays far better than ours. What carries over, with its evidence:
 - **Variety beats per-episode strength, and don't throw away old data.** More games at 1024 simulations beat fewer at
   2048; training only on the newest data overfit (0.273 vs 0.305).
 - **Augment with the game's symmetries** where they hold (mirrors in Maze; not in Atari, whose screens have text).
-- **Size the LR schedule to the time budget** so it fully decays inside the 5 minutes; `laya.vlm_train.train` already
+- **Size the LR schedule to the time budget** so it fully decays inside the budget; `laya.vlm_train.train` already
   decays on wall-clock progress, keep it that way if you write your own loop.
 - **Change one thing at a time**, in this order when unsure: learning rate and schedule, then batch size and steps,
   then architecture. Simpler wins at equal score.
@@ -166,7 +166,7 @@ globally, and the benchmark fixes what the model sees.
 
 ## Ideas to start from
 
-- **Cut depth**: `KEEP_TEXT_LAYERS` (30 in SmolVLM-256M) and `KEEP_VISION_LAYERS` (12), then use the 5 minutes to
+- **Cut depth**: `KEEP_TEXT_LAYERS` (30 in SmolVLM-256M) and `KEEP_VISION_LAYERS` (12), then use the budget to
   recover. Which layers go matters: try keeping every other layer instead of the first N.
 - **Fewer image tokens**: `IMAGE_SIZE` 384 or 256 (36 or 16 tokens instead of 64). This is usually the cheapest
   latency win.

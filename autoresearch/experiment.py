@@ -1,7 +1,7 @@
 """The autoresearch experiment: the one file the agent edits (upstream's ``train.py``).
 
 ``harness.py`` calls ``build(ctx)`` (model + data loading; not timed), then ``train(agent, ctx)``, which must return
-within ``ctx.time_budget_s`` seconds (5 minutes). The harness then fits temperatures, saves the model, reloads it and
+within ``ctx.time_budget_s`` seconds (15 minutes). The harness then fits temperatures, saves the model, reloads it and
 measures quality, parameter count and L4 latency the same way for every experiment. Anything is fair game here:
 where to start from, what to cut, what to train on, the objective and the optimizer. The only rules are the
 harness's: train only on ``ctx.train_examples()``, stay inside the time budget, and make whatever you change survive
