@@ -26,6 +26,9 @@
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
     modal run modal_app.py::maze_eval --models <run>/best     # Maze at 4x4 / 6x6 / 8x8 cells: BFS expert, random, models
     modal run modal_app.py::snake_eval --models <run>/best    # Snake on a 10x10 board: greedy expert, random, models
+    modal run modal_app.py::full_eval --model <run>/best  # EVERYTHING on one checkpoint, in parallel: evaluate over
+                                                     # vqa,cauldron,score,eval + games suite + latency; one JSON in
+                                                     # eval-results/ and <run>/evals/ on the checkpoint volume
     modal run modal_app.py::games_eval --model <run>/best --out games.json
                                                      # the games suite on one checkpoint: Atari Freeway / Breakout /
                                                      # Galaxian, ViZDoom basic, Maze, Snake, with baselines, in parallel
@@ -663,7 +666,7 @@ def finetune_long(
     gpu=["A10G", "L4", "A100"],  # any of these: an eval should not queue on one GPU type's capacity
     cpu=16,
     memory=32768,
-    timeout=30 * 60,
+    timeout=60 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
 def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS + EVAL_DATASETS),
@@ -691,7 +694,14 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
     print("[val, T=1]        " + format_metrics(raw))
     print("[val, calibrated] " + format_metrics(cal))
-    return {"val_raw": raw, "val_calibrated": cal}
+    metas = {}
+    for name in {ex["dataset"] for ex in val_ex}:
+        try:
+            with open(os.path.join("/data/vqa", name, "meta.json")) as f:
+                metas[name] = json.load(f)
+        except (OSError, ValueError):
+            metas[name] = None
+    return {"val_raw": raw, "val_calibrated": cal, "temperature": list(agent.temperature), "dataset_meta": metas}
 
 
 def _public_question(q: dict) -> dict:
@@ -1763,6 +1773,66 @@ def _git_state() -> dict:
             "dirty": bool(git("status", "--porcelain", "--untracked-files=no"))}
 
 
+def _games_spawn(model: str, atari_games: str, atari_episodes: int, doom_episodes: int, maze_sizes: str,
+                 maze_episodes: int, snake_sizes: str, snake_episodes: int) -> dict:
+    """Start every game of the suite, with its baselines, and return the call handles."""
+    calls = {"atari": [play_atari_game.spawn(g, model, atari_episodes) for g in atari_games.split(",") if g],
+             "doom": {p: play_doom.spawn(p, "", doom_episodes) for p in ("expert", "random", "always_attack")},
+             "grid": []}
+    calls["doom"]["model"] = play_doom.spawn("model", model, doom_episodes)
+    for game, sizes, episodes in (("maze", maze_sizes, maze_episodes), ("snake", snake_sizes, snake_episodes)):
+        for size in [int(s) for s in sizes.split(",") if s]:
+            calls["grid"] += [play_grid_baseline.spawn(game, p, episodes, size) for p in ("expert", "random")]
+            calls["grid"].append(play_grid.spawn(game, model, episodes, size))
+    return calls
+
+
+def _get(call, what: str):
+    """A call's result, or ``None`` with the error printed: one broken game or set should not lose the rest."""
+    try:
+        return call.get()
+    except Exception as e:
+        print("%s failed: %s" % (what, repr(e)[:300]))
+        return None
+
+
+def _games_collect(calls: dict) -> dict:
+    out = {"atari": [], "doom": {}, "maze": [], "snake": []}
+    for c in calls["atari"]:
+        r = _get(c, "atari")
+        if r:
+            out["atari"].append(r)
+    for p, c in calls["doom"].items():
+        r = _get(c, "doom " + p)
+        if r:
+            out["doom"][p] = r
+    for c in calls["grid"]:
+        r = _get(c, "grid game")
+        if r:
+            out[r["game"]].append(r)
+    return out
+
+
+def _games_print(results: dict) -> None:
+    print("\n== Atari (greedy)")
+    print("%-10s %10s %10s %10s %8s  %s" % ("game", "model", "random", "expert", "norm", "top actions"))
+    for r in results["atari"]:
+        top = ", ".join("%s %d%%" % (a, 100 * n / max(1, sum(r["actions"].values())))
+                        for a, n in sorted(r["actions"].items(), key=lambda kv: -kv[1])[:3])
+        f = lambda v, fmt="%.1f": "-" if v is None else fmt % v  # noqa: E731
+        print("%-10s %10.1f %10.1f %10s %8s  %s" % (r["game"], r["model_score"], r["random_score"], f(r["expert_score"]),
+                                                   f(r["normalized"], "%.2f"), top))
+    print("\n== ViZDoom basic")
+    print("%-32s %12s %10s %10s" % ("policy", "mean reward", "kill rate", "steps/ep"))
+    for r in results["doom"].values():
+        print("%-32s %12.1f %9.0f%% %10.1f" % (r["policy"], r["mean_reward"], 100 * r["kill_rate"], r["mean_steps"]))
+    for game in ("maze", "snake"):
+        print("\n== %s" % game.capitalize())
+        print(_grid_header(game))
+        for r in results[game]:
+            print(_grid_row(r))
+
+
 @app.local_entrypoint()
 def games_eval(model: str, atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
                doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
@@ -1772,46 +1842,95 @@ def games_eval(model: str, atari_games: str = ",".join(SUITE_ATARI_GAMES), atari
     Atari (Freeway, Breakout, Galaxian by default), ViZDoom ``basic``, Maze at each size and Snake, all in parallel,
     with each game's baselines on the same seeds: random (and the expert data's score) for Atari; the scripted
     expert, random and always-attack for Doom; the BFS expert and random for Maze and Snake. ``out`` gets every
-    result plus the git commit the code came from.
+    result plus the git commit the code came from. ``full_eval`` runs this together with the dataset evals.
     """
-    atari = [play_atari_game.spawn(g, model, atari_episodes) for g in atari_games.split(",") if g]
-    doom = {p: play_doom.spawn(p, "", doom_episodes) for p in ("expert", "random", "always_attack")}
-    doom["model"] = play_doom.spawn("model", model, doom_episodes)
-    grid = []
-    for game, sizes, episodes in (("maze", maze_sizes, maze_episodes), ("snake", snake_sizes, snake_episodes)):
-        for size in [int(s) for s in sizes.split(",") if s]:
-            grid += [play_grid_baseline.spawn(game, p, episodes, size) for p in ("expert", "random")]
-            grid.append(play_grid.spawn(game, model, episodes, size))
-    results = {"model": model, "code": _git_state(), "atari": [], "doom": {}, "maze": [], "snake": []}
-    for c in atari:
-        try:
-            results["atari"].append(c.get())
-        except Exception as e:  # one broken game should not lose the rest of the suite
-            print("atari failed:", repr(e)[:300])
-    for p, c in doom.items():
-        results["doom"][p] = c.get()
-    for c in grid:
-        r = c.get()
-        results[r["game"]].append(r)
-
-    print("\n== Atari (%d episodes, greedy)" % atari_episodes)
-    print("%-10s %10s %10s %10s %8s  %s" % ("game", "model", "random", "expert", "norm", "top actions"))
-    for r in results["atari"]:
-        top = ", ".join("%s %d%%" % (a, 100 * n / max(1, sum(r["actions"].values())))
-                        for a, n in sorted(r["actions"].items(), key=lambda kv: -kv[1])[:3])
-        f = lambda v, fmt="%.1f": "-" if v is None else fmt % v  # noqa: E731
-        print("%-10s %10.1f %10.1f %10s %8s  %s" % (r["game"], r["model_score"], r["random_score"], f(r["expert_score"]),
-                                                   f(r["normalized"], "%.2f"), top))
-    print("\n== ViZDoom basic (%d episodes)" % doom_episodes)
-    print("%-32s %12s %10s %10s" % ("policy", "mean reward", "kill rate", "steps/ep"))
-    for r in results["doom"].values():
-        print("%-32s %12.1f %9.0f%% %10.1f" % (r["policy"], r["mean_reward"], 100 * r["kill_rate"], r["mean_steps"]))
-    for game in ("maze", "snake"):
-        print("\n== %s" % game.capitalize())
-        print(_grid_header(game))
-        for r in results[game]:
-            print(_grid_row(r))
+    calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes, snake_sizes,
+                         snake_episodes)
+    results = dict({"model": model, "code": _git_state()}, **_games_collect(calls))
+    _games_print(results)
     if out:
         with open(out, "w") as f:
             json.dump(results, f, indent=2)
         print("\nwrote", out)
+
+
+@app.function(image=image, timeout=10 * 60, volumes={"/ckpt": ckpt_vol})
+def save_eval_results(run_name: str, filename: str, payload: dict) -> str:
+    """Write a ``full_eval`` result next to the run: ``<run dir>/evals/<filename>``, where the run dir is the
+    checkpoint's parent (``<run>/best`` -> ``<run>/evals/``), so ``publish`` never uploads it with the weights."""
+    ckpt_vol.reload()
+    ckpt = _ckpt_path(run_name)
+    evals = os.path.join(os.path.dirname(ckpt.rstrip("/")), "evals")
+    os.makedirs(evals, exist_ok=True)
+    path = os.path.join(evals, filename)
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    ckpt_vol.commit()
+    return path
+
+
+def _datasets_print(evals: dict) -> None:
+    """One line per dataset from ``evaluate``'s calibrated metrics (the model as it would be used)."""
+    cal = evals["val_calibrated"]
+    print("%-30s %6s %7s %6s %6s  %s" % ("dataset", "n", "acc", "ECE", "NLL", "vs human votes (prior)"))
+    for name in sorted(cal, key=lambda n: (n == "all", n)):
+        m = cal[name]
+        extra = []
+        for key in ("xent", "soft_xent"):
+            if key in m:
+                extra.append("%s %.3f%s" % (key, m[key], " (%.3f)" % m["prior_" + key] if "prior_" + key in m else ""))
+        if "mae" in m:
+            extra.append("mae %.2f" % m["mae"])
+        print("%-30s %6d %6.1f%% %6.3f %6.3f  %s" % (name, m["n"], 100 * m["acc"], m["ece"], m["nll"], ", ".join(extra)))
+
+
+@app.local_entrypoint()
+def full_eval(model: str, datasets: str = "vqa,cauldron,score,eval", val_split: str = "val", games: bool = True,
+              latency: bool = True, atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
+              doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
+              snake_episodes: int = 20, out: str = "", save: bool = True):
+    """modal run modal_app.py::full_eval --model <run>/best  -- every eval on one checkpoint, in parallel, one file.
+
+    The dataset evals (``evaluate`` over ``datasets``: accuracy, ECE, NLL, and the human-vote and ordinal metrics),
+    the games suite (``games_eval``) and ``bench_latency`` all run at once; ``--no-games`` / ``--no-latency`` skip
+    those parts. The combined result, with the git commit and each dataset's meta.json, is written to ``out``
+    (default ``eval-results/<run>-<commit>.json``) and, unless ``--no-save``, to ``<run>/evals/`` on the
+    checkpoint volume next to the checkpoint.
+    """
+    import datetime
+
+    code = _git_state()
+    t0 = time.time()
+    ds_call = evaluate.spawn(model, ",".join(_expand_datasets(datasets)), val_split)
+    lat_call = bench_latency.spawn(model) if latency else None
+    game_calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes,
+                              snake_sizes, snake_episodes) if games else None
+    results = {"model": model, "code": code, "val_split": val_split,
+               "started": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
+    results["datasets"] = _get(ds_call, "evaluate")
+    results["latency"] = _get(lat_call, "bench_latency") if lat_call else None
+    results["games"] = _games_collect(game_calls) if game_calls else None
+    results["minutes"] = round((time.time() - t0) / 60, 1)
+
+    if results["datasets"]:
+        print("\n== Datasets (%s split, calibrated)" % val_split)
+        _datasets_print(results["datasets"])
+    if results["latency"]:
+        lat = results["latency"]
+        print("\n== Latency: median %.1f ms, p90 %.1f ms per predict (L4, bf16)" % (lat["median_ms"], lat["p90_ms"]))
+    if results["games"]:
+        _games_print(results["games"])
+
+    stem = "%s-%s%s" % (model.replace("/", "-"), (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "")
+    out = out or os.path.join("eval-results", stem + ".json")
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(results, f, indent=2)
+    print("\nwrote", out)
+    if save:
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        leaf = model.rstrip("/").rsplit("/", 1)[-1]  # best / last share the run's evals/
+        name = "%s-%s-%s%s.json" % (leaf, stamp, (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "")
+        path = _get(save_eval_results.spawn(model, name, results), "save to volume")
+        if path:
+            print("saved", path, "on laya-checkpoints")
