@@ -26,7 +26,7 @@ SHAPES = ["square", "circle", "triangle"]
 
 @pytest.fixture()
 def dataset(tmp_path):
-    """``<tmp>/sq/val.jsonl`` + images (as in ``tests/test_robustness.py``): 4 images, each with a 4-way colour
+    """``<tmp>/sq/val.jsonl`` + images (as in ``tests/robustness/test_core.py``): 4 images, each with a 4-way colour
     question and a yes/no question, plus one text-only row; and here a 3-way shape question per image, so the
     colour rows have options from other rows to borrow."""
     base = tmp_path / "sq"

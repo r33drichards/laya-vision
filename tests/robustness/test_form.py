@@ -25,7 +25,7 @@ COLORS = {"red": (220, 30, 30), "blue": (30, 60, 220), "green": (30, 170, 60), "
 @pytest.fixture()
 def dataset(tmp_path):
     """``<tmp>/sq/val.jsonl`` + images: 4 images, each with a 4-way colour question and a yes/no question, plus
-    one text-only choice row (as in ``tests/test_robustness.py``)."""
+    one text-only choice row (as in ``tests/robustness/test_core.py``)."""
     base = tmp_path / "sq"
     (base / "images").mkdir(parents=True)
     recs = []

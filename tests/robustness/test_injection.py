@@ -1,5 +1,5 @@
 """``laya.robustness.injection``: the injection builders and the typographic renderer on the tiny on-disk dataset of
-``tests/test_robustness.py`` (no model), the summary on hand-made predictions, then one end-to-end run with the
+``tests/robustness/test_core.py`` (no model), the summary on hand-made predictions, then one end-to-end run with the
 untrained SmolVLM-256M agent (CPU is fine)."""
 import json
 
@@ -12,7 +12,7 @@ from laya import robustness as R
 from laya.robustness import injection as RI
 from laya.vlm_train import collect_logits
 
-from test_robustness import dataset, rows_of, strip_images  # noqa: F401  (fixture re-export)
+from test_core import dataset, rows_of, strip_images  # noqa: F401  (fixture re-export)
 
 # ---------------------------------------------------------------------------------------------------------
 # Builders (no model)

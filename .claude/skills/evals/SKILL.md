@@ -224,7 +224,7 @@ runs a cheap subset of it on every eval, see "Reading the robustness block"). Al
   labelled rows returns a `Calibration` with raw, checkpoint-temperature and out-of-fold ECE and 95% intervals,
   and `predict(..., calibration=cal)` applies it (see the README section "Calibrating on your own data"). Keep
   `n_permutations` the same at fit and use time. Accuracy never changes with temperature, only confidence.
-- Tests for these, CPU, no GPU: `python -m pytest tests/test_robustness.py tests/test_verify_published.py
+- Tests for these, CPU, no GPU: `python -m pytest tests/robustness/test_core.py tests/test_verify_published.py
   tests/test_calibration.py tests/test_decision_vs_generation.py`. The model tests (`test_vlm.py`,
   `test_smolvlm2.py`, `test_modernvbert.py`) are slow on a shared CPU; run them on an L4 with
   `modal run modal_app.py::test --backbones HuggingFaceTB/SmolVLM-256M-Instruct` (about 2 min).

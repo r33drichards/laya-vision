@@ -11,7 +11,7 @@ python -m laya.robustness results/robustness/predictions.jsonl.gz         # re-s
 ```
 
 Code: [`laya/robustness/__init__.py`](https://github.com/r33drichards/laya-vision/blob/main/laya/robustness/__init__.py) (builders, scoring, summary; each rule is documented
-there), `modal_app.py::robustness` / `robustness_eval`, tests in `tests/test_robustness.py`. Raw outputs:
+there), `modal_app.py::robustness` / `robustness_eval`, tests in `tests/robustness/test_core.py`. Raw outputs:
 [`results/robustness/predictions.jsonl.gz`](https://github.com/r33drichards/laya-vision/blob/main/results/robustness/predictions.jsonl.gz) (one line per scored
 row: ids, family/variant, label, raw logits, calibrated probabilities, argmax) and
 [`results/robustness/summary.json`](https://github.com/r33drichards/laya-vision/blob/main/results/robustness/summary.json).
@@ -213,7 +213,7 @@ call, and the prefix cache should all leave a row's logits unchanged. With the *
 | `predict` with the prefix cache | 1.1e-07 | 6.0e-07 | 0 |
 | bf16 backbone vs fp32 (report only) | 2.2e-03 | 1.0e-02 | 0 (1 of 9 near-50/50 rows in a single-thread run) |
 
-`tests/test_robustness_invariance.py` asserts bitwise-identical repeats. For the other fp32 conditions it asserts no
+`tests/robustness/test_invariance.py` asserts bitwise-identical repeats. For the other fp32 conditions it asserts no
 flips, |Δp| < 1e-5 and |Δlogit| < 1e-4. These CPU numbers show the mechanics only.
 
 **On the GPU, with the published checkpoint** (`cauldron-score-2ep-bidir-full/best`, NVIDIA L4, 50 seeded val rows
