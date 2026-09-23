@@ -163,9 +163,56 @@ call, and the prefix cache should all leave a row's logits unchanged. With the *
 | bf16 backbone vs fp32 (report only) | 2.2e-03 | 1.0e-02 | 0 (1 of 9 near-50/50 rows in a single-thread run) |
 
 `tests/test_robustness_invariance.py` asserts bitwise-identical repeats. For the other fp32 conditions it asserts no
-flips, |Δp| < 1e-5 and |Δlogit| < 1e-4. On CUDA, `collect_logits` runs under bf16 autocast and `predict` does
-not, so there the batch-path deltas will be bf16-sized. These numbers show the mechanics only. The trained
-checkpoint has not been measured on GPU yet (`python -m laya.robustness_invariance --model <ckpt> ...`).
+flips, |Δp| < 1e-5 and |Δlogit| < 1e-4. These CPU numbers show the mechanics only.
+
+**On the GPU, with the published checkpoint** (`cauldron-score-2ep-bidir-full/best`, NVIDIA L4, 50 seeded val rows
+from each of the 7 robustness sets = 350 rows, batch size 32, the checkpoint's temperatures). On CUDA the two paths
+run at different precision, and this cannot be switched off without changing `collect_logits`:
+
+- the batch path (`collect_logits`, which the evals and `laya.robustness` use) runs the fp32 weights under **bf16
+  autocast**;
+- `predict` runs the fp32 weights **without autocast** (fp32).
+
+So an fp32 batch path without autocast was not measured. Each condition is compared with its own path's
+reference, so the table measures batching at each path's own precision.
+
+| condition | precision | max \|Δp\| | max \|Δlogit\| | flips / rows |
+|---|---|---:|---:|---:|
+| repeat (batch path, alone twice) | bf16 autocast | 0 (bitwise) | 0 | 0 / 350 |
+| batched (batches of 32) | bf16 autocast | 3.0e-02 | 0.27 | **2 / 350** |
+| batched, reversed row order | bf16 autocast | 3.0e-02 | 0.27 | 0 / 350 |
+| hostile neighbours | bf16 autocast | 3.5e-02 | 0.27 | **1 / 350** |
+| `predict` repeat | fp32 | 0 (bitwise) | 0 | 0 / 350 |
+| `predict`, all of a state's questions in one call | fp32 | 3.1e-06 | 2.2e-05 | 0 / 350 |
+| the same + a hostile eight-option question | fp32 | 5.7e-06 | 4.0e-05 | 0 / 350 |
+| `predict` with the prefix cache, one / all questions per call | fp32 | 6.6e-06 | 5.2e-05 | 0 / 350 |
+| `predict` vs batch path, both alone (report only) | fp32 vs bf16 autocast | 6.5e-02 | 0.45 | **1 / 350** |
+| bf16 backbone weights vs fp32 weights, batch path (report only) | bf16 vs fp32 weights, both under bf16 autocast | 7.9e-02 | 0.54 | **2 / 350** |
+
+On the GPU the answer can change with a row's batch neighbours on the batch path. In fp32, `predict` stays within
+float rounding (≤ 6.6e-06 in probability, no flips): several questions per call, hostile neighbours and the
+prefix cache all agree. Under bf16 autocast the same batching changes a row's probabilities by up to 3.5e-02 (mean
+3.4e-03). That flips the argmax of 3 row/condition pairs out of 1,050, on 2 distinct rows, both aokvqa questions
+that were already close to a tie. Margin is the probability of the top option minus the runner-up:
+
+| condition | row | reference → condition answer | margin, reference → condition | \|Δp\| |
+|---|---|---|---|---:|
+| batched | aokvqa/000026 | option 0 → 2 | 0.023 → 0.004 | 0.014 |
+| batched | aokvqa/000303 | option 2 → 0 | 0.031 → 0.0007 | 0.017 |
+| hostile | aokvqa/000303 | option 2 → 0 | 0.031 → 0.0003 | 0.017 |
+| `predict` vs batch (report only) | cauldron_ai2d/000003 | option 0 → 2 | 0.019 → 0.018 | 0.019 |
+| bf16 weights (report only) | aokvqa/001034 | option 0 → 3 | 0.127 → 0.016 | 0.073 |
+| bf16 weights (report only) | cauldron_vsr/000129 | option 0 → 1 | 0.069 → 0.089 | 0.079 |
+
+So the evals' batch-path answers carry batch-composition noise: 1 or 2 of 350 answers (0.3 to 0.6%) changed,
+all on near-tied rows. Scores from `predict` in fp32 do not carry it. We ran the job twice (the same code apart from the margin
+fields): the flips, maxima and per-row deltas were identical to 1e-16, so for a fixed batch composition the noise
+is deterministic, not run-to-run.
+Evidence: [`results/robustness/invariance-gpu-n50-s0/invariance.json`](https://github.com/r33drichards/laya-vision/blob/main/results/robustness/invariance-gpu-n50-s0/invariance.json)
+(per-row deltas and margins; meta records the GPU, checkpoint file hashes, datasets, seed, code commit and the
+precision of each condition), from
+`modal run modal_app.py::invariance_eval --tag inv-gpu-n50-s0-r2 --out results/robustness/invariance-gpu-n50-s0`
+(about 6.5 min on the L4, 8 min wall clock).
 
 ### ECE noise floor
 
