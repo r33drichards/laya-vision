@@ -220,3 +220,39 @@ def test_latency(agent):
             ts.append((time.perf_counter() - t0) * 1000)
         ts.sort()
         print("\nmodernvbert latency %s state, 1 noul question, %s: median %.1f ms (min %.1f, max %.1f)" % (name, DEVICE, ts[2], ts[0], ts[-1]))
+
+
+def test_mask_builder_and_text_sequence_report_what_they_cut(agent):
+    """The ``[MASK]`` sequence and the text-only ``build_sequence`` it copies report the same kinds of cut."""
+    from test_vlm import LONG, NO_CUT, TRUNCATION_QUESTIONS
+
+    from laya.common import build_sequence, truncation_answer
+
+    proc, tok = agent.processor, agent.processor.tokenizer
+    for qid, check in (
+        ("long_option", lambda t: t == dict(NO_CUT, options=[1])),
+        ("same_after_cut", lambda t: t["options"] == [0, 1] and t["indistinguishable"] == [[0, 1]]),
+        ("many_options", lambda t: t["options"] == list(range(30)) and not t["indistinguishable"]),
+        ("long_instructions", lambda t: t["instructions_tokens_dropped"] > 100 and not t["options"]),
+    ):
+        q = VLMAgent._to_internal(TRUNCATION_QUESTIONS[qid])
+        order = list(reversed(range(len(render_options(q)))))
+        assert check(build_vlm_inputs(proc, "x", q, option_order=order)["truncation"]), qid
+        report = {}
+        build_sequence(tok, "x", q, 512, 192, option_order=order, report=report)
+        assert check(report), qid
+    q = VLMAgent._to_internal(QUESTIONS["is_red"])
+    state = {"image": square((0, 0, 255)), "note": "word " * 3000}
+    for left in (False, True):
+        it = build_vlm_inputs(proc, state, q, truncate_left=left)
+        assert it["truncation"]["state_tokens_dropped"] > 1500 and len(it["ids"]) == 1024
+        report = {}
+        ids, _ = build_sequence(tok, {"note": state["note"]}, q, 512, 192, truncate_left=left, report=report)
+        assert report["state_tokens_dropped"] > 2000 and len(ids) == 512
+    report = {}
+    build_sequence(tok, "a short state", VLMAgent._to_internal(QUESTIONS["color"]), report=report)
+    assert report == NO_CUT and truncation_answer(report, VLMAgent._to_internal(QUESTIONS["color"])) is None
+    t = agent.predict({"image": square((0, 0, 255))}, {"s": TRUNCATION_QUESTIONS["same_after_cut"]})["answers"]["s"]
+    assert t["truncated"]["indistinguishable"] == [[LONG + "alpha", LONG + "beta"]]
+    with pytest.raises(ValueError, match="'s' would be truncated"):
+        agent.predict("x", {"s": TRUNCATION_QUESTIONS["same_after_cut"]}, strict=True)

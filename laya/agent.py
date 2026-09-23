@@ -15,6 +15,8 @@ from .common import (
     confidence_from_probs,
     render_options,
     temp_bucket,
+    truncation_answer,
+    truncation_error,
 )
 
 
@@ -188,7 +190,8 @@ class Agent:
         return {"t": t, "ins": ins, "crit": crit}
 
     @torch.no_grad()
-    def system_one(self, state: Union[str, dict, list], questions: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def system_one(self, state: Union[str, dict, list], questions: Dict[str, Dict[str, Any]],
+                   strict: bool = False) -> Dict[str, Any]:
         """Evaluate typed questions across state in a single, parallel forward pass.
 
         Args:
@@ -197,20 +200,27 @@ class Agent:
                 - choice: {"type": "choice", "instructions": "...", "criteria": {"optA": "...", ...}}
                 - score:  {"type": "score",  "instructions": "...", "criteria": ["lvl0", "lvl1", ...]}
                 - noul:   {"type": "noul",   "instructions": "..."}
+            strict: raise ``ValueError`` instead of cutting options, instructions or state to fit the budgets.
 
         Returns:
-            Dictionary with answers, probabilities, calibrated confidence, and token usage.
+            Dictionary with answers, probabilities, calibrated confidence, and token usage. An answer whose
+            question was cut carries ``"truncated"`` (see ``laya.common.truncation_answer``).
         """
         ids = list(questions.keys())
         items = []
         max_len = self.cfg.get("max_len", 512)
         head_max_len = self.cfg.get("head_max_len", 192)
+        truncated = {}
 
         for qid in ids:
             q = self._to_internal(questions[qid])
-            seq, markers = build_sequence(self.tok, state, q, max_len, head_max_len)
+            report = {}
+            seq, markers = build_sequence(self.tok, state, q, max_len, head_max_len, report=report)
             if len(markers) != len(render_options(q)):
                 raise ValueError("question %r options exceed head_max_len=%d" % (qid, head_max_len))
+            truncated[qid] = truncation_answer(report, q)
+            if strict and truncated[qid]:
+                raise truncation_error(qid, truncated[qid], max_len, head_max_len)
             items.append({"ids": seq, "markers": markers, "qtype": QTYPES[q["t"]]})
 
         b = collate_items([items], self.tok.pad_token_id)
@@ -285,6 +295,8 @@ class Agent:
                     "confidence": round(max(float(p[1]), 1.0 - float(p[1])), 4),
                     "action": ext,
                 }
+            if truncated[qid]:
+                answers[qid]["truncated"] = truncated[qid]
 
         return {
             "model": "laya-rl-agent",

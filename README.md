@@ -21,6 +21,8 @@ a = result["answers"]
 a["damage"]["score"], a["category"]["choice"], a["outdoors"]["noul"]   # expected level 0-3, top option, P(true)
 ```
 
+Inputs are cut to fit the checkpoint's token budgets: each option to 48 tokens (and shorter when many options must share `head_max_len`, 256), the instructions to what the options leave, the state's text to what `max_len` leaves after the images. An answer whose question was cut carries a `truncated` field, absent otherwise: `{"options": [labels cut], "indistinguishable": [[label, label], ...], "instructions": bool, "instructions_tokens_dropped": n, "state_tokens_dropped": n}`, where `indistinguishable` lists options that are the same tokens once cut, which the model cannot tell apart. `predict(..., strict=True)` raises `ValueError` instead, naming the question and what would be cut.
+
 Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces its ModernBERT text encoder with a small vision-language model. Laya's `predict(state, questions)` API, output schema, RLCD training objective and temperature calibration are unchanged. It is an experimental research project, not affiliated with Convai Innovations, the authors of Laya.
 
 - **Try it:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU, about 3 s per image. Source in `space/`.
