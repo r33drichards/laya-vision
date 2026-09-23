@@ -241,7 +241,7 @@ def test_mask_builder_and_text_sequence_report_what_they_cut(agent):
         it = build_vlm_inputs(proc, state, q, truncate_left=left)
         assert it["truncation"]["state_tokens_dropped"] > 1500 and len(it["ids"]) == 1024
         report = {}
-        ids, _ = build_sequence(tok, state, q, 512, 192, truncate_left=left, report=report)
+        ids, _ = build_sequence(tok, {"note": state["note"]}, q, 512, 192, truncate_left=left, report=report)
         assert report["state_tokens_dropped"] > 2000 and len(ids) == 512
     report = {}
     build_sequence(tok, "a short state", VLMAgent._to_internal(QUESTIONS["color"]), report=report)
