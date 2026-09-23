@@ -82,10 +82,14 @@ def test_compare_on_hand_made_logits():
     got = [np.array([1.0, 0.0, -1.0]), np.array([0.2, 0.1])]
     c = I.compare(rows, ref, got, [1.0, 1.0, 1.0])
     assert c["rows"][0] == {"id": "a", "max_abs_dprob": 0.0, "max_abs_dlogit": 0.0, "flip": False,
-                            "pred_ref": 0, "pred": 0}
+                            "pred_ref": 0, "pred": 0, "margin_ref": c["rows"][0]["margin_ref"],
+                            "margin": c["rows"][0]["margin_ref"]}
+    e = np.exp([1.0, 0.0, -1.0])
+    assert c["rows"][0]["margin_ref"] == pytest.approx((e[0] - e[1]) / e.sum())
     b = c["rows"][1]
     assert b["flip"] and b["pred_ref"] == 1 and b["pred"] == 0 and b["max_abs_dlogit"] == pytest.approx(0.2)
     assert b["max_abs_dprob"] == pytest.approx(2 / (1 + np.exp(-0.1)) - 1)  # |sigmoid(0.1) - sigmoid(-0.1)|
+    assert b["margin_ref"] == pytest.approx(b["max_abs_dprob"]) and b["margin"] == pytest.approx(b["max_abs_dprob"])
     s = c["summary"]
     assert s["n"] == 2 and s["n_flips"] == 1 and s["n_exact"] == 1 and s["max_abs_dlogit"] == pytest.approx(0.2)
     json.dumps(c)

@@ -1001,7 +1001,8 @@ def invariance(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
         json.dump(res, f, indent=1)
     ckpt_vol.commit()
     print("wrote %s in %.1f min" % (out_dir, res["meta"]["minutes"]))
-    return {"meta": res["meta"], "summary": res["summary"], "out_dir": out_dir}
+    # a JSON round trip: meta["torch"] is a TorchVersion, which the local client cannot unpickle without torch
+    return json.loads(json.dumps({"meta": res["meta"], "summary": res["summary"], "out_dir": out_dir}))
 
 
 @app.local_entrypoint()

@@ -35,8 +35,9 @@ Cross-path and precision, reported, not expected to be zero-tolerance:
   head stays fp32), against the fp32 ``alone``.
 
 For every condition and row: ``max_abs_dprob`` (max over options of |p - p_ref|, probabilities under the given
-temperatures), ``max_abs_dlogit`` and ``flip`` (argmax differs); per condition a summary with the max and mean of
-both and the flip count. Everything returned is JSON-able::
+temperatures), ``max_abs_dlogit``, ``flip`` (argmax differs) and ``margin_ref`` / ``margin`` (top-1 minus top-2
+probability of the reference and of the condition, so how close a flip was to a tie is on record); per condition a
+summary with the max and mean of both and the flip count. Everything returned is JSON-able::
 
     python -m laya.robustness_invariance --data-root <root> --datasets sq --n 50 --out invariance.json
 """
@@ -171,6 +172,12 @@ def _softmax(z: np.ndarray, t: float) -> np.ndarray:
     return p / p.sum()
 
 
+def _margin(p: np.ndarray) -> float:
+    """Top-1 minus top-2 probability (1.0 for a single option)."""
+    q = np.sort(p)[::-1]
+    return float(q[0] - q[1]) if len(q) > 1 else 1.0
+
+
 def compare(rows: List[Dict], ref: List[np.ndarray], got: List[np.ndarray], temperatures: Sequence[float]) -> Dict:
     """Per-row deltas of ``got`` against ``ref`` (both label-order logits aligned with ``rows``) and their summary."""
     from .common import QTYPES
@@ -181,7 +188,8 @@ def compare(rows: List[Dict], ref: List[np.ndarray], got: List[np.ndarray], temp
         pa, pb = _softmax(a, t), _softmax(b, t)
         per.append({"id": r["id"], "max_abs_dprob": float(np.abs(pa - pb).max()),
                     "max_abs_dlogit": float(np.abs(a - b).max()), "flip": bool(pa.argmax() != pb.argmax()),
-                    "pred_ref": int(pa.argmax()), "pred": int(pb.argmax())})
+                    "pred_ref": int(pa.argmax()), "pred": int(pb.argmax()), "margin_ref": _margin(pa),
+                    "margin": _margin(pb)})
     return {"rows": per, "summary": summarize_rows(per)}
 
 
