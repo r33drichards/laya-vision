@@ -17,7 +17,8 @@ fly: ``toolkit.maze_examples(n)`` and ``toolkit.snake_examples(n)`` (soft target
 ``value`` target, the board's 8 symmetries), ``toolkit.control_examples(game, n)`` for CartPole, Acrobot,
 MountainCar and LunarLander, and ``toolkit.game_mix(ctx.train_examples(), games, frac, base_weights=MIX)`` to give
 games ``frac`` of the draws. A model built with ``"value_head": True`` in its config learns the ``value`` targets
-(``train(..., w_value=...)``). The games are played greedy: no test-time search.
+(``train(..., w_value=...)``); setting ``agent.cfg["search"]`` makes the games benchmark plan with ``laya.search``
+on the deterministic games.
 """
 from typing import Dict, Optional
 
@@ -28,8 +29,8 @@ BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
 # size and latency: 0 keeps what the checkpoint has
-KEEP_TEXT_LAYERS = 15      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
-KEEP_VISION_LAYERS = 8    # keep the first N vision-tower layers (SmolVLM-256M has 12)
+KEEP_TEXT_LAYERS = 0      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
 # training
@@ -95,9 +96,7 @@ def build(ctx):
     if GAME_FRAC:
         import toolkit
 
-        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
-        for g in CONTROL_GAMES:
-            games += toolkit.control_examples(g, 5000)
+        games = toolkit.maze_examples(20000)  # test: all game draws to Maze (~10k in 5 min, as the overfit probe)
         ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
     return agent
 
