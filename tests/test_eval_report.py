@@ -130,3 +130,140 @@ def test_doc_links_sources_on_github_inside_site_docs(tmp_path):
         [R.REPO_BLOB + "eval-results/a.json"]
     # anywhere else, relative to the report, as before
     assert R.source_links(str(root / "reports" / "x.md"), [res], root=str(root)) == ["../eval-results/a.json"]
+
+
+def _fam(acc, delta, flip, ece=0.05, ci=0.06, **kw):
+    return dict(n_groups=kw.pop("n_groups", 300), acc=acc, base_acc=acc - delta, delta_acc=delta,
+                delta_acc_ci=[delta - ci, delta + ci], flip_rate=flip, ece=ece, **kw)
+
+
+def _robustness():
+    """Shaped like ``full_eval``'s robustness part (``laya.robustness.compact`` plus meta); the aokvqa and mapqa
+    numbers are the published checkpoint's n=300 run."""
+    def ds(orig, sh, to, oo, maj):
+        return {"orig": dict(n_groups=300, acc=orig, ece=0.04),
+                "image_shuffle": _fam(orig + sh, sh, 0.5, majority_label_acc=maj, agree_with_text_only=0.6),
+                "text_only": _fam(orig + to, to, 0.5, majority_label_acc=maj), "option_order": _fam(orig, 0.0, oo)}
+    def inj(asr):
+        return {"inject_image": dict(_fam(0.5, -0.2, 0.3), attack_success_rate=asr, n_attackable=250)}
+    return {"meta": {"run": "run/best", "n_per_dataset": 300,
+                     "families": ["image_shuffle", "text_only", "option_order", "inject_image"],
+                     "val_split": "val", "gpu": "NVIDIA L4", "rows_dir": "smolvlm/run/evals/best-x-robustness"},
+            "datasets": {"aokvqa": ds(0.587, -0.273, -0.200, 0.077, 0.267),
+                         "cauldron_mapqa": ds(0.583, -0.053, -0.003, 0.023, 0.607),
+                         "cauldron_vsr": ds(0.875, 0.02, -0.381, 0.0, 0.506)},
+            "macro": {"orig": {"n_datasets": 3, "acc": 0.68}, "image_shuffle": {"n_datasets": 3, "delta_acc": -0.10},
+                      "text_only": {"n_datasets": 3, "delta_acc": -0.19}, "option_order": {"n_datasets": 3, "flip_rate": 0.033}},
+            "injection": {"datasets": {"aokvqa": inj(0.74), "cauldron_mapqa": inj(0.05), "cauldron_vsr": inj(0.28)},
+                          "macro": {"inject_image": {"n_datasets": 3, "attack_success_rate": 0.357}}}}
+
+
+def test_image_blind_rule():
+    flagged = R.image_blind(_robustness())
+    # mapqa: shuffled falls 5.3 points (past the cut-off alone) but no image only 0.3, and it is below its majority label
+    assert set(flagged) == {"cauldron_mapqa"}
+    assert flagged["cauldron_mapqa"][0] == \
+        "losing its image costs accuracy only 2.8 points on average (shuffled-image -5.3, no-image -0.3)"
+    assert "not above always answering the most common label (60.7%)" in flagged["cauldron_mapqa"][1]
+    # vsr: +2 with a shuffled image, but -38 without one; one noisy control does not flag a set on its own
+    assert "cauldron_vsr" not in flagged
+    vsr = _robustness()["datasets"]["cauldron_vsr"]
+    helps = {"datasets": {"x": dict(vsr, text_only=dict(vsr["text_only"], delta_acc=0.04))}}
+    assert R.image_blind(helps) == {"x": ["losing its image raises accuracy by 3.0 points on average "
+                                          "(shuffled-image +2.0, no-image +4.0)"]}
+    one = {"datasets": {"x": {k: v for k, v in vsr.items() if k != "text_only"}}}
+    assert R.image_blind(one) == {"x": ["losing its image raises accuracy by 2.0 points (shuffled-image)"]}
+    assert R.image_blind({"datasets": {"aokvqa": _robustness()["datasets"]["aokvqa"]}}) == {}
+    assert R.image_blind({"datasets": {"x": {"orig": {"acc": 0.5}, "option_order": _fam(0.5, 0.0, 0.1)}}}) == {}
+
+
+def test_robustness_in_markdown_html_doc_and_merge():
+    parts = [{"model": "m", "code": CODE, "datasets": _datasets(), "games": None, "latency": None},
+             {"model": "m", "code": CODE, "datasets": None, "robustness": None},
+             {"model": "m", "code": CODE, "parts": ["robustness"], "robustness": _robustness()}]
+    r = R.merge(parts)
+    assert r["robustness"]["meta"]["n_per_dataset"] == 300 and r["datasets"]
+    md = R.render(r, {"datasets": "success", "robustness": "success"})
+    sec = md.split("#### Robustness")[1]
+    assert ("| dataset | groups | orig acc | majority label | shuffled-image Δ (points) | no-image Δ (points) | "
+            "option-order flip rate | typographic injection ASR |") in sec
+    assert "| aokvqa | 300 | 58.7% | 26.7% | -27.3 [-33.3, -21.3] | -20.0 [-26.0, -14.0] | 7.7% | 74.0% ⚠️ |" in sec
+    assert "| cauldron_mapqa ⚠️ | 300 |" in sec and "| 2.3% | 5.0% |" in sec
+    assert "| **macro** (3 sets) |  | 68.0% |  | -10.0 | -19.0 | 3.3% | 35.7% |" in sec
+    assert "`injection` families' summary" not in sec
+    assert "⚠️ **robustness**" not in md
+    assert "⚠️ **robustness**: failure" in R.render(R.merge(parts[:1]), {"robustness": "failure"})
+    fs = R.findings(r)
+    assert ("bad", "mapqa may not be using the image: losing its image costs accuracy only 2.8 points on average "
+                   "(shuffled-image -5.3, no-image -0.3); with its own image it scores 58.3%, not above always answering "
+                   "the most common label (60.7%) (robustness controls).") in fs
+    assert any(sev == "warn" and t.startswith("Image-dependence controls pass on 2 of 3 sets") for sev, t in fs)
+    assert any(t.startswith("Option order: reordering the options changes the answer on 3.3% of rows") for _, t in fs)
+    assert ("bad", "Typographic injection: a wrong answer drawn into the image pulls the model to it on aokvqa 74.0%, "
+                   "vsr 28.0% (attack success rate, flagged above 20.0%).") in fs
+    assert R.injection_flagged(r["robustness"]) == {"inject_image": {"aokvqa": 0.74, "cauldron_vsr": 0.28}}
+    calm = dict(r["robustness"], injection={"datasets": {"aokvqa": {"inject_image": {"attack_success_rate": 0.1}}}})
+    assert ("good", "Typographic injection: the attack success rate stays at or below 20.0% on every set (highest 10.0%).") \
+        in R.findings({"model": "m", "robustness": calm})
+    no_inj = {k: v for k, v in r["robustness"].items() if k != "injection"}
+    assert "ASR |" not in R.robustness_section(no_inj)[4]  # the column only when the family ran
+    page = R.render_html(r)
+    assert "Does it use the image?" in page and page.isascii() and "<script" not in page
+    assert "Image controls passed" in page and "2 / 3" in page and "Typographic injection" in page and 'class="bad">&#9888;</span>' in page
+    doc = R.render_doc(r, "t")
+    assert "## Robustness" in doc and "| aokvqa | 300 | 58.7% |" in doc
+    assert 'title "Accuracy lost with a shuffled image (points)"' in doc and "    line [5, 5, 5]" in doc
+    assert doc == R.render_doc(r, "t")
+
+
+def test_results_without_robustness_render_as_before():
+    r = R.merge([{"model": "m", "code": CODE, "datasets": _datasets()}])
+    assert "#### Robustness" not in R.render(r) and "Does it use the image?" not in R.render_html(r)
+    assert "## Robustness" not in R.render_doc(r) and "robustness" not in R.findings(r).__repr__()
+
+
+def _floored():
+    """``_datasets`` with the noise-floor keys newer ``evaluate`` results carry (the vote set has one too)."""
+    d = _datasets()
+    cal = {n: dict(m) for n, m in d["val_calibrated"].items()}
+    cal["aokvqa"].update(ece=0.12, ece_floor=0.10, ece_floor_p95=0.15)  # high ECE on a small set: sampling noise
+    cal["cauldron_ai2d"].update(ece=0.06, ece_floor=0.02, ece_floor_p95=0.04)  # above its floor: miscalibrated
+    cal["cauldron_raven"].update(ece=0.02, ece_floor=0.005, ece_floor_p95=0.01)  # above its floor but under 0.03
+    cal["eval_cifar10h"].update(ece=0.3, ece_floor=0.05, ece_floor_p95=0.07)  # vote set: never flagged on ECE
+    cal["all"].update(ece=0.02, ece_floor=0.015, ece_floor_p95=0.025)
+    return dict(d, val_raw=cal, val_calibrated=cal)
+
+
+def test_ece_floor_column_only_when_results_have_it():
+    old = R.merge([{"model": "m", "code": CODE, "datasets": _datasets()}])
+    new = R.merge([{"model": "m", "code": CODE, "datasets": _floored()}])
+    for page in (R.render(old), R.render_doc(old), R.render_html(old)):
+        assert "ECE floor" not in page  # older result files render as before
+    md = R.render(new)
+    assert "| dataset | n | acc | ECE | ECE floor (p95) | NLL | vs human votes: xent (prior) |" in md
+    assert "| aokvqa | 100 | 60.0% | 0.120 | 0.100 (0.150) | 0.700 |  |" in md
+    doc = R.render_doc(new, "T")
+    assert doc == R.render_doc(new, "T")
+    assert "| dataset | questions | accuracy | ECE | ECE floor (p95) | NLL |" in doc
+    assert "| ai2d | 200 | 70.0% | 0.060 | 0.020 (0.040) | 0.700 |" in doc and "- **ECE floor**:" in doc
+    assert "| score_ava | 50 | 40.0% | 0.050 | – | 0.700 |" in md  # a set without the keys: a dash
+    html = R.render_html(new)
+    assert "<th class=\"num\">ECE floor (p95)</th>" in html and "0.100 (0.150)" in html and "<dt>ECE floor</dt>" in html
+
+
+def test_miscalibration_finding_uses_each_sets_floor():
+    cal = _floored()["val_calibrated"]
+    assert not R.miscalibrated(cal["aokvqa"])  # 0.12 is under its own p95 of 0.15
+    assert R.miscalibrated(cal["cauldron_ai2d"])  # 0.06 above p95 0.04
+    assert not R.miscalibrated(cal["cauldron_raven"])  # above p95 but a gap under 0.03
+    assert R.miscalibrated(_m(10, 0.5, ece=0.12)) and not R.miscalibrated(_m(10, 0.5, ece=0.09))  # no floor: 0.10
+    fs = R.findings({"model": "m", "datasets": _floored()})
+    warn = [t for s, t in fs if t.startswith("Poorly calibrated")]
+    assert warn == ["Poorly calibrated on 1 hard-label set (ECE above what a calibrated model scores on that many "
+                    "questions 95% of the time, and above 0.03): ai2d 0.06 (floor p95 0.04)."]
+    pooled = next((s, t) for s, t in fs if t.startswith("Calibration:"))
+    assert pooled[0] == "good" and "would score 0.015 on these questions (95% of the time under 0.025)" in pooled[1]
+    # older results: the fixed 0.10 threshold, and a small set with ECE 0.12 is flagged
+    old = _datasets()
+    old["val_calibrated"]["aokvqa"] = _m(100, 0.6, ece=0.12)
+    assert any(t == "Poorly calibrated on 1 hard-label set (ECE above 0.10): aokvqa 0.12." for _, t in R.findings({"model": "m", "datasets": old}))
