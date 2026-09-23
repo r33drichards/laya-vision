@@ -217,6 +217,12 @@ def test_summary_on_hand_made_predictions():
     lo, hi = tx["acc_ci"]
     assert 0 <= lo <= tx["acc"] <= hi <= 1
     assert "|" in R.format_table(R.summarize(preds, n_boot=0))
+    c = R.compact(R.summarize(preds, n_boot=200))
+    assert set(c["datasets"]["d"]) == {"orig", "option_order", "text"} and "text" in c["macro"]
+    assert "variants" not in c["datasets"]["d"]["text"] and "acc_by_order" not in c["datasets"]["d"]["option_order"]
+    assert c["datasets"]["d"]["option_order"]["acc_spread"] == pytest.approx(1 / 3)
+    assert c["datasets"]["d"]["text"]["delta_acc_ci"] == s["text"]["delta_acc_ci"]
+    json.dumps(c)
 
 
 # ---------------------------------------------------------------------------------------------------------

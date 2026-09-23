@@ -597,6 +597,24 @@ def summarize(preds: Sequence[Dict], n_boot: int = 1000, seed: int = 0, ece_floo
     return res
 
 
+COMPACT_KEYS = ("n_groups", "n_rows", "acc", "acc_ci", "base_acc", "delta_acc", "delta_acc_ci", "flip_rate",
+                "flip_rate_ci", "ece", "chance", "majority_label_acc", "agree_with_text_only", "acc_spread")
+
+
+def compact(summary: Dict) -> Dict:
+    """``summarize``'s report without the per-variant, per-order and per-position breakdowns: per dataset and family
+    (``"orig"`` included) the ``COMPACT_KEYS`` it has, the ``"macro"`` block as is, and the opt-in families' own
+    summaries (``"options"`` / ``"form"`` / ``"injection"``) when present. Small enough for ``full_eval``'s results
+    file."""
+    out = {"datasets": {name: {fam: {k: s[k] for k in COMPACT_KEYS if k in s} for fam, s in rep.items()}
+                        for name, rep in summary["datasets"].items()},
+           "macro": summary.get("macro", {})}
+    for k in ("options", "form", "injection", "n_boot", "seed"):
+        if k in summary:
+            out[k] = summary[k]
+    return out
+
+
 def format_table(summary: Dict) -> str:
     """A markdown table: one line per dataset and family, accuracy with its interval, change from unperturbed,
     flip rate and ECE."""

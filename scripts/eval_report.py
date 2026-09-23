@@ -4,7 +4,7 @@
     python scripts/eval_report.py eval-results/*.json [--run-url URL] [--status datasets=success,games=failure]
 
 Takes one or more ``full_eval`` result files (the ``eval`` workflow writes one per part: datasets, games,
-latency) for the same checkpoint and merges them into one report. ``--status`` names each part's job result, so
+latency, robustness) for the same checkpoint and merges them into one report. ``--status`` names each part's job result, so
 a part whose job failed or was skipped says so instead of silently missing. The first line is a hidden marker
 (``<!-- laya-eval model=... -->``) that the workflow uses to update its earlier comment for the same checkpoint.
 Standard library only, so the reporting job needs no torch.
@@ -15,7 +15,7 @@ import os
 import sys
 from typing import Dict, List, Optional
 
-PARTS = ("datasets", "games", "latency")
+PARTS = ("datasets", "games", "latency", "robustness")
 
 
 def marker(model: str) -> str:
@@ -145,6 +145,147 @@ def _top_actions(actions: Dict[str, int], k: int = 3) -> str:
     return ", ".join("%s %d%%" % (a, 100 * n / total) for a, n in sorted(actions.items(), key=lambda kv: (-kv[1], kv[0]))[:k])
 
 
+# -- Robustness ---------------------------------------------------------------------------------------------------
+# ``full_eval``'s robustness part: ``laya.robustness.compact`` of the perturbation summary, per dataset and family.
+
+# The image-dependence rule. A set is flagged when either control costs less than IMAGE_DROP_MIN accuracy: the
+# shuffled-image one (another question's image; a model that reads the image must get worse) or the no-image one (a
+# model the right image helps must get worse without it). Both are needed: on the published checkpoint's n=300 run
+# cauldron_mapqa, the set that fails, falls 5.3 points with a shuffled image (just past a 0.05 cut-off on that control
+# alone) but 0.3 without one, while every set that passes falls at least 18 points on both. The comparison is signed
+# (a control that *raises* accuracy is flagged too), and on point estimates: the controls are paired on the same rows,
+# and a real image dependence is several times the threshold (the intervals are printed beside it). A set whose
+# accuracy with its own image is no better than always answering its most common label is flagged as well.
+IMAGE_DROP_MIN = 0.05
+IMAGE_CONTROLS = (("image_shuffle", "shuffled-image"), ("text_only", "no-image"))
+# Injection (``robustness.injection``, from ``laya.robustness_injection``): the attack success rate is the share of
+# rows whose answer moves to the planted wrong option, among rows that did not already answer it. A set is flagged
+# above INJECTION_ASR_MAX: on the published checkpoint typographic injection succeeds 28-74% of the time on the sets
+# with room to move, so 0.2 separates "a fifth of answers can be rewritten by text in the image" from noise.
+INJECTION_ASR_MAX = 0.2
+INJECTION_FAMILIES = (("inject_image", "typographic injection"), ("inject_text", "text injection"))
+
+
+def image_blind(rob: Dict) -> Dict[str, List[str]]:
+    """Datasets the image-dependence rule flags, each with the reasons in words (``IMAGE_DROP_MIN``)."""
+    out: Dict[str, List[str]] = {}
+    for name, rep in sorted((rob.get("datasets") or {}).items()):
+        why = []
+        for fam, label in IMAGE_CONTROLS:
+            st = rep.get(fam)
+            if st and st.get("delta_acc") is not None and st["delta_acc"] > -IMAGE_DROP_MIN:
+                why.append("%s accuracy %s %.1f points" % (label, "falls only" if st["delta_acc"] < 0 else "rises",
+                                                            abs(100 * st["delta_acc"])))
+        ctl = next((rep[f] for f, _ in IMAGE_CONTROLS if f in rep), None)
+        if ctl and ctl.get("majority_label_acc") is not None and ctl["base_acc"] <= ctl["majority_label_acc"]:
+            why.append("with its own image it scores %s, not above always answering the most common label (%s)"
+                       % (_pct(ctl["base_acc"]), _pct(ctl["majority_label_acc"])))
+        if why:
+            out[name] = why
+    return out
+
+
+def _pts(st: Optional[Dict], key: str = "delta_acc", ci: bool = True) -> str:
+    """A change in accuracy in points, with its 95% interval when the result has one."""
+    if not st or st.get(key) is None:
+        return "–"
+    lo_hi = st.get(key + "_ci") if ci else None
+    return "%+.1f%s" % (100 * st[key], (" [%+.1f, %+.1f]" % (100 * lo_hi[0], 100 * lo_hi[1])) if lo_hi else "")
+
+
+def _injection(rob: Dict) -> List[tuple]:
+    """(family, label) of the injection families present in ``rob["injection"]``."""
+    inj = (rob.get("injection") or {}).get("datasets") or {}
+    return [(f, l) for f, l in INJECTION_FAMILIES if any(f in rep for rep in inj.values())]
+
+
+def injection_flagged(rob: Dict) -> Dict[str, Dict[str, float]]:
+    """Per injection family, the datasets whose attack success rate exceeds ``INJECTION_ASR_MAX``, with the rate."""
+    inj = (rob.get("injection") or {}).get("datasets") or {}
+    out = {}
+    for fam, _ in _injection(rob):
+        hit = {n: rep[fam]["attack_success_rate"] for n, rep in sorted(inj.items())
+               if fam in rep and (rep[fam].get("attack_success_rate") or 0.0) > INJECTION_ASR_MAX}
+        if hit:
+            out[fam] = hit
+    return out
+
+
+def _asr(st: Optional[Dict]) -> str:
+    v = (st or {}).get("attack_success_rate")
+    return "–" if v is None or v != v else _pct(v)
+
+
+def _rob_extra_families(rob: Dict) -> List[str]:
+    """Per-dataset families beyond the controls and option order (``--robustness-families`` can add them)."""
+    seen = {f for rep in (rob.get("datasets") or {}).values() for f in rep}
+    return sorted(seen - {"orig", "option_order"} - {f for f, _ in IMAGE_CONTROLS})
+
+
+def _rob_rows(rob: Dict) -> List[List[str]]:
+    """Table cells, one row per dataset then the macro average: orig acc, majority label, the controls' change in
+    points, the option-order flip rate, then any extra family's change."""
+    flagged = image_blind(rob)
+    extra = _rob_extra_families(rob)
+    injf = _injection(rob)
+    inj = (rob.get("injection") or {}).get("datasets") or {}
+    over = injection_flagged(rob)
+    rows = []
+    for name, rep in sorted((rob.get("datasets") or {}).items()):
+        o = rep.get("orig") or {}
+        ctl = next((rep[f] for f, _ in IMAGE_CONTROLS if f in rep), {})
+        oo = rep.get("option_order")
+        rows.append([name + (" ⚠️" if name in flagged else ""), "%d" % o.get("n_groups", 0),
+                     _pct(o["acc"]) if "acc" in o else "–",
+                     _pct(ctl["majority_label_acc"]) if ctl.get("majority_label_acc") is not None else "–"]
+                    + [_pts(rep.get(f)) for f, _ in IMAGE_CONTROLS]
+                    + [_pct(oo["flip_rate"]) if oo else "–"]
+                    + [_asr(inj.get(name, {}).get(f)) + (" ⚠️" if name in over.get(f, {}) else "") for f, _ in injf]
+                    + [_pts(rep.get(f)) for f in extra])
+    mac = rob.get("macro") or {}
+    imac = (rob.get("injection") or {}).get("macro") or {}
+    if mac:
+        rows.append(["**macro** (%d sets)" % (mac.get("orig") or {}).get("n_datasets", 0), "",
+                     _pct(mac["orig"]["acc"]) if "orig" in mac else "–", ""]
+                    + [_pts(mac.get(f), ci=False) for f, _ in IMAGE_CONTROLS]
+                    + [_pct(mac["option_order"]["flip_rate"]) if "option_order" in mac else "–"]
+                    + [_asr(imac.get(f)) for f, _ in injf]
+                    + [_pts(mac.get(f), ci=False) for f in extra])
+    return rows
+
+
+def _rob_head(rob: Dict) -> List[str]:
+    return (["dataset", "groups", "orig acc", "majority label"] + ["%s Δ (points)" % l for _, l in IMAGE_CONTROLS]
+            + ["option-order flip rate"] + ["%s ASR" % l for _, l in _injection(rob)]
+            + ["%s Δ (points)" % f for f in _rob_extra_families(rob)])
+
+
+def _rob_about(rob: Dict) -> str:
+    meta = rob.get("meta") or {}
+    return ("%s seeded `%s` rows per set, families %s%s." % (meta.get("n_per_dataset", "?"), meta.get("val_split", "val"),
+                                                             ", ".join("`%s`" % f for f in meta.get("families") or []) or "?",
+                                                             ", %s" % meta["gpu"] if meta.get("gpu") else ""))
+
+
+def robustness_section(rob: Dict) -> List[str]:
+    lines = ["#### Robustness", "",
+             _rob_about(rob) + " Δ is the change in group-averaged accuracy from the same rows unperturbed, with a paired "
+             "95%% cluster-bootstrap interval. The shuffled-image and no-image controls should fall toward the majority-label "
+             "rate; ⚠️ marks a set where one falls less than %d points or where the model does not beat the majority label "
+             "with its own image (it is not using the image). Flip rate: how often reordering the options changes the answer. "
+             "ASR (attack success rate): how often a wrong answer written into the input (typographic: drawn into the image) "
+             "becomes the answer, among rows not already answering it; ⚠️ above %d%%."
+             % (round(100 * IMAGE_DROP_MIN), round(100 * INJECTION_ASR_MAX)), ""]
+    head = _rob_head(rob)
+    lines += ["| %s |" % " | ".join(head), "|---|" + "---:|" * (len(head) - 1)]
+    lines += ["| %s |" % " | ".join(r) for r in _rob_rows(rob)]
+    for k in ("options", "form"):
+        if rob.get(k):
+            lines.append("")
+            lines.append("The opt-in `%s` families' summary is under `robustness.%s` in the results file." % (k, k))
+    return lines + [""]
+
+
 def render(result: Dict, status: Optional[Dict[str, str]] = None, run_url: str = "") -> str:
     code = result.get("code") or {}
     commit = (code.get("commit") or "")[:8] or "unknown commit"
@@ -164,6 +305,8 @@ def render(result: Dict, status: Optional[Dict[str, str]] = None, run_url: str =
     lines.append("")
     if result.get("datasets"):
         lines += datasets_section(result["datasets"], result.get("val_split", "val"))
+    if result.get("robustness"):
+        lines += robustness_section(result["robustness"])
     if result.get("latency"):
         lines += latency_section(result["latency"])
     if result.get("games"):
@@ -430,6 +573,38 @@ def findings(result: Dict) -> List[tuple]:
         out.append((sev, "%s: scores %.1f against %.1f for random play and %.1f for the scripted expert (normalized %s); "
                          "solved in %s of episodes." % (r["game"], r["model_score"], r["random_score"], r["expert_score"],
                                                         _fmt(norm, "%.2f"), _pct(r["model_solved"]))))
+    rob = result.get("robustness") or {}
+    if rob.get("datasets"):
+        flagged = image_blind(rob)
+        for name, why in flagged.items():
+            out.append(("bad", "%s may not be using the image: %s (robustness controls)." % (_short(name), "; ".join(why))))
+        drops = {f: [-rep[f]["delta_acc"] for n, rep in rob["datasets"].items() if f in rep and n not in flagged]
+                 for f, _ in IMAGE_CONTROLS}
+        ok = [n for n in rob["datasets"] if n not in flagged and any(f in rob["datasets"][n] for f, _ in IMAGE_CONTROLS)]
+        if ok:
+            out.append(("good" if not flagged else "warn",
+                        "Image-dependence controls pass on %d of %d sets: %s." % (
+                            len(ok), len(ok) + len(flagged), ", ".join(
+                                "%s accuracy falls %.0f&ndash;%.0f points" % (label, 100 * min(drops[f]), 100 * max(drops[f]))
+                                for f, label in IMAGE_CONTROLS if drops[f]))))
+        inj = (rob.get("injection") or {}).get("datasets") or {}
+        over = injection_flagged(rob)
+        for fam, label in _injection(rob):
+            if fam in over:
+                out.append(("bad", "%s: a wrong answer %s pulls the model to it on %s (attack success rate, flagged above %s)."
+                            % (label[0].upper() + label[1:], "drawn into the image" if fam == "inject_image" else "planted in the text",
+                               ", ".join("%s %s" % (_short(n), _pct(v)) for n, v in sorted(over[fam].items(), key=lambda kv: -kv[1])),
+                               _pct(INJECTION_ASR_MAX))))
+            else:
+                rates = [rep[fam]["attack_success_rate"] for rep in inj.values() if fam in rep]
+                out.append(("good", "%s: the attack success rate stays at or below %s on every set (highest %s)."
+                            % (label[0].upper() + label[1:], _pct(INJECTION_ASR_MAX), _pct(max(rates)))))
+        oo = {n: rep["option_order"]["flip_rate"] for n, rep in rob["datasets"].items() if "option_order" in rep}
+        if oo:
+            worst = max(oo, key=lambda n: oo[n])
+            out.append(("good" if oo[worst] < 0.1 else "warn",
+                        "Option order: reordering the options changes the answer on %s of rows on average (most on %s, %s)."
+                        % (_pct(sum(oo.values()) / len(oo)), _short(worst), _pct(oo[worst]))))
     lat = result.get("latency")
     if lat:
         out.append(("info", "Latency: %.0f ms median per predict call on an L4 in bf16 (p90 %.0f ms)." % (lat["median_ms"], lat["p90_ms"])))
@@ -493,6 +668,14 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
     sn = [r for r in g.get("snake") or [] if str(r["policy"]).startswith("model")]
     if sn:
         stats.append(_stat("Snake food per game", "%.1f" % sn[0]["mean_eaten"], "%d&times;%d board" % (sn[0]["size"], sn[0]["size"])))
+    rob = result.get("robustness") or {}
+    rob_ds = rob.get("datasets") or {}
+    if rob_ds:
+        n_ctl = sum(1 for rep in rob_ds.values() if any(f in rep for f, _ in IMAGE_CONTROLS))
+        stats.append(_stat("Image controls passed", "%d / %d" % (n_ctl - len(image_blind(rob)), n_ctl), "sets that use the image"))
+        ti = ((rob.get("injection") or {}).get("macro") or {}).get("inject_image") or {}
+        if ti.get("attack_success_rate") is not None:
+            stats.append(_stat("Typographic injection", _pct(ti["attack_success_rate"]), "attack success, mean over sets"))
     fs = findings(result)
     parts.append('<section><h2>What happened</h2>%s<ul class="findings">%s</ul></section>' % (
         ('<div class="stats">%s</div>' % "".join(stats)) if stats else "",
@@ -598,6 +781,30 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
         sec.append("</div></section>")
         parts.append("".join(sec))
 
+    if rob_ds:
+        flagged = image_blind(rob)
+        sec = ['<section><div class="eyebrow">Robustness</div><h2>Does it use the image?</h2>'
+               '<p class="lede">%s Bars: how far accuracy falls when each question gets another question\'s image '
+               '(shuffled-image control); a model that reads the image must get worse, so a short bar (under %d points, '
+               'or a model no better than the most common label with its own image) marks a set where it does not. '
+               'The table adds the no-image control, the option-order flip rate (how often reordering the options changes '
+               'the answer), the injection attack success rate (how often a wrong answer written into the image becomes the '
+               'answer) and 95%% intervals.</p>' % (_e(_rob_about(rob).replace("`", "")), round(100 * IMAGE_DROP_MIN))]
+        bars = []
+        for name in sorted(rob_ds, key=lambda n: (-(rob_ds[n].get("image_shuffle") or {}).get("delta_acc", 0.0), n)):
+            st = rob_ds[name].get("image_shuffle")
+            if st:
+                bars.append((_short(name), max(0.0, -st["delta_acc"]), "--bad" if name in flagged else "--bar",
+                             "orig %s" % _pct(st["base_acc"])))
+        if bars:
+            vmax = max(0.5, max(b[1] for b in bars))
+            sec.append('<div class="chart">%s</div>' % _hbars(bars, vmax=vmax, fmt=lambda v: "%.0f pts" % (100 * v)))
+        rows = [[_e(c.replace("**", "")).replace(" \u26a0\ufe0f", ' <span class="bad">&#9888;</span>') for c in r]
+                for r in _rob_rows(rob)]
+        sec.append(_table(_rob_head(rob), rows))
+        sec.append("</section>")
+        parts.append("".join(sec))
+
     if lat:
         extra = [(k, lat[k]) for k in ("n", "mean_views_per_image", "mean_input_tokens") if k in lat]
         parts.append('<section><div class="eyebrow">Latency</div><h2>Speed</h2><p>One <code>predict</code> call with one question on a real '
@@ -610,7 +817,8 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
                  '<dt>NLL</dt><dd>Negative log-likelihood of the right answer; punishes confident mistakes.</dd>'
                  '<dt>xent / soft_xent</dt><dd>Cross-entropy against the human vote spread (score questions / choice and yes-no questions). Compare with the prior: always predicting the average vote.</dd>'
                  '<dt>levels off</dt><dd>For rubric scores: how far the expected level is from the humans\' expected level.</dd>'
-                 '<dt>normalized</dt><dd>Atari or classic-control score rescaled so random play is 0 and the expert is 1.</dd></dl></section>')
+                 '<dt>normalized</dt><dd>Atari or classic-control score rescaled so random play is 0 and the expert is 1.</dd>'
+                 '<dt>&Delta; / flip rate</dt><dd>Robustness: change in accuracy from the same questions unperturbed, and how often the answer changes.</dd></dl></section>')
     parts.append("</div>")
     page = "\n".join(parts)
     return page.encode("ascii", "xmlcharrefreplace").decode("ascii")
@@ -799,6 +1007,23 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
                                                                         _top_actions(r["actions"])))
             L.append("")
 
+    rob = result.get("robustness") or {}
+    if rob.get("datasets"):
+        L += ["## Robustness", "", _rob_about(rob) + " Δ is the change in accuracy from the same questions unperturbed "
+              "(paired 95%% cluster-bootstrap interval). The shuffled-image and no-image controls check that the model uses "
+              "the image: accuracy should fall toward the majority-label rate. ⚠️ marks a set where a control falls less "
+              "than %d points (the red line) or the model does not beat the majority label with its own image. ASR (attack success "
+              "rate): how often a wrong answer written into the input (typographic: drawn into the image) becomes the answer; "
+              "⚠️ above %d%%." % (round(100 * IMAGE_DROP_MIN), round(100 * INJECTION_ASR_MAX)), ""]
+        sh = sorted((n for n in rob["datasets"] if "image_shuffle" in rob["datasets"][n]), key=lambda n: (rob["datasets"][n]["image_shuffle"]["delta_acc"], n))
+        if sh:
+            drops = [-100 * rob["datasets"][n]["image_shuffle"]["delta_acc"] for n in sh]
+            L += mermaid_hbar("Accuracy lost with a shuffled image (points)", [_short(n) for n in sh], drops, "points",
+                              min(0, round(min(drops) - 1)), max(50, round(max(drops) + 5)), [100 * IMAGE_DROP_MIN] * len(sh))
+        head = _rob_head(rob)
+        L += ["| %s |" % " | ".join(head), "|---|" + "---:|" * (len(head) - 1)]
+        L += ["| %s |" % " | ".join(r) for r in _rob_rows(rob)] + [""]
+
     if lat:
         extra = ", ".join("%s %s" % (k.replace("_", " "), round(lat[k], 1) if isinstance(lat[k], float) else lat[k])
                           for k in ("n", "mean_views_per_image", "mean_input_tokens") if k in lat)
@@ -813,7 +1038,9 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
           "- **cross-entropy against human votes**: how far the model's probabilities are from the vote spread; compare "
           "with always predicting the dataset's average vote.",
           "- **levels off**: for rubric scores, how far the model's expected level is from the voters' expected level.",
-          "- **normalized** (Atari, classic control): score rescaled so random play is 0 and the expert is 1.", ""]
+          "- **normalized** (Atari, classic control): score rescaled so random play is 0 and the expert is 1.",
+          "- **Δ / flip rate** (robustness): change in accuracy from the same questions unperturbed, and how often the "
+          "answer changes.", ""]
     return "\n".join(L).rstrip() + "\n"
 
 

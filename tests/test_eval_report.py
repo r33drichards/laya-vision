@@ -130,3 +130,84 @@ def test_doc_links_sources_on_github_inside_site_docs(tmp_path):
         [R.REPO_BLOB + "eval-results/a.json"]
     # anywhere else, relative to the report, as before
     assert R.source_links(str(root / "reports" / "x.md"), [res], root=str(root)) == ["../eval-results/a.json"]
+
+
+def _fam(acc, delta, flip, ece=0.05, ci=0.06, **kw):
+    return dict(n_groups=kw.pop("n_groups", 300), acc=acc, base_acc=acc - delta, delta_acc=delta,
+                delta_acc_ci=[delta - ci, delta + ci], flip_rate=flip, ece=ece, **kw)
+
+
+def _robustness():
+    """Shaped like ``full_eval``'s robustness part (``laya.robustness.compact`` plus meta); the aokvqa and mapqa
+    numbers are the published checkpoint's n=300 run."""
+    def ds(orig, sh, to, oo, maj):
+        return {"orig": dict(n_groups=300, acc=orig, ece=0.04),
+                "image_shuffle": _fam(orig + sh, sh, 0.5, majority_label_acc=maj, agree_with_text_only=0.6),
+                "text_only": _fam(orig + to, to, 0.5, majority_label_acc=maj), "option_order": _fam(orig, 0.0, oo)}
+    def inj(asr):
+        return {"inject_image": dict(_fam(0.5, -0.2, 0.3), attack_success_rate=asr, n_attackable=250)}
+    return {"meta": {"run": "run/best", "n_per_dataset": 300,
+                     "families": ["image_shuffle", "text_only", "option_order", "inject_image"],
+                     "val_split": "val", "gpu": "NVIDIA L4", "rows_dir": "smolvlm/run/evals/best-x-robustness"},
+            "datasets": {"aokvqa": ds(0.587, -0.273, -0.200, 0.077, 0.267),
+                         "cauldron_mapqa": ds(0.583, -0.053, -0.003, 0.023, 0.607),
+                         "cauldron_vsr": ds(0.875, 0.02, -0.381, 0.0, 0.506)},
+            "macro": {"orig": {"n_datasets": 3, "acc": 0.68}, "image_shuffle": {"n_datasets": 3, "delta_acc": -0.10},
+                      "text_only": {"n_datasets": 3, "delta_acc": -0.19}, "option_order": {"n_datasets": 3, "flip_rate": 0.033}},
+            "injection": {"datasets": {"aokvqa": inj(0.74), "cauldron_mapqa": inj(0.05), "cauldron_vsr": inj(0.28)},
+                          "macro": {"inject_image": {"n_datasets": 3, "attack_success_rate": 0.357}}}}
+
+
+def test_image_blind_rule():
+    flagged = R.image_blind(_robustness())
+    # mapqa: shuffled falls 5.3 points (past the cut-off) but no image only 0.3, and it is below its majority label
+    assert set(flagged) == {"cauldron_mapqa", "cauldron_vsr"}
+    assert flagged["cauldron_mapqa"][0] == "no-image accuracy falls only 0.3 points"
+    assert "not above always answering the most common label (60.7%)" in flagged["cauldron_mapqa"][1]
+    assert flagged["cauldron_vsr"] == ["shuffled-image accuracy rises 2.0 points"]  # a control that helps is flagged too
+    assert R.image_blind({"datasets": {"aokvqa": _robustness()["datasets"]["aokvqa"]}}) == {}
+    assert R.image_blind({"datasets": {"x": {"orig": {"acc": 0.5}, "option_order": _fam(0.5, 0.0, 0.1)}}}) == {}
+
+
+def test_robustness_in_markdown_html_doc_and_merge():
+    parts = [{"model": "m", "code": CODE, "datasets": _datasets(), "games": None, "latency": None},
+             {"model": "m", "code": CODE, "datasets": None, "robustness": None},
+             {"model": "m", "code": CODE, "parts": ["robustness"], "robustness": _robustness()}]
+    r = R.merge(parts)
+    assert r["robustness"]["meta"]["n_per_dataset"] == 300 and r["datasets"]
+    md = R.render(r, {"datasets": "success", "robustness": "success"})
+    sec = md.split("#### Robustness")[1]
+    assert ("| dataset | groups | orig acc | majority label | shuffled-image Δ (points) | no-image Δ (points) | "
+            "option-order flip rate | typographic injection ASR |") in sec
+    assert "| aokvqa | 300 | 58.7% | 26.7% | -27.3 [-33.3, -21.3] | -20.0 [-26.0, -14.0] | 7.7% | 74.0% ⚠️ |" in sec
+    assert "| cauldron_mapqa ⚠️ | 300 |" in sec and "| 2.3% | 5.0% |" in sec
+    assert "| **macro** (3 sets) |  | 68.0% |  | -10.0 | -19.0 | 3.3% | 35.7% |" in sec
+    assert "`injection` families' summary" not in sec
+    assert "⚠️ **robustness**" not in md
+    assert "⚠️ **robustness**: failure" in R.render(R.merge(parts[:1]), {"robustness": "failure"})
+    fs = R.findings(r)
+    assert ("bad", "mapqa may not be using the image: no-image accuracy falls only 0.3 points; with its own image it "
+                   "scores 58.3%, not above always answering the most common label (60.7%) (robustness controls).") in fs
+    assert any(sev == "warn" and t.startswith("Image-dependence controls pass on 1 of 3 sets") for sev, t in fs)
+    assert any(t.startswith("Option order: reordering the options changes the answer on 3.3% of rows") for _, t in fs)
+    assert ("bad", "Typographic injection: a wrong answer drawn into the image pulls the model to it on aokvqa 74.0%, "
+                   "vsr 28.0% (attack success rate, flagged above 20.0%).") in fs
+    assert R.injection_flagged(r["robustness"]) == {"inject_image": {"aokvqa": 0.74, "cauldron_vsr": 0.28}}
+    calm = dict(r["robustness"], injection={"datasets": {"aokvqa": {"inject_image": {"attack_success_rate": 0.1}}}})
+    assert ("good", "Typographic injection: the attack success rate stays at or below 20.0% on every set (highest 10.0%).") \
+        in R.findings({"model": "m", "robustness": calm})
+    no_inj = {k: v for k, v in r["robustness"].items() if k != "injection"}
+    assert "ASR |" not in R.robustness_section(no_inj)[4]  # the column only when the family ran
+    page = R.render_html(r)
+    assert "Does it use the image?" in page and page.isascii() and "<script" not in page
+    assert "Image controls passed" in page and "1 / 3" in page and "Typographic injection" in page and 'class="bad">&#9888;</span>' in page
+    doc = R.render_doc(r, "t")
+    assert "## Robustness" in doc and "| aokvqa | 300 | 58.7% |" in doc
+    assert 'title "Accuracy lost with a shuffled image (points)"' in doc and "    line [5, 5, 5]" in doc
+    assert doc == R.render_doc(r, "t")
+
+
+def test_results_without_robustness_render_as_before():
+    r = R.merge([{"model": "m", "code": CODE, "datasets": _datasets()}])
+    assert "#### Robustness" not in R.render(r) and "Does it use the image?" not in R.render_html(r)
+    assert "## Robustness" not in R.render_doc(r) and "robustness" not in R.findings(r).__repr__()
