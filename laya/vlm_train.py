@@ -133,6 +133,11 @@ def make_item(
     it["label"] = max(range(k), key=lambda j: it["target"][j])
     it["qtype"] = QTYPES[ex["q"]["t"]]
     it["order"] = order
+    if ex.get("value") is not None:  # optional value-head target in [0, 1] (order-free: one per state)
+        v = float(ex["value"])
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("example value must be in [0, 1], got %r" % ex["value"])
+        it["value"] = v
     return it
 
 
@@ -180,6 +185,19 @@ def vlm_loss(logits, target, qtype, mask, sigma: float = 0.3, group_size: int = 
         eu = p_act * (c_ok * y + c_bad * (1 - y)) + (1 - p_act) * c_esc
         loss = loss - eu.mean()
     return loss, r.mean()
+
+
+def value_loss(value_logits: Optional[torch.Tensor], value: Optional[torch.Tensor], w_value: float = 1.0):
+    """``w_value * BCE(value_logits, value)`` over the rows whose ``value`` is not NaN (``collate_vlm`` marks rows
+    without a target that way); a plain ``0.0`` when the model has no value head, the batch no targets, or
+    ``w_value`` is 0, so nothing about such a step changes."""
+    if value_logits is None or value is None or not w_value:
+        return 0.0
+    value = value.to(value_logits.device).float()
+    has = ~torch.isnan(value)
+    if not bool(has.any()):
+        return 0.0
+    return w_value * torch.nn.functional.binary_cross_entropy_with_logits(value_logits.float()[has], value[has])
 
 
 def _to(b: Dict, device, dtype) -> Dict:
@@ -312,6 +330,7 @@ def train(
     save_state_every_min: float = 0.0,
     mix_weights: Optional[Dict[str, float]] = None,
     mix_alpha: float = 0.0,
+    w_value: float = 1.0,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -323,6 +342,11 @@ def train(
     ``sigma_end`` over training when given) control the exploration noise, ``w_sph`` the spherical score, and
     ``w_ce_schedule="anneal"`` holds the cross-entropy weight at ``w_ce`` for the first 30% of progress then
     decays it linearly to 0 by 80%. ``train_act`` trains the act/escalate head on its cost matrix.
+
+    Value head: when the model has one (config ``"value_head": true``) and a batch carries examples with a
+    ``"value"`` (a float in [0, 1], e.g. whether the episode this game state came from was won), the loss adds
+    ``w_value * BCE(value_logit, value)`` averaged over those examples only (``value_loss``); examples without one
+    contribute nothing to it, and a batch with none (or a model without the head) trains exactly as before.
 
     Sampling mix: dataset ``k`` is drawn with probability proportional to
     ``mix_weights.get(k, 1.0) * n_k ** mix_alpha`` (``ItemStream``); the defaults draw every dataset equally.
@@ -432,6 +456,7 @@ def train(
                                 act_logits=act if train_act else None)
         if not train_act:
             loss = loss + 0.0 * act.float().sum()
+        loss = loss + value_loss(model.last_value, b.get("value"), w_value)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_([p for g in groups for p in g["params"]], 1.0)
@@ -477,7 +502,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     ``"images"`` (a list of paths) replaces ``"image"`` for a multi-image record, e.g. NLVR2's pairs.
     ``label`` indexes the rendered options (choice: criteria order; score: level; noul: 0=false, 1=true).
     An optional ``"target"`` (a probability per option, same order) replaces the one-hot target, e.g. an expert
-    policy's action distribution; ``label`` is still used for accuracy.
+    policy's action distribution; ``label`` is still used for accuracy. An optional ``"value"`` (in [0, 1]) is the
+    value-head target for the state (``train``).
     """
     qdef = rec["question"]
     q = VLMAgent._to_internal(qdef)
@@ -498,7 +524,10 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     soft = rec.get("target")
     if soft is not None and len(soft) == k and min(soft) >= 0 and sum(soft) > 0:
         target = [float(p) / sum(soft) for p in soft]
-    return {"state": state or "", "q": q, "target": target, "label": label, "dataset": dataset, "id": rec.get("id")}
+    ex = {"state": state or "", "q": q, "target": target, "label": label, "dataset": dataset, "id": rec.get("id")}
+    if rec.get("value") is not None:  # optional value-head target in [0, 1]
+        ex["value"] = float(rec["value"])
+    return ex
 
 
 def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] = None) -> List[Dict]:
@@ -558,7 +587,8 @@ def collect_logits(
     tokenizing, e.g. ``laya.robustness.realize`` to perturb the images without storing them.
     ``"logits"`` is the mean over orders (as in ``VLMAgent.predict(n_permutations=...)``); ``"logits_per_order"``
     keeps each order's logits (label order), aligned with ``orders(k)``, and ``"input_ids_sha256"`` the hash of
-    each order's input ids (``laya.vlm.input_ids_sha256``), for row-level evidence files.
+    each order's input ids (``laya.vlm.input_ids_sha256``), for row-level evidence files. A model with a value
+    head adds ``"value_logit"`` (mean over orders) and, for examples that carry one, ``"value_target"``.
     """
     device = torch.device(device or next(model.parameters()).device)
     model.eval()
@@ -575,16 +605,20 @@ def collect_logits(
     )
     per_ex: Dict[int, List[torch.Tensor]] = {}
     hashes: Dict[int, List[str]] = {}
+    per_value: Dict[int, List[float]] = {}
     for batch in loader:
         b = _to(batch, device, model.encoder.dtype)
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
             logits, _ = _forward(model, b)
         logits = logits.float().cpu()
+        vlog = model.last_value.float().cpu() if model.last_value is not None else None
         for r, (i, order) in enumerate(zip(batch["index"], batch["order"])):
             k = len(order)
             z = torch.empty(k)
             z[torch.tensor(order)] = logits[r, :k]  # marker j scored option order[j]
             per_ex.setdefault(i, []).append(z)
+            if vlog is not None:
+                per_value.setdefault(i, []).append(float(vlog[r]))
             hashes.setdefault(i, []).append(batch["ids_sha256"][r])
     out = []
     for i, ex in enumerate(examples):
@@ -593,6 +627,10 @@ def collect_logits(
                     "target": torch.tensor(ex["target"]),
                     "qtype": QTYPES[ex["q"]["t"]], "dataset": ex.get("dataset", "_"),
                     "label": ex.get("label", int(np.argmax(ex["target"])))})
+        if i in per_value:  # value head: mean logit over orders, and the example's target if it has one
+            out[-1]["value_logit"] = float(np.mean(per_value[i]))
+            if ex.get("value") is not None:
+                out[-1]["value_target"] = float(ex["value"])
     return out
 
 

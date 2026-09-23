@@ -435,6 +435,10 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
     }
     if target is not None:
         res["target"] = target
+    if any(it.get("value") is not None for it in items):
+        # value-head targets in [0, 1]; NaN marks the rows that have none (the loss skips them)
+        res["value"] = torch.tensor([float(it["value"]) if it.get("value") is not None else float("nan")
+                                     for it in items], dtype=torch.float32)
     n_img = max(it.get("n_images", 0) for it in items)
     if with_pixels and n_img > 0 and any(it.get("raw_images") is not None for it in items):
         ref = next(it["raw_images"] for it in items if it.get("raw_images") is not None)
@@ -509,6 +513,7 @@ class VLMDecisionModel(nn.Module):
         option_attention: str = "causal",
         prep: Optional[ImagePrep] = None,
         readout: str = "terminator",
+        value_head: bool = False,
     ):
         super().__init__()
         option_attention = normalize_option_attention(option_attention)
@@ -534,6 +539,12 @@ class VLMDecisionModel(nn.Module):
         self.scorer = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1))
         self.act_head = nn.Sequential(nn.Linear(d + 4, 256), nn.GELU(), nn.Linear(256, n_act))
         self.register_buffer("temperature", torch.ones(3))
+        # Optional state-value head (config ``"value_head": true``): one logit per row, sigmoid = P(success / good
+        # outcome from this state). It reads exactly what the act head reads. Absent (None, no state-dict keys)
+        # by default, so checkpoints without it load and run bit-identically. ``forward`` keeps returning
+        # ``(logits, act)``; the value logits of the last readout are left in ``last_value`` ([B] float, or None).
+        self.value_head = nn.Sequential(nn.Linear(d + 4, 256), nn.GELU(), nn.Linear(256, 1)) if value_head else None
+        self.last_value: Optional[torch.Tensor] = None
 
     @property
     def backbone(self) -> nn.Module:
@@ -672,7 +683,9 @@ class VLMDecisionModel(nn.Module):
         else:
             last = (attention_mask.sum(-1) - 1).clamp(min=0)
             pooled = h[torch.arange(h.size(0), device=h.device), last].float()
-        act_logits = self.act_head(torch.cat([pooled, feats], -1))
+        z = torch.cat([pooled, feats], -1)
+        act_logits = self.act_head(z)
+        self.last_value = self.value_head(z).squeeze(-1).float() if self.value_head is not None else None
         return logits, act_logits
 
 
@@ -730,12 +743,27 @@ def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.
         option_attention=OPTION_ATTENTION_ALIASES.get(cfg.get("option_attention"), cfg.get("option_attention", "causal")),
         prep=prep,
         readout=cfg.get("readout") or readout_for(backbone.config),
+        value_head=bool(cfg.get("value_head", False)),
     )
 
 
 # ---------------------------------------------------------------------------------------------------------
 # Runtime
 # ---------------------------------------------------------------------------------------------------------
+
+
+def _load_weights(model: VLMDecisionModel, sd: Dict[str, torch.Tensor], head_only: bool) -> None:
+    """Load a checkpoint's state dict: strict, except that a head-only file lacks the backbone and that a value head
+    the checkpoint never had (``"value_head": true`` passed as an override to fine-tune one onto it) starts freshly
+    initialised. A checkpoint that has value-head weights refuses to load into a model without the head."""
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    fresh_value = model.value_head is not None and not any(k.startswith("value_head.") for k in sd)
+    bad = [k for k in missing if not (head_only and k.startswith("encoder."))
+           and not (fresh_value and k.startswith("value_head."))] + list(unexpected)
+    if bad:
+        raise ValueError("checkpoint mismatch (missing or unexpected keys): %s" % bad[:5])
+    if fresh_value:
+        warnings.warn("this checkpoint has no value head; 'value_head' starts untrained", stacklevel=3)
 
 
 def _resolve_device(device: Optional[str]) -> torch.device:
@@ -898,15 +926,12 @@ class VLMAgent:
         if os.path.exists(full):
             self.model = build_vlm_model(self.cfg, os.path.join(model_dir, "backbone"), dtype=self._torch_dtype(),
                                          prep=self.prep)
-            self.model.load_state_dict(load_file(full), strict=True)
+            _load_weights(self.model, load_file(full), head_only=False)
         else:
             # head-only checkpoint: backbone comes from the pretrained id in the config
             self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep, token=token)
             self.cfg["backbone_revision"] = self._backbone_commit()
-            missing, unexpected = self.model.load_state_dict(load_file(os.path.join(model_dir, HEAD_WEIGHTS_NAME)), strict=False)
-            bad = [k for k in missing if not k.startswith("encoder.")] + list(unexpected)
-            if bad:
-                raise ValueError("head checkpoint mismatch: %s" % bad[:5])
+            _load_weights(self.model, load_file(os.path.join(model_dir, HEAD_WEIGHTS_NAME)), head_only=True)
 
     def save(self, path: str, include_backbone: bool = True):
         """Write ``vlm_agent_config.json``, processor, and weights (full, or head-only for frozen backbones)."""
@@ -1029,7 +1054,7 @@ class VLMAgent:
                 cached = self.model.encode_prefix(torch.tensor([rows[0]["ids"][:n]], device=self.device), img_feats)
                 step = SUFFIX_BATCH_FACTOR * batch_size
 
-        row_logits = []
+        row_logits, row_values = [], []
         n_tokens = 0
         for s in range(0, len(rows), step):
             chunk = rows[s : s + step]
@@ -1043,8 +1068,11 @@ class VLMAgent:
                 logits, act = self.model(*args, image_hidden_states=feats, option_span=b["option_span"].to(self.device))
             act = torch.softmax(act.float(), -1).cpu().numpy()
             logits = logits.float().cpu().numpy()
+            value = torch.sigmoid(self.model.last_value).cpu().numpy() if self.model.last_value is not None else None
             for r in range(len(chunk)):
                 row_logits.append((logits[r], act[r]))
+                if value is not None:
+                    row_values.append(float(value[r]))
 
         answers, temps_used = {}, {}
         for qid in ids:
@@ -1094,13 +1122,19 @@ class VLMAgent:
                 }
             if truncated[qid]:
                 answers[qid]["truncated"] = truncated[qid]
+            if row_values:  # the value head read under this question's rows
+                answers[qid]["value"] = round(float(np.mean([v for it, v in zip(rows, row_values)
+                                                             if it["qid"] == qid])), 4)
 
-        return {
+        out = {
             "model": "laya-vlm",
             "answers": answers,
             "usage": {"input_tokens": n_tokens, "output_tokens": 0, "images": len(images)},
             "provenance": self.provenance(rows, n_permutations, temps_used),
         }
+        if row_values:  # value head: P(success from this state), averaged over every scored row
+            out["value"] = round(float(np.mean(row_values)), 4)
+        return out
 
     system_one = predict
 
