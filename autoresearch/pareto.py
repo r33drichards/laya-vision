@@ -6,7 +6,7 @@
 | `quality`   | higher | 0.005 (abs)   | macro dataset accuracy minus ECE on single-answer questions            |
 | `games`     | higher | 0.03 (abs)    | mean normalized game score, 0 = random play, 1 = the scripted expert   |
 | `params_m`  | lower  | 1% (rel)      | parameters of the saved model, millions                                |
-| `latency_x` | lower  | 3% (rel)      | median predict time / the base checkpoint's, timed in the same L4 run  |
+| `latency_x` | lower  | 5% (rel)      | median predict time / the base checkpoint's, timed in the same L4 run  |
 
 Upstream autoresearch keeps an experiment when its single metric (val_bpb) improves. Here an experiment is kept when
 it extends the frontier: no already-kept result is at least as good on every objective within the noise margins.
@@ -33,11 +33,13 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # every game identical), but that baseline plays degenerately (0 on the mazes, Acrobot, MountainCar), so retraining
 # noise did not move it; 0.03 is one game moving 0.3 in the 10-game mean. Retraining a stronger recipe (15 text
 # layers + game data) moved games by 0.013 (0.148 / 0.135: DoomBasic 0.78 / 0.66, every other game within 0.02).
+# latency_x was 3% from the full model timed twice; the 15-layer architecture timed three times gave 0.768 / 0.749 /
+# 0.733 (4.6% spread, host noise alone: 9a06403 changed only the LR and was kept on latency), so the margin is 5%.
 OBJECTIVES = (
     ("quality", "max", 0.005, False),
     ("games", "max", 0.03, False),
     ("params_m", "min", 0.01, True),
-    ("latency_x", "min", 0.03, True),
+    ("latency_x", "min", 0.05, True),
 )
 NAMES = tuple(o[0] for o in OBJECTIVES)
 
