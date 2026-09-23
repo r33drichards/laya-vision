@@ -1,4 +1,4 @@
-"""``laya.telemetry``: a no-op without an endpoint, and OTLP/HTTP traces, metrics and stdout logs with one.
+"""``laya.telemetry``: on by default, a no-op when turned off, and OTLP/HTTP traces, metrics and stdout logs.
 
 The exporting test runs in a subprocess (the OpenTelemetry providers are process-global) against a local HTTP
 server that stands in for the collector and records the paths it is posted to.
@@ -17,9 +17,21 @@ from laya import telemetry
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def test_off_without_endpoint(monkeypatch, capsys):
-    if telemetry._state["on"] is None:
-        monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+def test_endpoint_defaults_and_opt_outs(monkeypatch):
+    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    assert telemetry.endpoint() == telemetry.DEFAULT_ENDPOINT
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/")
+    assert telemetry.endpoint() == "http://collector:4318"
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    assert telemetry.endpoint() is None
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
+    assert telemetry.endpoint() is None
+
+
+def test_off_when_disabled(capsys):
+    # tests/conftest.py sets OTEL_SDK_DISABLED=true, so nothing here is sent anywhere
     if telemetry.enabled():
         pytest.skip("telemetry is configured in this process")
 
@@ -80,6 +92,7 @@ def test_exports_traces_metrics_and_logs():
     try:
         env = dict(os.environ, OTEL_EXPORTER_OTLP_ENDPOINT="http://127.0.0.1:%d" % server.server_port,
                    NO_PROXY="127.0.0.1", no_proxy="127.0.0.1", PYTHONPATH=ROOT)
+        env.pop("OTEL_SDK_DISABLED", None)
         out = subprocess.run([sys.executable, "-c", CHILD], env=env, capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out.stderr
         assert "a line for the logs" in out.stdout  # still on the real stdout

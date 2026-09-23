@@ -95,10 +95,10 @@ The same suite runs from GitHub Actions with the `eval` workflow (`.github/workf
 
 ### Telemetry
 
-The training, eval, latency and game jobs send traces, metrics and their stdout logs over OTLP/HTTP to the collector named in the `laya-otel` Modal secret (`OTEL_EXPORTER_OTLP_ENDPOINT`). The collector is a `grafana/otel-lgtm` stack, so the data shows up in Grafana under Tempo, Prometheus and Loki.
+The training, eval, latency and game jobs send traces, metrics and their stdout logs over OTLP/HTTP to the project's collector by default (`DEFAULT_ENDPOINT` in `laya/telemetry.py`). The collector is a `grafana/otel-lgtm` stack, so the data shows up in Grafana under Tempo, Prometheus and Loki.
 - Each job call is one trace, named after the function, with the run, backbone or game as attributes.
 - Training reports `laya_train_*` gauges: loss, reward, learning rates, throughput and data wait. Evals report `laya_eval_*` (acc, ECE, NLL, ... by `dataset` and `split`), and final scores are `laya_final_*`. A job's numeric results, such as `median_ms` or `kill_rate`, become `laya_result_*`.
-- Without the secret, run with `LAYA_OTEL_SECRET= modal run ...` and telemetry stays off. Locally, `pip install -e .[otel]` and set `OTEL_EXPORTER_OTLP_ENDPOINT` (see `laya/telemetry.py`).
+- `OTEL_EXPORTER_OTLP_ENDPOINT` points it at another collector, and `OTEL_SDK_DISABLED=true` turns it off. Locally it is on once the packages are installed (`pip install -e .[otel]`). Pytest turns it off in `tests/conftest.py`.
 
 ## Playing games
 

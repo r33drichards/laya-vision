@@ -1,9 +1,10 @@
 """OpenTelemetry for training, eval and Modal jobs: traces, metrics and the job's stdout as logs, over OTLP/HTTP.
 
-Everything here is a no-op unless ``OTEL_EXPORTER_OTLP_ENDPOINT`` is set (e.g. ``https://<collector>``; the
-exporters append ``/v1/traces``, ``/v1/metrics`` and ``/v1/logs``) and the ``opentelemetry-sdk`` and
-``opentelemetry-exporter-otlp-proto-http`` packages are installed (``pip install laya[otel]``). The Modal
-images install them and get the endpoint from the ``laya-otel`` Modal secret (see ``modal_app.py``).
+On by default whenever the ``opentelemetry-sdk`` and ``opentelemetry-exporter-otlp-proto-http`` packages are
+installed (``pip install laya[otel]``; the Modal images have them): data goes to ``DEFAULT_ENDPOINT``, the
+project's otel-lgtm collector, or to ``OTEL_EXPORTER_OTLP_ENDPOINT`` when that is set (``/v1/traces``,
+``/v1/metrics`` and ``/v1/logs`` are appended). ``OTEL_SDK_DISABLED=true`` or an empty
+``OTEL_EXPORTER_OTLP_ENDPOINT`` turns it off; ``tests/conftest.py`` does that for pytest.
 
     @telemetry.traced_job(attrs=("run_name",))       # a span per call, stdout -> logs, numeric results -> metrics
     def evaluate(run_name, ...): ...
@@ -27,12 +28,21 @@ import traceback
 from typing import Dict, Iterable, Optional
 
 SERVICE_NAME = "laya-vision"
+DEFAULT_ENDPOINT = "https://otel-lgtm-production-ee87.up.railway.app"  # grafana/otel-lgtm on Railway (irc project)
 METRIC_EXPORT_MS = 15_000
 FLUSH_MS = 10_000
 
 _state = {"on": None, "pid": None, "tracer": None, "meter": None, "providers": [], "gauges": {}}
 _attrs = threading.local()  # the enclosing jobs' attributes, merged into every metric point
 _lock = threading.Lock()
+
+
+def endpoint() -> Optional[str]:
+    """The collector's base URL, or None when telemetry is turned off."""
+    if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
+        return None
+    url = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_ENDPOINT).strip()
+    return url.rstrip("/") or None
 
 
 def enabled() -> bool:
@@ -46,7 +56,8 @@ def setup(service_name: str = SERVICE_NAME) -> bool:
             # a forked child (a DataLoader worker) inherits the providers but not their export threads: stay quiet
             return _state["on"] and _state["pid"] == os.getpid()
         _state.update(on=False, pid=os.getpid())
-        if not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        url = endpoint()
+        if not url:
             return False
         try:
             from opentelemetry import metrics, trace
@@ -62,8 +73,9 @@ def setup(service_name: str = SERVICE_NAME) -> bool:
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
         except ImportError:
-            print("telemetry: OTEL_EXPORTER_OTLP_ENDPOINT is set but opentelemetry-sdk / "
-                  "opentelemetry-exporter-otlp-proto-http are not installed; telemetry is off", file=sys.stderr)
+            if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):  # asked for explicitly: say why nothing is sent
+                print("telemetry: OTEL_EXPORTER_OTLP_ENDPOINT is set but opentelemetry-sdk / "
+                      "opentelemetry-exporter-otlp-proto-http are not installed; telemetry is off", file=sys.stderr)
             return False
 
         from . import __version__
@@ -77,13 +89,14 @@ def setup(service_name: str = SERVICE_NAME) -> bool:
         resource = Resource.create(res)  # also merges OTEL_RESOURCE_ATTRIBUTES
 
         tp = TracerProvider(resource=resource)
-        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=url + "/v1/traces")))
         trace.set_tracer_provider(tp)
-        mp = MeterProvider(resource=resource, metric_readers=[
-            PeriodicExportingMetricReader(OTLPMetricExporter(), export_interval_millis=METRIC_EXPORT_MS)])
+        reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=url + "/v1/metrics"),
+                                               export_interval_millis=METRIC_EXPORT_MS)
+        mp = MeterProvider(resource=resource, metric_readers=[reader])
         metrics.set_meter_provider(mp)
         lp = LoggerProvider(resource=resource)
-        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=url + "/v1/logs")))
         set_logger_provider(lp)
 
         stdout_log = logging.getLogger("laya.stdout")
