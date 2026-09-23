@@ -60,6 +60,12 @@ import numpy as np
 from .common import ece_score, render_options
 
 FAMILIES = ("option_order", "text", "image", "image_shuffle", "text_only")
+# Opt-in families from the extension modules, each summarised under its own key of ``summarize`` (not in the
+# accuracy/flip table: they change the question type, the option set or the label, or are adversarial):
+# ``robustness_options`` (option_set, abstain), ``robustness_form`` (form_choice, negation) and
+# ``robustness_injection`` (inject_text, inject_image).
+EXTRA_FAMILIES = ("option_set", "abstain", "form_choice", "negation", "inject_text", "inject_image")
+ALL_FAMILIES = FAMILIES + EXTRA_FAMILIES
 
 # ---------------------------------------------------------------------------------------------------------
 # Rows
@@ -387,9 +393,13 @@ def build_variants(rows: Sequence[Dict], families: Sequence[str] = FAMILIES, see
     makers = {"option_order": lambda: order_variants(rows, seed), "text": lambda: text_variants(rows),
               "image": lambda: image_variants(rows, seed), "image_shuffle": lambda: shuffle_variants(rows, seed),
               "text_only": lambda: text_only_variants(rows)}
+    from . import robustness_form, robustness_injection, robustness_options  # they import this module
+
+    for mod in (robustness_options, robustness_form, robustness_injection):
+        makers.update({f: (lambda mod=mod, f=f: mod.build(rows, (f,), seed)) for f in mod.FAMILIES})
     unknown = set(families) - set(makers)
     if unknown:
-        raise ValueError("unknown families %s (expected %s)" % (sorted(unknown), FAMILIES))
+        raise ValueError("unknown families %s (expected %s)" % (sorted(unknown), ALL_FAMILIES))
     out = [dict(r) for r in rows]
     for fam in families:
         out += makers[fam]()
@@ -413,7 +423,10 @@ def score_rows(model, processor, rows: Sequence[Dict], temperatures: Sequence[fl
 
     from .vlm_train import collect_logits
 
-    recs = collect_logits(model, processor, list(rows), transform=realize, **kw)
+    from .robustness_injection import realize_injection  # draws ``typo`` ops, delegates everything else to realize
+
+    kw.setdefault("transform", realize_injection)
+    recs = collect_logits(model, processor, list(rows), **kw)
     out = []
     for row, rec in zip(rows, recs):
         z = rec["logits"]
@@ -509,12 +522,14 @@ def _stats(rows: Sequence[Dict], base: Dict[str, Dict], n_boot: int, rng: np.ran
     return res
 
 
-def summarize(preds: Sequence[Dict], n_boot: int = 1000, seed: int = 0) -> Dict:
+def summarize(preds: Sequence[Dict], n_boot: int = 1000, seed: int = 0, ece_floor_sims: int = 0) -> Dict:
     """The report: per dataset and family (``"orig"`` included), ``_stats`` plus per-variant accuracy, paired change
     from the same rows unperturbed, and flip rate; for ``option_order`` the accuracy by variant (``orig``
     included), its spread over the orders every row has, and the accuracy by the gold option's displayed position; for the image controls the label prior (majority-label accuracy on the
     source rows) and how often the shuffled-image and no-image predictions agree. ``"macro"`` averages each
-    family's point estimates over the datasets that have it."""
+    family's point estimates over the datasets that have it. Predictions from ``EXTRA_FAMILIES`` add ``"options"``,
+    ``"form"`` and ``"injection"`` (each module's own summary); ``ece_floor_sims`` > 0 adds ``"ece_floor"``, the ECE
+    noise floor of every (dataset, family) (``robustness_floor.summarize_floor``)."""
     rng = np.random.default_rng(seed)
     out: Dict[str, Dict] = {}
     for name in sorted({p["dataset"] for p in preds}):
@@ -565,7 +580,21 @@ def summarize(preds: Sequence[Dict], n_boot: int = 1000, seed: int = 0) -> Dict:
             macro[fam] = {"n_datasets": len(per)}
             for k in ("acc", "balanced_acc", "base_acc", "delta_acc", "flip_rate", "ece"):
                 macro[fam][k] = float(np.nanmean([s[k] for s in per]))
-    return {"datasets": out, "macro": macro, "n_boot": n_boot, "seed": seed}
+    res = {"datasets": out, "macro": macro, "n_boot": n_boot, "seed": seed}
+    fams = {p["family"] for p in preds}
+    from . import robustness_form, robustness_injection, robustness_options
+
+    if fams & set(robustness_options.FAMILIES):
+        res["options"] = robustness_options.summarize_options(preds)
+    if fams & set(robustness_form.FAMILIES):
+        res["form"] = robustness_form.summarize_form(preds, n_boot, seed)
+    if fams & set(robustness_injection.FAMILIES):
+        res["injection"] = robustness_injection.summarize_injection(preds, n_boot, seed)
+    if ece_floor_sims:
+        from .robustness_floor import summarize_floor
+
+        res["ece_floor"] = summarize_floor(preds, ece_floor_sims, seed)
+    return res
 
 
 def format_table(summary: Dict) -> str:
@@ -591,13 +620,19 @@ def main(argv=None):
     ap.add_argument("predictions")
     ap.add_argument("--n-boot", type=int, default=1000)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--ece-floor-sims", type=int, default=0, help="also report the ECE noise floor (e.g. 200)")
     ap.add_argument("--out", default="")
     a = ap.parse_args(argv)
     opener = gzip.open if a.predictions.endswith(".gz") else open
     with opener(a.predictions, "rt") as f:
         preds = [json.loads(line) for line in f if line.strip()]
-    s = summarize(preds, a.n_boot, a.seed)
+    s = summarize(preds, a.n_boot, a.seed, a.ece_floor_sims)
     print(format_table(s))
+    if "ece_floor" in s:
+        from .robustness_floor import format_floor_table
+
+        print()
+        print(format_floor_table(s["ece_floor"]))
     if a.out:
         with open(a.out, "w") as f:
             json.dump(s, f, indent=1)

@@ -865,7 +865,8 @@ def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
                tag: str = ""):
     """Meaning-preserving perturbations of ``n_per_dataset`` seeded val rows per set (``laya.robustness``): option
     order, rewording, image corruptions, and the shuffled-image / no-image controls, scored with the checkpoint's
-    temperatures. Writes the per-row predictions and the summary to ``ROBUSTNESS_ROOT/<tag>/`` (a new directory;
+    temperatures. ``families`` (comma-separated) may also name the opt-in ``R.EXTRA_FAMILIES`` (option set /
+    abstention, question form / negation, text and typographic injection), summarised under their own keys. Writes the per-row predictions and the summary to ``ROBUSTNESS_ROOT/<tag>/`` (a new directory;
     the job refuses an existing one) so a detached run's results survive the local client, and returns the
     summary."""
     import gzip

@@ -218,25 +218,8 @@ def build(rows: Sequence[Dict], families: Sequence[str] = FAMILIES, seed: int = 
 
 def score_rows_injection(model, processor, rows: Sequence[Dict], temperatures: Sequence[float] = (1.0, 1.0, 1.0),
                          **kw) -> List[Dict]:
-    """``robustness.score_rows`` with ``realize_injection`` as the loader transform (``score_rows`` fixes
-    ``transform=realize``, so passing ``transform=`` through its ``**kw`` is a duplicate-keyword TypeError)."""
-    import torch
-
-    from .vlm_train import collect_logits
-
-    recs = collect_logits(model, processor, list(rows), transform=realize_injection, **kw)
-    out = []
-    for row, rec in zip(rows, recs):
-        z = rec["logits"]
-        p = torch.softmax(z / temperatures[rec["qtype"]], -1)
-        pred = {k: row[k] for k in ("id", "group_id", "cluster", "dataset", "family", "variant", "label")}
-        pred.update(qtype=int(rec["qtype"]), k=len(z), logits=[round(float(v), 4) for v in z],
-                    probs=[round(float(v), 5) for v in p], pred=int(p.argmax()))
-        for k in ("shown_label", "order", "donor_image", "meta"):
-            if k in row:
-                pred[k] = row[k]
-        out.append(pred)
-    return out
+    """``robustness.score_rows``, whose default loader transform is ``realize_injection``; kept as a name."""
+    return R.score_rows(model, processor, rows, temperatures, **kw)
 
 
 # ---------------------------------------------------------------------------------------------------------

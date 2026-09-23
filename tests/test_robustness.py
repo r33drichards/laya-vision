@@ -266,3 +266,20 @@ def test_image_shuffle_control_plumbing(agent, dataset):
     assert s["image_shuffle"]["n_groups"] == s["text_only"]["n_groups"] == 8 and s["orig"]["n_groups"] == 9
     assert 0 <= s["image_shuffle"]["agree_with_text_only"] <= 1 and "majority_label_acc" in s["text_only"]
     json.dumps(s)  # JSON-able
+
+
+def test_extra_families_end_to_end(agent, dataset):
+    """Every opt-in family through ``build_variants`` -> plain ``score_rows`` (its default transform draws the
+    ``typo`` ops) -> ``summarize``: the core table stays the core families, each extension gets its own block."""
+    rows = rows_of(dataset)
+    variants = R.build_variants(rows, families=R.EXTRA_FAMILIES, seed=0)
+    assert {v["family"] for v in variants} == {"orig"} | set(R.EXTRA_FAMILIES)
+    assert R.build_variants(rows, families=R.EXTRA_FAMILIES, seed=0) == variants  # deterministic
+    preds = R.score_rows(agent.model, agent.processor, variants, agent.temperature, batch_size=8)
+    assert [p["id"] for p in preds] == [v["id"] for v in variants]
+    s = R.summarize(preds, n_boot=20, ece_floor_sims=20)
+    assert set(s["datasets"]["sq"]) == {"orig"}
+    assert {"options", "form", "injection", "ece_floor"} <= set(s)
+    json.dumps(s)
+    with pytest.raises(ValueError):
+        R.build_variants(rows, families=("nope",))
