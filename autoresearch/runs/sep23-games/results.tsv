@@ -6,3 +6,4 @@ a82ec1d	0.6757	0.7160	0.0403	0.1439	236.5623	1.0008	keep	exp: mix game data (too
 a430602	0.6750	0.7140	0.0390	0.1099	236.7113	0.9991	discard	exp: value head trained 1:1 on game value targets
 3aed5cd	0.6522	0.6807	0.0284	0.1632	236.5623	1.0228	discard	exp: train the vision tower too (on the 25% game mix)
 88f111b	0.6739	0.7168	0.0428	0.1656	236.5623	0.9958	discard	exp: double both learning rates (head 1e-4, backbone 2e-5)
+02e7aa8	0.6655	0.7131	0.0475	0.0142	236.5623	1.0065	discard	exp: 2x LR + per-game weights inside the 25% game share (favour unlearned games)
