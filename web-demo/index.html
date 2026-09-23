@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Laya Vision in the browser</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1>Laya Vision, in your browser</h1>
+    <p>Typed decisions (<code>choice</code>, <code>score</code>, <code>noul</code>) about an image, computed on this
+      device with ONNX Runtime Web. No server: the image never leaves the page, there is no backend or telemetry.
+      Experimental; read the <a href="#limits">limitations</a> before trusting a number.</p>
+  </header>
+
+  <section id="model-panel">
+    <h2>1. Model</h2>
+    <p class="hint">The model files are not hosted anywhere public. Export them with
+      <code>scripts/export_onnx.py</code> (see the README in <code>web-demo/</code>) and point this at the folder,
+      or pass <code>?models=&lt;url&gt;</code>.</p>
+    <div class="row">
+      <label>Model folder URL <input id="base-url" type="text" value="./models/laya-vision/" spellcheck="false"></label>
+    </div>
+    <div class="row">
+      <label>Precision
+        <select id="variant">
+          <option value="auto" selected>auto (fp16 on WebGPU with shader-f16, else q8)</option>
+          <option value="fp32">fp32 (matches PyTorch, largest)</option>
+          <option value="fp16">fp16</option>
+          <option value="q8">q8 (8-bit weights)</option>
+          <option value="q4">q4 (4-bit weights, smallest, least faithful)</option>
+        </select>
+      </label>
+      <label>Backend
+        <select id="backend">
+          <option value="auto" selected>auto (WebGPU if available)</option>
+          <option value="webgpu">WebGPU</option>
+          <option value="wasm">WASM (CPU)</option>
+        </select>
+      </label>
+      <button id="load">Load model</button>
+    </div>
+    <div id="model-status" class="status">Not loaded.</div>
+    <progress id="progress" value="0" max="1" hidden></progress>
+  </section>
+
+  <section id="input-panel">
+    <h2>2. Image and state</h2>
+    <div class="row">
+      <label>Image <input id="image" type="file" accept="image/*"></label>
+      <button id="clear-image" type="button">No image</button>
+    </div>
+    <canvas id="preview" width="0" height="0"></canvas>
+    <label>State (JSON object, or plain text; keys other than the image are serialised like <code>json.dumps</code>)
+      <textarea id="state" rows="3" spellcheck="false">{"note": "customer says it arrived broken"}</textarea>
+    </label>
+  </section>
+
+  <section id="questions-panel">
+    <h2>3. Questions</h2>
+    <label>Questions (JSON, the same shape as <code>agent.predict</code>'s second argument)
+      <textarea id="questions" rows="14" spellcheck="false"></textarea>
+    </label>
+    <div class="row">
+      <label>Option orders
+        <select id="perms">
+          <option value="1" selected>1 (as written)</option>
+          <option value="2">2 (as written + reversed, logits averaged)</option>
+        </select>
+      </label>
+      <button id="run" disabled>Run</button>
+    </div>
+    <div id="run-status" class="status"></div>
+  </section>
+
+  <section id="results-panel" hidden>
+    <h2>Answers</h2>
+    <div id="answers"></div>
+    <details>
+      <summary>Raw output (the <code>predict</code> schema)</summary>
+      <pre id="raw"></pre>
+    </details>
+  </section>
+
+  <section id="limits">
+    <h2>Limitations</h2>
+    <ul>
+      <li><strong>Probabilities are conditional on the options you list.</strong> They are a softmax over those
+        options only, so a question whose true answer is not listed still gets a confident-looking distribution.
+        There is no "none of the above" unless you add one.</li>
+      <li><strong>Calibration is not guaranteed on your images.</strong> The per-type temperatures were fitted on
+        the validation splits of the training data (calibrated ECE 0.02 to 0.03 there). On images unlike that data
+        the numbers are scores, not calibrated probabilities, and a high value does not establish that the answer
+        is correct.</li>
+      <li><strong>Quantised files are not the PyTorch model.</strong> fp32 matches <code>VLMAgent.predict</code> to
+        about 1e-5 in probability on the export's validation inputs; fp16 is within about 0.002, q8 about 0.02, and q4
+        up to about 0.17, where it can change the top answer (the exporter writes the measured differences to
+        <code>validation.json</code>; the page shows its summary after loading).</li>
+      <li><strong>Image decoding differs slightly.</strong> The browser decodes the file (and applies EXIF
+        rotation, colour management and alpha handling its own way, where PIL does not), then this page
+        reimplements the processor's two LANCZOS resizes to 2048 and then 512x512. On test images the result is
+        within 0.05 grey levels of the Hugging Face processor on average and 2 levels at most.</li>
+      <li><strong>Only one or two option orders.</strong> <code>predict(..., n_permutations=K)</code> averages
+        over seeded random orders past the second; those are not reproduced here.</li>
+      <li><strong>State text</strong> is serialised like Python's <code>json.dumps</code>; numbers such as
+        <code>1.0</code> or <code>1e-05</code> print differently in JavaScript, and the state is cut to fit
+        <code>max_len</code> (the page says when).</li>
+      <li>One question at a time, sequentially; there is no batching or prefix caching, so latency grows with the
+        number of questions.</li>
+    </ul>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
