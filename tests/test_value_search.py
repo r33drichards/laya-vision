@@ -198,17 +198,14 @@ def _fake_scores(values):
 @pytest.mark.parametrize("settings", [{"kind": "lookahead"}, {"kind": "lookahead", "depth": 3},
                                       {"kind": "puct", "sims": 8}])
 def test_search_follows_the_value(monkeypatch, settings):
-    # no reward within reach; the value says left is better at 1 and right is better at 3
-    monkeypatch.setattr(search, "score_states", _fake_scores([0.9, 0.1, 0.5, 0.8, 0.0]))
+    # value by position; the goal (cell 5) pays 1. From 1 the value says left; from 3 it says right (and right
+    # also leads to the goal within reach of the deeper searches)
+    monkeypatch.setattr(search, "score_states", _fake_scores([0.9, 0.1, 0.2, 0.3, 0.6, 0.0]))
     stats = {}
-    acts = search.plan(None if False else _StubAgent(), [Corridor(n=6, pos=1), Corridor(n=6, pos=3)], Q,
-                       dict(settings, c_prior=0.0), stats)
-    if settings["kind"] == "puct":
-        assert stats["forwards"] == 1 + settings["sims"]
-    else:
-        assert stats["forwards"] == 1
-    assert acts[0] == "left"
-    assert acts[1] == ("right" if settings.get("depth", 1) == 1 or settings["kind"] == "puct" else "right")
+    acts = search.plan(_StubAgent(), [Corridor(n=6, pos=1), Corridor(n=6, pos=3)], Q, dict(settings, c_prior=0.0),
+                       stats)
+    assert stats["forwards"] == (1 + settings["sims"] if settings["kind"] == "puct" else 1)
+    assert acts == ["left", "right"]
 
 
 class _StubAgent:
