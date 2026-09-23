@@ -37,10 +37,16 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-LR_HEAD = 1e-4
-LR_BACKBONE = 2e-5
+LR_HEAD = 5e-5
+LR_BACKBONE = 1e-5
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
+
+# distillation, inside the time budget: score DISTILL_N training examples with a teacher checkpoint, then train on
+# targets blended DISTILL_MIX of the teacher's probabilities with the labels ("" = off)
+DISTILL_FROM = "autoresearch/sep23-games/a82ec1d"   # the frontier's full-size point
+DISTILL_N = 8000
+DISTILL_MIX = 0.5
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.25
@@ -103,9 +109,41 @@ def build(ctx):
     return agent
 
 
+def distill_targets(ctx, examples, t_start):
+    """Blend a teacher's probabilities into ``DISTILL_N`` of ``examples`` (in place of those entries)."""
+    import random
+    import time
+
+    import torch
+
+    from laya.vlm import VLMAgent
+    from laya.vlm_train import collect_logits
+
+    teacher = VLMAgent(ctx.ckpt_path(DISTILL_FROM), device=ctx.device, dtype="bf16")
+    idx = random.Random(0).sample(range(len(examples)), min(DISTILL_N, len(examples)))
+    recs = collect_logits(teacher.model, teacher.processor, [examples[i] for i in idx], batch_size=64,
+                          num_workers=12)
+    for i, r in zip(idx, recs):
+        p = torch.softmax(r["logits"].float(), 0).tolist()
+        t = examples[i]["target"]
+        tot = sum(t) or 1.0
+        examples[i] = dict(examples[i], target=[(1 - DISTILL_MIX) * a / tot + DISTILL_MIX * b for a, b in zip(t, p)])
+    del teacher
+    torch.cuda.empty_cache()
+    print("distilled %d examples in %.0f s" % (len(idx), time.time() - t_start), flush=True)
+
+
 def train(agent, ctx):
+    import time
+
     from laya.vlm_train import train as train_loop
+
+    t_start = time.time()
+    if DISTILL_FROM:
+        ctx.data = list(ctx.data)
+        distill_targets(ctx, ctx.data, t_start)
+    budget_min = (ctx.time_budget_s - (time.time() - t_start)) / 60
 
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
-               max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
+               max_minutes=budget_min, num_workers=12, log_every=50, device=ctx.device)
