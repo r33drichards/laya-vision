@@ -31,7 +31,7 @@ keep / discard call, not you.
      for ideas; change behaviour by writing it in `experiment.py`, not by editing them.
 4. **Modal**: `modal volume ls laya-checkpoints` must work. In a Claude Code cloud sandbox, set it up as
    `.claude/skills/evals/SKILL.md` section 1 describes (the proxy extra and CA bundle, in a scratch venv).
-5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v1`). If it is missing, build
+5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v2`). If it is missing, build
    it once with `modal run autoresearch/harness.py --prepare-pool` (it reads the prepared `cauldron_*`, `score_*` and
    `eval_*` sets). Every image the harness uses comes from this pool: reading the datasets' small image files
    straight from the volume is too slow to keep an H100 fed.
@@ -90,7 +90,7 @@ and in what mix, the loss weights, freezing, learning rates, batch size, schedul
 
 You CANNOT:
 - modify `harness.py`, `pareto.py`, `games_eval.py`, `game_baselines.json`, `toolkit.py`, or the eval data;
-- train on anything but `ctx.train_examples()` (the pool's 2,000 examples per Cauldron and score set),
+- train on anything but `ctx.train_examples()` (the pool's up to 6,000 examples per Cauldron and score set),
   `ctx.game_examples()` and what `toolkit.py` generates (on seeds below 100,000; the games benchmark plays 700,000+):
   no val splits, no `eval_*` sets, no calibration tail;
 - use test-time search (`agent.cfg["search"]`): the benchmark plays the saved model greedy, one forward per move.

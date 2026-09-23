@@ -40,7 +40,7 @@ data. ``modal run autoresearch/harness.py --prepare-pool`` builds the pool once,
 pickles of examples with the encoded image bytes inline:
 
 * ``train``: ``TRAIN_POOL_PER_SET`` seeded examples of each ``TRAINABLE_DATASETS`` train split, calibration tail
-  excluded. A 15-minute experiment sees ~90k samples, about two passes over the 46k pool, and every experiment trains from
+  excluded. A 15-minute experiment sees ~90k samples, under one pass over the pool (up to 6,000 per set), and every experiment trains from
   the same one;
 * ``calib``: the last ``N_CALIB`` train records of each ``CALIB_DATASETS`` set;
 * ``eval``: ``EVAL_PER_SET`` seeded val examples of each ``EVAL_DATASETS`` set.
@@ -79,10 +79,10 @@ TIME_BUDGET = 900          # seconds of training (upstream: 300; 5 minutes starv
 EVAL_PER_SET = 300         # seeded questions per eval set
 LATENCY_N = 100            # images timed on the L4 (after 10 warm-up calls)
 N_CALIB = 100              # last train records per calibration set, held out from training
-TRAIN_POOL_PER_SET = 2000  # seeded train examples per trainable set in the pool
+TRAIN_POOL_PER_SET = 6000  # seeded train examples per trainable set in the pool (fewer where a set is smaller)
 SEED = 0
 REFERENCE = "cauldron-score-2ep-bidir-full/best"   # latency is reported relative to this checkpoint (= thaitea/laya-vision)
-POOL_VERSION = "v1"
+POOL_VERSION = "v2"         # v1: 2,000 per set, which 15 minutes cycled through twice (quality fell 0.02)
 POOL_DIR = "/data/autoresearch/pool-" + POOL_VERSION
 
 VQA = ("aokvqa", "scienceqa", "vqav2_yesno")
