@@ -101,7 +101,7 @@ Checked on Linux, CPU only, in this repository's test setup:
   | Variant | Size | max \|Δp\| | max \|Δlogit\| | same top answer |
   |---|---|---|---|---|
   | fp32 | 948 MB | 2.0e-6 | 2.5e-5 | 9/9 |
-  | fp16 | 475 MB | 1.8e-3 | 1.9e-2 | 9/9 |
+  | fp16 | 475 MB | 2.5e-3 | 3.2e-2 | 9/9 |
   | q8 | 355 MB | 1.8e-2 | 0.25 | 9/9 |
   | q4 | 252 MB | 0.17 | 1.7 | 6/9 |
   | int8 dynamic (dropped) | 329 MB | 0.62 | 5.3 | 5/9 |
@@ -138,6 +138,13 @@ Checked on Linux, CPU only, in this repository's test setup:
 - **No real GPU was available.** WebGPU ran only on SwiftShader, Chromium's software adapter, which has no
   `shader-f16`: the q8 graphs gave the same answers as WASM to 1e-4, so the WebGPU kernels for these graphs work,
   but fp16 on WebGPU (the default on a desktop GPU) has not run anywhere, and there are no GPU timings.
+- **fp16 and real float16 arithmetic.** The first published fp16 files gave exactly uniform probabilities on
+  WebGPU (Apple Metal): the converter had put RMSNorm's `x**2` in float16, and the residual stream (~2.5e3 before the
+  final norm) overflows it, so every hidden state came out 0. onnxruntime's CPU backend runs those ops in float32,
+  which is why `--validate` passed. The export now keeps every normalisation in float32; checked with onnx's
+  reference evaluator in true float16 on a real photo (text graph: option hidden states within 0.06 of fp32;
+  vision features within 0.09 of fp32, against 57 off before) and by `tests/test_web_demo.py`. Not yet confirmed on
+  a real GPU.
 - **Real devices and timings.** Only the headless CPU run above; no phone, no Safari or Firefox. The fp32 files
   need about 1 GB of downloads and more than that in memory; a phone will likely not manage fp32.
 - **Decoding is the browser's.** JPEG decoding, EXIF orientation (browsers apply it, PIL does not), colour

@@ -14,18 +14,21 @@ let state = null; // {cfg, tok, sessions, backend, variant}
 
 const send = (type, data = {}) => self.postMessage({ type, ...data });
 
-async function cached(url) {
+async function cached(key) {
   try {
     const cache = await caches.open(CACHE);
-    return { cache, hit: await cache.match(url) };
+    return { cache, hit: await cache.match(key) };
   } catch {
     return { cache: null, hit: null };
   }
 }
 
-/** GET ``url`` as an ArrayBuffer with progress messages, through the Cache Storage API when it is available. */
-async function fetchBytes(url, label) {
-  const { cache, hit } = await cached(url);
+/** GET ``url`` as an ArrayBuffer with progress messages, through the Cache Storage API when it is available. The
+ * cache key carries the file's SHA-256 from laya_web.json, so a re-export under the same URL is fetched again instead
+ * of served stale (the first fp16 export was broken on real GPUs and replaced in place). */
+async function fetchBytes(url, label, sha256) {
+  const key = sha256 ? `${url}?sha256=${sha256}` : url;
+  const { cache, hit } = await cached(key);
   let res = hit;
   if (!res) {
     res = await fetch(url);
@@ -46,7 +49,7 @@ async function fetchBytes(url, label) {
   let o = 0;
   for (const p of parts) { buf.set(p, o); o += p.length; }
   if (cache && !hit) {
-    try { await cache.put(url, res); } catch { /* quota: fine, the HTTP cache may still help */ }
+    try { await cache.put(key, res); } catch { /* quota: fine, the HTTP cache may still help */ }
   }
   return buf;
 }
@@ -70,7 +73,7 @@ async function load({ baseUrl, variant, backend }) {
   const t0 = performance.now();
   const base = new URL(baseUrl, self.location.href);
   if (!base.pathname.endsWith("/")) base.pathname += "/";
-  const cfg = await (await fetch(new URL("laya_web.json", base))).json();
+  const cfg = await (await fetch(new URL("laya_web.json", base), { cache: "no-cache" })).json();
   if (cfg.format_version !== 1 || cfg.readout !== "terminator") throw new Error("unsupported laya_web.json (format or readout)");
   const [tj, tc] = await Promise.all(cfg.tokenizer.map((p) => fetch(new URL(p, base)).then((r) => r.json())));
   const tok = new Tokenizer(tj, tc);
@@ -84,7 +87,7 @@ async function load({ baseUrl, variant, backend }) {
     const file = `${name}${suffix}.onnx`;
     if (!cfg.files[file]) throw new Error(`${file} is not in laya_web.json; export it with --quantize ${variant}`);
     const t = performance.now();
-    const bytes = await fetchBytes(new URL(file, base).href, file);
+    const bytes = await fetchBytes(new URL(file, base).href, file, cfg.files[file].sha256);
     timings[`download ${file}`] = performance.now() - t;
     const t2 = performance.now();
     // the tiny head graph runs on WASM: a WebGPU dispatch per op costs more than the arithmetic

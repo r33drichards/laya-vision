@@ -18,6 +18,7 @@ import sys
 
 import numpy as np
 import pytest
+import torch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB = os.path.join(ROOT, "web-demo")
@@ -154,3 +155,58 @@ if __name__ == "__main__":
     with open(FIXTURE, "w") as f:
         json.dump(build_fixture(), f, ensure_ascii=False)
     print("wrote", FIXTURE)
+
+
+def _toposort(model):
+    """The fp16 converter appends its casts after the nodes that read them; onnxruntime reorders, the reference
+    evaluator does not."""
+    g = model.graph
+    known = {i.name for i in g.input} | {t.name for t in g.initializer} | {""}
+    todo, done = list(g.node), []
+    while todo:
+        ready = [n for n in todo if all(i in known for i in n.input)]
+        assert ready, "graph has a missing input or a cycle"
+        for n in ready:
+            known.update(n.output)
+        done += ready
+        todo = [n for n in todo if n not in ready]
+    del g.node[:]
+    g.node.extend(done)
+    return model
+
+
+def test_fp16_keeps_rmsnorm_in_fp32(tmp_path):
+    """The fp16 variant must not square the residual stream in float16 (``export_onnx.rmsnorm_in_fp32``). A Llama
+    RMSNorm fed values of a few thousand, as SmolVLM's last layers produce, run with real float16 arithmetic
+    (onnx's reference evaluator; onnxruntime's CPU backend would silently upcast and hide the bug)."""
+    onnx = pytest.importorskip("onnx")
+    pytest.importorskip("onnxruntime")
+    from onnx.reference import ReferenceEvaluator
+    from onnxruntime.transformers.float16 import convert_float_to_float16
+    from transformers.models.llama.modeling_llama import LlamaRMSNorm
+
+    from export_onnx import rmsnorm_in_fp32
+
+    class Block(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.proj = torch.nn.Linear(64, 64)
+            self.norm = LlamaRMSNorm(64)
+
+        def forward(self, x):
+            return self.norm(self.proj(x))
+
+    torch.manual_seed(0)
+    block = Block().eval()
+    x = torch.randn(1, 8, 64) * 3000
+    path = str(tmp_path / "block.onnx")
+    torch.onnx.export(block, (x,), path, input_names=["x"], output_names=["y"], opset_version=18, dynamo=False)
+    want = block(x).detach().numpy()
+    m = onnx.load(path)
+    # the plain conversion (what the first published fp16 files were): all zeros in real float16
+    naive = ReferenceEvaluator(_toposort(convert_float_to_float16(onnx.load(path), keep_io_types=True))).run(
+        None, {"x": x.numpy()})[0]
+    assert np.abs(naive).max() == 0, "expected the plain conversion to overflow to zeros"
+    fixed = rmsnorm_in_fp32(convert_float_to_float16(m, keep_io_types=True))
+    got = ReferenceEvaluator(_toposort(fixed)).run(None, {"x": x.numpy()})[0]
+    np.testing.assert_allclose(got, want, atol=0.05)

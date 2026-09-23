@@ -21,7 +21,9 @@ Next to the graphs it writes ``laya_web.json`` (everything the page needs to reb
 logits into answers: config, temperatures, token ids, text templates, file sizes and hashes) and copies the
 tokenizer files. ``--quantize`` adds variants next to the fp32 graphs:
 
-* ``fp16``: weights and activations in float16 (``keep_io_types``), for WebGPU.
+* ``fp16``: weights and activations in float16 (``keep_io_types``), for WebGPU, with every normalisation kept in
+  float32 (``rmsnorm_in_fp32``; LayerNormalization via the converter's block list): they square residuals of a few
+  thousand, which overflows float16.
 * ``q8`` / ``q4``: weight-only 8-/4-bit ``MatMulNBits`` (block 32, symmetric), activations stay float; for WASM.
 
 Dynamic int8 (``quantize_dynamic``, int8 activations per tensor) was tried and dropped: on the validation inputs it
@@ -204,15 +206,63 @@ def export_all(agent: VLMAgent, out: str, opset: int = 18, parts=("vision", "tex
     return {"image_token_id": image_token_id}
 
 
+def rmsnorm_in_fp32(model):
+    """Put every decomposed RMSNorm of a float16-converted graph back on float32 arithmetic, as Hugging Face's
+    ``LlamaRMSNorm`` does under half precision: upcast, square, mean, rsqrt, scale, then cast back before the weight.
+
+    SmolVLM's residual stream reaches a few thousand in the last layers (about 2.5e3 before the final norm), so
+    ``x**2`` is ~6e6, far past float16's 65504. The converter retargets the norm's upcast ``Cast(to=float)`` to
+    float16; the mean is then inf, ``1/sqrt(inf)`` is 0, every hidden state comes out 0 and every option gets the
+    same logit (exactly uniform probabilities on WebGPU/Metal). onnxruntime's CPU backend hides this by running
+    ``Pow``/``ReduceMean`` in float32, so ``--validate`` passed; ``tests/test_web_demo.py`` checks it with real
+    float16 arithmetic. (Blocking the nodes in the converter does not help: it still casts the edges between
+    blocked nodes to float16.)
+    """
+    import onnx
+    from onnx import numpy_helper
+
+    nodes = model.graph.node
+    prefixes = {n.name.rsplit("/", 1)[0] + "/" for n in nodes if n.op_type == "Pow" and "norm" in n.name}
+    upcasts = []
+    for n in nodes:
+        pre = n.name.rsplit("/", 1)[0] + "/"
+        if pre not in prefixes:
+            continue
+        if n.op_type == "Cast" and n.name == pre + "Cast":  # the upcast; Cast_1 (back to the input dtype) stays
+            # The tracer shares this Cast's output with the residual Add (in the float32 graph it is a no-op), so
+            # add a float32 twin that only the norm's own nodes read instead of retargeting it.
+            f32 = n.output[0] + "_fp32"
+            upcasts.append(onnx.helper.make_node("Cast", [n.input[0]], [f32], name=pre + "Cast_fp32",
+                                                 to=onnx.TensorProto.FLOAT))
+            for c in nodes:
+                if c.name.startswith(pre) and c is not n:
+                    for i, name in enumerate(c.input):
+                        if name == n.output[0]:
+                            c.input[i] = f32
+        elif n.op_type == "Constant":
+            for a in n.attribute:
+                if a.name == "value" and a.t.data_type == onnx.TensorProto.FLOAT16:
+                    a.t.CopyFrom(numpy_helper.from_array(numpy_helper.to_array(a.t).astype(np.float32), a.t.name))
+    assert prefixes or not any(n.op_type == "Pow" for n in nodes), "RMSNorm pattern not found"
+    nodes.extend(upcasts)
+    del model.graph.value_info[:]  # the converter's float16 annotations on these edges are now wrong; re-inferred
+    return model
+
+
 def quantize(out: str, kinds: List[str]):
     for kind in kinds:
         for name in ("vision", "text", "head"):
             src, dst = os.path.join(out, name + ".onnx"), os.path.join(out, "%s_%s.onnx" % (name, kind))
             if kind == "fp16":
                 import onnx
-                from onnxruntime.transformers.float16 import convert_float_to_float16
+                from onnxruntime.transformers.float16 import DEFAULT_OP_BLOCK_LIST, convert_float_to_float16
 
-                m = convert_float_to_float16(onnx.load(src), keep_io_types=True)
+                # LayerNormalization (the vision tower's, the head's) computes x**2 over residuals of ~2e3: keep the
+                # fused op in float32 (a single op, so only its input and output are cast, and those fit in fp16).
+                # In true float16 arithmetic it took the vision features 57 off (of 93); in float32, 0.09.
+                m = convert_float_to_float16(onnx.load(src), keep_io_types=True,
+                                             op_block_list=list(DEFAULT_OP_BLOCK_LIST) + ["LayerNormalization"])
+                m = rmsnorm_in_fp32(m)
                 onnx.save_model(m, dst)
             elif kind in ("q4", "q8"):
                 import onnx
