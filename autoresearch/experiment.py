@@ -9,16 +9,7 @@ harness's: train only on ``ctx.train_examples()``, stay inside the time budget, 
 
 ``ctx`` has ``time_budget_s``, ``device``, ``ckpt_path(run)`` (a run on the laya-checkpoints volume) and
 ``train_examples(names=...)`` (the data pool's up to 6,000 examples per Cauldron and score train split, never the
-calibration tail; images are in memory as encoded bytes) and ``game_examples(names=...)`` (the pool's Atari
-Freeway / Breakout and ViZDoom basic expert frames).
-
-Game play is the ``games`` objective (``games_eval.py``). ``import toolkit`` generates more game training data on the
-fly: ``toolkit.maze_examples(n)`` and ``toolkit.snake_examples(n)`` (soft targets over every shortest-path move, a
-``value`` target, the board's 8 symmetries), ``toolkit.control_examples(game, n)`` for CartPole, Acrobot,
-MountainCar and LunarLander, and ``toolkit.game_mix(ctx.train_examples(), games, frac, base_weights=MIX)`` to give
-games ``frac`` of the draws. A model built with ``"value_head": True`` in its config learns the ``value`` targets
-(``train(..., w_value=...)``); setting ``agent.cfg["search"]`` makes the games benchmark plan with ``laya.search``
-on the deterministic games.
+calibration tail; images are in memory as encoded bytes).
 """
 from typing import Dict, Optional
 
@@ -41,10 +32,6 @@ LR_HEAD = 5e-5
 LR_BACKBONE = 1e-5
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
-
-# games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
-GAME_FRAC = 0.25
-CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
@@ -92,14 +79,6 @@ def build(ctx):
     if IMAGE_SIZE:
         set_image_size(agent, IMAGE_SIZE)
     ctx.data = ctx.train_examples(TRAIN_SETS) if TRAIN_SETS else ctx.train_examples()
-    ctx.mix = MIX
-    if GAME_FRAC:
-        import toolkit
-
-        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
-        for g in CONTROL_GAMES:
-            games += toolkit.control_examples(g, 5000)
-        ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
     return agent
 
 
@@ -107,5 +86,5 @@ def train(agent, ctx):
     from laya.vlm_train import train as train_loop
 
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
-               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
+               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=MIX,
                max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
