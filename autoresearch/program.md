@@ -49,6 +49,10 @@ modal run autoresearch/harness.py --tag <tag> > autoresearch/runs/<tag>/run.log 
 grep -A12 "^---" autoresearch/runs/<tag>/run.log        # the summary and the keep/discard status
 ```
 
+Running two experiments at once (each from its own commit): pass `--no-prune` to both. A finishing run prunes every
+checkpoint not on the frontier, including the other run's fresh one that is not in `results.tsv` yet (it crashed
+`0124a9d` in `sep23-v2`); prune later with a single run, or leave it.
+
 Never pass `--detach`: the local entrypoint collects the result, decides and writes the files. The first run of a
 new harness version deploys it and snapshots the loaded data (slower); later runs restore that snapshot. A run is
 15 minutes of training plus loading, calibration and eval, then the L4 latency job and the four games jobs (one per
