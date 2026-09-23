@@ -34,8 +34,7 @@ Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/la
 | Checkpoint | Backbone | Trained on | A-OKVQA | ScienceQA | VQAv2 yes/no | `score` head | Latency, L4 bf16 |
 |---|---|---|---|---|---|---|---|
 | [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision), **recommended** (same weights as [laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score)) | SmolVLM-256M, options attend to each other | 19 Cauldron subsets + 4 rubric-scored sets | 60.0% | 82.8% | 72.4% | trained | ~41 ms |
-| [thaitea/laya-vision-modernvbert-250m](https://huggingface.co/thaitea/laya-vision-modernvbert-250m) | ModernVBERT-250M, bidirectional | 19 Cauldron subsets | 65.2% | 79.0% | 71.8% | untrained | 32 ms |
-| [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m), the original | SmolVLM-256M | A-OKVQA, ScienceQA, VQAv2 yes/no | 61.8% | 86.6% | 73.4% | untrained | 41 ms |
+
 
 Accuracies are on the official validation splits (VQAv2 yes/no is a re-split of the official val set by image, so not comparable to published VQAv2 numbers). Calibrated ECE pooled over all of a checkpoint's validation sets is 0.02 to 0.035, but it varies by set: for the recommended checkpoint it is 0.16 on A-OKVQA, 0.035 on ScienceQA and 0.077 on VQAv2 yes/no ([row-level evidence](results/raw/README.md)). The original checkpoint is ahead on ScienceQA because it made 12 passes over that one train split; the others made 3 to 4 as one of 19 to 23 sets, and are far broader: the recommended one averages 75% over 26 validation sets, and 93.7% on IconQA, 91.8% on DVQA, 89.9% on Hateful Memes.
 
