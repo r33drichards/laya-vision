@@ -30,7 +30,10 @@ discard call, not you.
      for ideas; change behaviour by writing it in `experiment.py`, not by editing them.
 4. **Modal**: `modal volume ls laya-checkpoints` must work. In a Claude Code cloud sandbox, set it up as
    `.claude/skills/evals/SKILL.md` section 1 describes (the proxy extra and CA bundle, in a scratch venv).
-5. **Data**: `modal volume ls laya-datasets vqa` must list the `cauldron_*`, `score_*` and `eval_*` sets.
+5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v1`). If it is missing, build
+   it once with `modal run autoresearch/harness.py::prepare_pool` (it reads the prepared `cauldron_*`, `score_*` and
+   `eval_*` sets). Every image the harness uses comes from this pool: reading the datasets' small image files
+   straight from the volume is too slow to keep an H100 fed.
 6. **Baseline**: run the unmodified `experiment.py` first. It continues training the released checkpoint for 5
    minutes, so it should land near the released model's numbers.
 7. **Noise**: run the baseline twice more (`--desc "baseline repeat"`), look at the spread of the three objectives,
@@ -45,8 +48,9 @@ modal run autoresearch/harness.py --tag <tag> > autoresearch/runs/<tag>/run.log 
 grep -A12 "^---" autoresearch/runs/<tag>/run.log        # the summary and the keep/discard status
 ```
 
-Never pass `--detach`: the local entrypoint collects the result, decides and writes the files. Each run takes about
-15-20 minutes end to end (model and data loading, 5 minutes of training, calibration, eval, then latency on an L4).
+Never pass `--detach`: the local entrypoint collects the result, decides and writes the files. The first run of a
+new harness version deploys it and snapshots the loaded data (slower); later runs restore that snapshot. A run is
+5 minutes of training plus loading, calibration, eval and the L4 latency job.
 Start it as a background shell command and wait for it; do not let its output into your context.
 
 The harness writes `autoresearch/runs/<tag>/<commit>.json` (every metric, per dataset) and appends a row to
@@ -84,7 +88,8 @@ and in what mix, the loss weights, freezing, learning rates, batch size, schedul
 
 You CANNOT:
 - modify `harness.py`, `pareto.py`, or the eval data;
-- train on anything but `ctx.train_examples()`: no val splits, no `eval_*` sets, no calibration tail;
+- train on anything but `ctx.train_examples()` (the pool's 2,000 examples per Cauldron and score set): no val
+  splits, no `eval_*` sets, no calibration tail;
 - exceed the 5-minute training budget (the harness fails runs over budget + 60 s);
 - add dependencies beyond what the harness image installs.
 

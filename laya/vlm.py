@@ -119,14 +119,20 @@ def _load_image(img):
     if isinstance(img, (str, os.PathLike)):
         with Image.open(img) as im:
             return im.convert("RGB")
-    raise TypeError("unsupported image type %r (expected PIL.Image, uint8 array or path)" % type(img).__name__)
+    if isinstance(img, (bytes, bytearray, memoryview)):  # an encoded file already in memory
+        import io
+
+        with Image.open(io.BytesIO(img)) as im:
+            return im.convert("RGB")
+    raise TypeError("unsupported image type %r (expected PIL.Image, uint8 array, path or encoded bytes)"
+                    % type(img).__name__)
 
 
 def split_state(state: Any) -> Tuple[List, str]:
     """Split a state into (images, text).
 
-    Accepts text, a list (conversation turns), a PIL image, or a dict. Dict keys ``"image"`` (PIL image or
-    path) and ``"images"`` (list of them) are pulled out as images; the remaining keys are serialized to
+    Accepts text, a list (conversation turns), a PIL image, or a dict. Dict keys ``"image"`` (PIL image, path or
+    encoded bytes) and ``"images"`` (list of them) are pulled out as images; the remaining keys are serialized to
     JSON text exactly like the text-only model does.
     """
     try:

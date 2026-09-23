@@ -24,6 +24,33 @@ The three objectives (see ``pareto.py``):
 
 The result lands in ``autoresearch/runs/<tag>/<commit>.json`` and ``pareto.py`` appends it to
 ``autoresearch/runs/<tag>/results.tsv`` as keep / discard.
+
+The data pool. Every image the harness touches comes from a fixed, versioned pool (``POOL_DIR`` on the
+``laya-datasets`` volume), not from the prepared datasets' image folders: reading those small files from the volume
+costs about 0.4 s each (measured: 2.4 files/s serially, ~28 files/s with 32 threads), which starved training of
+data. ``modal run autoresearch/harness.py::prepare_pool`` builds the pool once, one container per dataset, as pickles
+of examples with the encoded image bytes inline:
+
+* ``train``: ``TRAIN_POOL_PER_SET`` seeded examples of each ``TRAINABLE_DATASETS`` train split, calibration tail
+  excluded. A 5-minute experiment sees ~30k samples, so a 46k pool is enough, and every experiment trains from
+  the same one;
+* ``calib``: the last ``N_CALIB`` train records of each ``CALIB_DATASETS`` set;
+* ``eval``: ``EVAL_PER_SET`` seeded val examples of each ``EVAL_DATASETS`` set.
+
+The pool is immutable: changing what goes in means a new ``POOL_VERSION``.
+
+Memory snapshots. Both GPU jobs are ``@app.cls(enable_memory_snapshot=True, single_use_containers=True)`` classes
+whose ``@modal.enter(snap=True)`` method does the experiment-independent CPU work, which Modal then restores from a
+snapshot on later cold starts instead of redoing it: the torch / transformers / laya imports and the whole pool in
+memory (``TrainEval``), or the imports and the ``LATENCY_N`` decoded latency images (``Latency``). Nothing touches
+the GPU while snapshotting; CUDA starts in the method body. ``single_use_containers`` gives every run a fresh
+container, so an experiment that mutates its examples cannot leak into a later run.
+
+Modal only snapshots deployed apps, never the ephemeral app of ``modal run``. So ``main`` deploys this file as
+``laya-autoresearch-<hash>`` (hash of this file and the ``laya`` package; a few seconds, skipped when that deployment
+exists) and calls its classes. ``experiment.py`` is sent as an argument, so experiment commits reuse the snapshot;
+changing ``laya`` or this file makes a new deployment and new snapshots. Modal snapshots the first cold start(s) of
+a deployment (those runs pay the full load plus the snapshot) and restores later ones.
 """
 import importlib.util
 import json
@@ -44,7 +71,10 @@ TIME_BUDGET = 300          # seconds of training, as upstream
 EVAL_PER_SET = 300         # seeded questions per eval set
 LATENCY_N = 100            # images timed on the L4 (after 10 warm-up calls)
 N_CALIB = 100              # last train records per calibration set, held out from training
+TRAIN_POOL_PER_SET = 2000  # seeded train examples per trainable set in the pool
 SEED = 0
+POOL_VERSION = "v1"
+POOL_DIR = "/data/autoresearch/pool-" + POOL_VERSION
 
 VQA = ("aokvqa", "scienceqa", "vqav2_yesno")
 CAULDRON = tuple("cauldron_" + s for s in (
@@ -94,22 +124,86 @@ def load_split(name: str, split: str) -> List[Dict]:
         return []
 
 
+def _with_bytes(ex: Dict) -> Dict:
+    """An example whose image paths are replaced by the files' bytes (``laya.vlm`` loads either)."""
+    state = ex["state"]
+    if not isinstance(state, dict):
+        return ex
+    state = dict(state)
+    for key in ("image",):
+        if isinstance(state.get(key), str):
+            with open(state[key], "rb") as f:
+                state[key] = f.read()
+    if state.get("images"):
+        imgs = []
+        for p in state["images"]:
+            with open(p, "rb") as f:
+                imgs.append(f.read())
+        state["images"] = imgs
+    return dict(ex, state=state)
+
+
+def pool_selection(kind: str, name: str) -> List[Dict]:
+    """The examples (with image paths) that go into pool part ``kind`` for dataset ``name``, deterministically."""
+    import random
+
+    rng = random.Random("%d:%s:%s" % (SEED, kind, name))
+    if kind == "eval":
+        exs = load_split(name, "val")
+        return rng.sample(exs, min(EVAL_PER_SET, len(exs)))
+    exs = load_split(name, "train")
+    if kind == "calib":
+        return exs[-N_CALIB:]
+    exs = exs[:-N_CALIB] if name in CALIB_DATASETS else exs
+    return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
+
+
+def _pool_file(kind: str, name: str) -> str:
+    return os.path.join(POOL_DIR, kind, name + ".pkl")
+
+
+POOL_PARTS = ([("train", n) for n in TRAINABLE_DATASETS] + [("calib", n) for n in CALIB_DATASETS]
+              + [("eval", n) for n in EVAL_DATASETS])
+
+
+def load_pool(kinds=("train", "calib", "eval")) -> Dict[str, Dict[str, List[Dict]]]:
+    """``{kind: {dataset: examples}}`` from the pool; fails with the command to build it when it is missing."""
+    import pickle
+    from concurrent.futures import ThreadPoolExecutor
+
+    parts = [(k, n) for k, n in POOL_PARTS if k in kinds]
+    missing = [_pool_file(k, n) for k, n in parts if not os.path.exists(_pool_file(k, n))]
+    if missing:
+        raise FileNotFoundError("the autoresearch data pool %s is incomplete (%d parts missing, e.g. %s); build it "
+                                "with: modal run autoresearch/harness.py::prepare_pool" % (POOL_DIR, len(missing), missing[0]))
+
+    def read(part):
+        with open(_pool_file(*part), "rb") as f:
+            return part, pickle.load(f)
+
+    out: Dict[str, Dict[str, List[Dict]]] = {k: {} for k in kinds}
+    with ThreadPoolExecutor(16) as pool:  # a few large sequential reads each; a handful in flight hides latency
+        for (kind, name), exs in pool.map(read, parts):
+            out[kind][name] = exs
+    return out
+
+
 class Context:
     """What an experiment gets: the budget, the device, checkpoint lookup and training data. Training data never
     includes the val splits or the calibration tail the harness fits temperatures on."""
 
-    def __init__(self, time_budget_s: float):
+    def __init__(self, time_budget_s: float, train: Dict[str, List[Dict]]):
         self.time_budget_s = time_budget_s
         self.device = "cuda"
         self.ckpt_path = ckpt_path
+        self._train = train  # name -> train records minus the calibration tail
 
     def train_examples(self, names=TRAINABLE_DATASETS) -> List[Dict]:
         out = []
         for name in names:
             if name not in TRAINABLE_DATASETS:
                 raise ValueError("%s is not trainable here (one of %s)" % (name, TRAINABLE_DATASETS))
-            exs = load_split(name, "train")
-            out += exs[:-N_CALIB] if name in CALIB_DATASETS else exs
+            out += self._train[name]  # a new list each call; the records are shared (one run per container)
         return out
 
 
@@ -131,99 +225,188 @@ def _summary(metrics: Dict, hard_metrics: Dict) -> Dict:
             "n_questions": metrics["all"]["n"]}
 
 
-@app.function(image=image, gpu="H100", cpu=16, memory=65536, timeout=45 * 60, volumes=VOLUMES)
-def train_and_eval(source: str, tag: str, commit: str) -> Dict:
-    import random
-
-    import torch
-
-    from laya.vlm_train import collect_logits, fit_temperatures_from, metrics_from
-
-    torch.manual_seed(SEED)
-    random.seed(SEED)
-    data_vol.reload()
-    exp = _import_experiment(source)
-    ctx = Context(TIME_BUDGET)
-    t_setup = time.time()
-    agent = exp.build(ctx)
-    setup_s = time.time() - t_setup
-    t0 = time.time()
-    exp.train(agent, ctx)
-    train_s = time.time() - t0
-    if train_s > TIME_BUDGET + 60:
-        raise RuntimeError("training took %.0f s, over the %d s budget" % (train_s, TIME_BUDGET))
-    agent.model.eval()
-
-    calib = []
-    for name in CALIB_DATASETS:
-        calib += load_split(name, "train")[-N_CALIB:]
-    temps = fit_temperatures_from(collect_logits(agent.model, agent.processor, calib, batch_size=32, num_workers=8))
-    agent.temperature, agent.temperature_by_options = list(temps), {}
-
-    out_dir = os.path.join(ROOT, tag, commit)
-    agent.save(out_dir)
-    ckpt_vol.commit()
-    del agent
-    torch.cuda.empty_cache()
-
-    from laya.vlm import VLMAgent
-
-    agent = VLMAgent(out_dir, device="cuda")
-    params = sum(p.numel() for p in agent.model.parameters())
-    rng = random.Random(SEED)
-    val = []
-    for name in EVAL_DATASETS:
-        exs = load_split(name, "val")
-        val += rng.sample(exs, min(EVAL_PER_SET, len(exs)))
-    records = collect_logits(agent.model, agent.processor, val, batch_size=32, num_workers=12)
-    metrics = metrics_from(records, agent.temperature)
-    # one right answer (one-hot target): ECE is meaningful there, not against a spread of human votes
-    hard = metrics_from([r for r in records if float(r["target"].max()) >= 0.999], agent.temperature)
-    summary = _summary(metrics, hard)
-    summary["params_m"] = params / 1e6
-    res = {"tag": tag, "commit": commit, "summary": summary, "metrics": metrics, "temperature": temps,
-           "setup_s": round(setup_s, 1), "train_s": round(train_s, 1), "checkpoint": out_dir,
-           "config": {k: v for k, v in agent.cfg.items() if isinstance(v, (str, int, float, bool)) or v is None}}
-    print(json.dumps(summary))
-    return res
+def _log(t_start: float, msg: str) -> None:
+    print("[harness %6.1f s] %s" % (time.time() - t_start, msg), flush=True)
 
 
-@app.function(image=image, gpu="L4", cpu=4, memory=16384, timeout=20 * 60, volumes=VOLUMES)
-def latency(tag: str, commit: str) -> Dict:
-    import random
+@app.cls(image=image, gpu="H100", cpu=16, memory=65536, timeout=45 * 60, volumes=VOLUMES,
+         enable_memory_snapshot=True, single_use_containers=True)
+class TrainEval:
+    @modal.enter(snap=True)
+    def load(self):
+        """Experiment-independent CPU state, kept in the memory snapshot. No CUDA here: there is no GPU yet."""
+        t = time.time()
+        import random  # noqa: F401
 
-    import numpy as np
-    import torch
+        import torch  # noqa: F401
+        import transformers  # noqa: F401
+
+        import laya.vlm  # noqa: F401
+        import laya.vlm_train  # noqa: F401
+        _log(t, "imports")
+
+        self.pool = load_pool()
+        _log(t, "data pool: %s" % ", ".join("%s %d examples" % (k, sum(len(v) for v in d.values()))
+                                            for k, d in self.pool.items()))
+        self.snap_s = time.time() - t
+
+    @modal.enter(snap=False)
+    def restore(self):
+        _log(time.time(), "restored (snapshot built in %.1f s)" % self.snap_s)
+
+    def _train_lists(self) -> Dict[str, List[Dict]]:
+        return self.pool["train"]
+
+    def _calib(self) -> List[Dict]:
+        return [ex for name in CALIB_DATASETS for ex in self.pool["calib"][name]]
+
+    def _val(self) -> List[Dict]:
+        return [ex for name in EVAL_DATASETS for ex in self.pool["eval"][name]]
+
+    @modal.method()
+    def run(self, source: str, tag: str, commit: str) -> Dict:
+        import random
+
+        import torch
+
+        from laya.vlm_train import collect_logits, fit_temperatures_from, metrics_from
+
+        t_run = time.time()
+        torch.manual_seed(SEED)
+        random.seed(SEED)
+        exp = _import_experiment(source)
+        ctx = Context(TIME_BUDGET, self._train_lists())
+        t_setup = time.time()
+        agent = exp.build(ctx)
+        setup_s = time.time() - t_setup
+        _log(t_run, "build %.1f s" % setup_s)
+        t0 = time.time()
+        exp.train(agent, ctx)
+        train_s = time.time() - t0
+        if train_s > TIME_BUDGET + 60:
+            raise RuntimeError("training took %.0f s, over the %d s budget" % (train_s, TIME_BUDGET))
+        agent.model.eval()
+
+        temps = fit_temperatures_from(collect_logits(agent.model, agent.processor, self._calib(), batch_size=32,
+                                                     num_workers=8))
+        agent.temperature, agent.temperature_by_options = list(temps), {}
+
+        out_dir = os.path.join(ROOT, tag, commit)
+        agent.save(out_dir)
+        ckpt_vol.commit()
+        del agent
+        torch.cuda.empty_cache()
+
+        from laya.vlm import VLMAgent
+
+        agent = VLMAgent(out_dir, device="cuda")
+        params = sum(p.numel() for p in agent.model.parameters())
+        records = collect_logits(agent.model, agent.processor, self._val(), batch_size=32, num_workers=12)
+        metrics = metrics_from(records, agent.temperature)
+        # one right answer (one-hot target): ECE is meaningful there, not against a spread of human votes
+        hard = metrics_from([r for r in records if float(r["target"].max()) >= 0.999], agent.temperature)
+        summary = _summary(metrics, hard)
+        summary["params_m"] = params / 1e6
+        res = {"tag": tag, "commit": commit, "summary": summary, "metrics": metrics, "temperature": temps,
+               "setup_s": round(setup_s, 1), "train_s": round(train_s, 1), "checkpoint": out_dir,
+               "config": {k: v for k, v in agent.cfg.items() if isinstance(v, (str, int, float, bool)) or v is None}}
+        print(json.dumps(summary))
+        _log(t_run, "done")
+        return res
+
+
+def _latency_cases(evals: Dict[str, List[Dict]]) -> List:
+    """The first ``ceil(LATENCY_N / len(EVAL_DATASETS))`` single-image examples of each eval set's pool part, decoded,
+    cut to ``LATENCY_N``: the same fixed images for every experiment."""
+    import io
+
     from PIL import Image
 
-    from laya.vlm import VLMAgent
-
-    ckpt_vol.reload()
-    agent = VLMAgent(os.path.join(ROOT, tag, commit), device="cuda", dtype="bf16")
-    rng = random.Random(SEED)
-    per = -(-LATENCY_N // len(EVAL_DATASETS))  # ceil, then cut to LATENCY_N
+    per = -(-LATENCY_N // len(EVAL_DATASETS))
     cases = []
     for name in EVAL_DATASETS:
-        exs = [ex for ex in load_split(name, "val") if isinstance(ex["state"], dict) and ex["state"].get("image")]
-        for ex in rng.sample(exs, min(per, len(exs))):
+        exs = [ex for ex in evals[name] if isinstance(ex["state"], dict) and ex["state"].get("image") is not None]
+        for ex in exs[:per]:
             state = dict(ex["state"])
-            with Image.open(state["image"]) as im:
+            with Image.open(io.BytesIO(state["image"])) as im:
                 state["image"] = im.convert("RGB")
             q = ex["q"]
             crit = list(q["crit"]) if q["t"] == "choice" else q["crit"]
             cases.append((state, {"q": {"type": q["t"], "instructions": q["ins"], "criteria": crit}}))
-    cases = cases[:LATENCY_N]
-    for state, qs in cases[:10]:
-        agent.predict(state, qs)
-    ms = []
-    for state, qs in cases:
-        torch.cuda.synchronize()
-        t = time.perf_counter()
-        agent.predict(state, qs)
-        torch.cuda.synchronize()
-        ms.append((time.perf_counter() - t) * 1000)
-    return {"latency_ms": float(np.median(ms)), "latency_p90_ms": float(np.percentile(ms, 90)), "n": len(ms),
-            "gpu": torch.cuda.get_device_name(0)}
+    return cases[:LATENCY_N]
+
+
+@app.cls(image=image, gpu="L4", cpu=4, memory=16384, timeout=20 * 60, volumes=VOLUMES,
+         enable_memory_snapshot=True, single_use_containers=True)
+class Latency:
+    @modal.enter(snap=True)
+    def load(self):
+        t = time.time()
+        import numpy  # noqa: F401
+        import torch  # noqa: F401
+
+        import laya.vlm  # noqa: F401
+        import laya.vlm_train  # noqa: F401
+
+        self.cases = _latency_cases(load_pool(("eval",))["eval"])
+        _log(t, "imports and %d latency cases" % len(self.cases))
+
+    @modal.method()
+    def run(self, tag: str, commit: str) -> Dict:
+        import numpy as np
+        import torch
+
+        from laya.vlm import VLMAgent
+
+        ckpt_vol.reload()
+        agent = VLMAgent(os.path.join(ROOT, tag, commit), device="cuda", dtype="bf16")
+        cases = self.cases
+        for state, qs in cases[:10]:
+            agent.predict(state, qs)
+        ms = []
+        for state, qs in cases:
+            torch.cuda.synchronize()
+            t = time.perf_counter()
+            agent.predict(state, qs)
+            torch.cuda.synchronize()
+            ms.append((time.perf_counter() - t) * 1000)
+        return {"latency_ms": float(np.median(ms)), "latency_p90_ms": float(np.percentile(ms, 90)), "n": len(ms),
+                "gpu": torch.cuda.get_device_name(0)}
+
+
+@app.function(image=image, cpu=4, memory=8192, timeout=60 * 60, volumes={"/data": data_vol})
+def build_pool_part(kind: str, name: str) -> Dict:
+    """One pool part: the selected examples with their image bytes inline, pickled to the pool directory."""
+    import pickle
+    from concurrent.futures import ThreadPoolExecutor
+
+    t = time.time()
+    path = _pool_file(kind, name)
+    if os.path.exists(path):
+        return {"kind": kind, "name": name, "examples": -1, "mb": round(os.path.getsize(path) / 1e6, 1), "seconds": 0.0}
+    exs = pool_selection(kind, name)
+    with ThreadPoolExecutor(64) as pool:  # each small-file read is ~0.4 s of latency; overlap many
+        exs = list(pool.map(_with_bytes, exs))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        pickle.dump(exs, f, protocol=5)
+    os.replace(path + ".tmp", path)
+    data_vol.commit()
+    return {"kind": kind, "name": name, "examples": len(exs), "mb": round(os.path.getsize(path) / 1e6, 1),
+            "seconds": round(time.time() - t, 1)}
+
+
+@app.local_entrypoint()
+def prepare_pool():
+    """modal run autoresearch/harness.py::prepare_pool  -- build every missing pool part, all in parallel."""
+    total = 0.0
+    for r in build_pool_part.starmap(POOL_PARTS, order_outputs=False, return_exceptions=True):
+        if isinstance(r, Exception):
+            print("FAILED:", repr(r)[:300])
+            continue
+        total += r["mb"]
+        print("%-6s %-28s %6d examples %8.1f MB %6.1f s" % (r["kind"], r["name"], r["examples"], r["mb"], r["seconds"]))
+    print("pool %s: %.1f GB" % (POOL_DIR, total / 1e3))
 
 
 @app.function(image=image, timeout=10 * 60, volumes={"/ckpt": ckpt_vol})
@@ -239,6 +422,41 @@ def prune_checkpoints(tag: str, keep: List[str]) -> List[str]:
             removed.append(name)
     ckpt_vol.commit()
     return removed
+
+
+def _code_hash() -> str:
+    """What the containers run: this file and the shipped ``laya`` package."""
+    import hashlib
+
+    h = hashlib.sha256()
+    files = [os.path.abspath(__file__)]
+    for d, _, names in sorted(os.walk(os.path.join(REPO, "laya"))):
+        files += [os.path.join(d, n) for n in sorted(names) if n.endswith(".py")]
+    for path in files:
+        h.update(os.path.relpath(path, REPO).encode() + b"\0")
+        with open(path, "rb") as f:
+            h.update(f.read() + b"\0")
+    return h.hexdigest()[:10]
+
+
+def deployed_classes():
+    """``(TrainEval, Latency)`` from a deployment of exactly this code, deploying it first if needed.
+
+    Modal only snapshots deployed apps, so ``modal run`` alone would rebuild everything every time. Each version of
+    the code gets its own app, ``laya-autoresearch-<hash>``: redeploying unchanged code is quick and keeps its
+    snapshot, and concurrent runs from different code never call each other's deployment.
+    """
+    name = "%s-%s" % (app.name, _code_hash())
+    try:
+        te = modal.Cls.from_name(name, "TrainEval")
+        te.hydrate()
+    except modal.exception.NotFoundError:
+        cmd = [sys.executable, "-m", "modal", "deploy", os.path.abspath(__file__), "--name", name]
+        p = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True)
+        if p.returncode:
+            raise RuntimeError("modal deploy failed:\n" + p.stdout + p.stderr)
+        te = modal.Cls.from_name(name, "TrainEval")
+    return te, modal.Cls.from_name(name, "Latency")
 
 
 def _git(*args) -> str:
@@ -260,9 +478,10 @@ def main(tag: str, desc: str = "", prune: bool = True):
     with open(exp_path) as f:
         source = f.read()
     t0 = time.time()
+    train_eval, latency = deployed_classes()  # a failed deploy is not the experiment's crash
     try:
-        res = train_and_eval.remote(source, tag, commit)
-        res["summary"].update({k: v for k, v in latency.remote(tag, commit).items() if k.startswith("latency")})
+        res = train_eval().run.remote(source, tag, commit)
+        res["summary"].update({k: v for k, v in latency().run.remote(tag, commit).items() if k.startswith("latency")})
     except Exception as e:
         print("crash: %r" % (e,))
         pareto.append_tsv(tsv, pareto.crash_row(commit, desc))

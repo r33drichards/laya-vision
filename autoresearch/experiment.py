@@ -8,7 +8,8 @@ harness's: train only on ``ctx.train_examples()``, stay inside the time budget, 
 ``agent.save`` / reload (an architecture change has to be written into the backbone config, as the helpers below do).
 
 ``ctx`` has ``time_budget_s``, ``device``, ``ckpt_path(run)`` (a run on the laya-checkpoints volume) and
-``train_examples(names=...)`` (the Cauldron and score train splits, minus the calibration tail).
+``train_examples(names=...)`` (the data pool's 2,000 examples per Cauldron and score train split, never the
+calibration tail; images are in memory as encoded bytes).
 """
 from typing import Dict, Optional
 
