@@ -103,6 +103,24 @@ A change only counts if it survives `agent.save` and reload. The harness measure
 disk, so an architecture change must also be written into the backbone config, as the helpers in `experiment.py`
 do.
 
+## What the games budget buys (measured, tag sep23-games)
+
+Why Maze, CartPole, Acrobot and MountainCar stay at 0 while ViZDoom and LunarLander learn, tested by competing
+hypotheses (plumbing, perception, labels, LR, data size, drift) rather than by guessing:
+
+- Not plumbing: maze targets are balanced, their argmax is the label, the training item carries them.
+- Not perception or labels: 500 maze frames alone for 3 minutes (307 steps) fit to 99% and reach 57.5% on unseen
+  mazes, with the vision tower frozen at 512 px. The loss sits at its start for ~50 pure-maze steps first.
+- It is exposure: in the 25% game mix (9 games) Maze gets ~1,200 draws in 5 minutes, and the trained checkpoint is
+  still at chance on its *own training frames* (NLL 1.37 = ln 4; CartPole predicts one action for all 400 frames).
+  Giving Maze the whole game share (~10k draws) gives the first solves (Maze4 0.055) and costs ViZDoom and
+  LunarLander all their gain.
+- So not covariate shift yet: DAgger helps a policy that fits the expert's states and drifts; these do not fit them.
+
+Within 5 minutes, points of `games` are far cheaper from ViZDoom and LunarLander than from the mazes. Judge a
+game-data change by per-move accuracy on training and unseen frames, not by game score alone: score floors at 0
+until accuracy is high.
+
 ## Lessons from autogo
 
 [autogo](https://github.com/r33drichards/autogo) runs the same kind of loop on an AlphaGo-style Go player, and its

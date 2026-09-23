@@ -96,7 +96,9 @@ def build(ctx):
     if GAME_FRAC:
         import toolkit
 
-        games = toolkit.maze_examples(20000)  # test: all game draws to Maze (~10k in 5 min, as the overfit probe)
+        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
+        for g in CONTROL_GAMES:
+            games += toolkit.control_examples(g, 5000)
         ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
     return agent
 
