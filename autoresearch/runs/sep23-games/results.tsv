@@ -13,3 +13,4 @@ ced98b7	0.6694	0.7075	0.0381	0.0821	201.1613	0.8322	keep	exp: keep 20 of 30 text
 7405aef	0.6317	0.6551	0.0234	0.1346	183.4609	0.7492	discard	repeat: 15 text layers (games noise)
 f03734b	0.5276	0.5449	0.0173	0.1204	165.7604	0.6576	keep	exp: keep 10 of 30 text layers on the 25% game mix
 c44f30c	0.4406	0.4584	0.0178	0.0986	155.1094	0.7256	keep	exp: keep 8 of 12 vision layers on the 15-layer recipe
+23b7087	0.6631	0.7105	0.0474	-0.0349	236.5623	0.9999	discard	exp (ACH test of H1-exposure): the whole 25% game share to Maze
