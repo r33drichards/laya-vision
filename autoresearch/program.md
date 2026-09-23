@@ -93,7 +93,9 @@ You CANNOT:
 - train on anything but `ctx.train_examples()` (the pool's 2,000 examples per Cauldron and score set),
   `ctx.game_examples()` and what `toolkit.py` generates (on seeds below 100,000; the games benchmark plays 700,000+):
   no val splits, no `eval_*` sets, no calibration tail;
-- use test-time search (`agent.cfg["search"]` / `laya.search`): the model plays greedy, one forward per move;
+- use test-time search (`agent.cfg["search"]`): the benchmark plays the saved model greedy, one forward per move.
+  Search during training is fine (rollouts, `laya.search`, expert relabelling inside `train()`, all within the
+  5-minute budget, on training seeds below 100,000): only what the model learned is scored;
 - exceed the 5-minute training budget (the harness fails runs over budget + 60 s);
 - add dependencies beyond what the harness image installs.
 
@@ -137,6 +139,10 @@ architecture plays far better than ours. What carries over, with its evidence:
 - **Game data**: mix `toolkit` game examples (soft BFS targets for Maze and Snake, expert frames for classic
   control) into the training stream, and the pool's Atari and ViZDoom expert frames via `ctx.game_examples()`.
 - **Value head**: `"value_head": true` with `value` targets, as an auxiliary loss.
+- **Train on the model's own states (DAgger)**: expert data never shows the states the model's mistakes lead to.
+  Mid-training, roll the current model out on training seeds, label the frames it visits with the BFS / expert move
+  (or a short `laya.search` where there is no expert), add them to the mix, keep training. autogo's version is
+  MCTS from its own positions, with the visit counts as targets.
 - **Calibration**: the harness fits temperatures, but training with the proper scoring rules (`w_ce_schedule`, `w_sph`)
   changes how well a single temperature can fix things.
 
