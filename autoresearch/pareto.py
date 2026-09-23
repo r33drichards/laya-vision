@@ -28,8 +28,10 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 # (name, direction, margin, margin is relative). A result must beat every kept result by more than the margin in at
 # least one objective to count as new. quality and latency_x margins were measured on the unchanged baseline (4 runs
-# on the pooled harness: quality 0.6691-0.6739, latency_x 0.998 / 1.007 on L4 hosts timing 52 / 77 ms raw). The games
-# margin is provisional until the baseline has been repeated on the games objective (program.md asks for this).
+# on the pooled harness: quality 0.6691-0.6739, latency_x 0.998 / 1.007 on L4 hosts timing 52 / 77 ms raw). games is
+# deterministic for a given checkpoint (fixed seeds, greedy play) and the baseline repeated exactly (-0.0344 twice,
+# every game identical), but that baseline plays degenerately (0 on the mazes, Acrobot, MountainCar), so retraining
+# noise did not move it; 0.03 is one game moving 0.3 in the 10-game mean, kept until a stronger player is repeated.
 OBJECTIVES = (
     ("quality", "max", 0.005, False),
     ("games", "max", 0.03, False),
