@@ -119,6 +119,17 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
 
 - **accuracy / ECE / NLL** are on calibrated probabilities (the checkpoint's per-type temperatures), as `predict`
   returns them. ECE under ~0.03 means probabilities can be taken at face value.
+- **ECE floor** (`ece_floor`, `ece_floor_p95` next to each set's `ece`, and on the pooled `all`): ECE on n rows is
+  biased upward, so read it against the ECE a *perfectly calibrated* model scores on the same confidences and row
+  count (`laya.robustness_floor.ece_floor_fields`: correctness redrawn as Bernoulli(confidence) 200 times, same 15
+  bins, seeded by the set's name). On a few hundred rows the floor is ~0.05; on the 59k pooled rows ~0.005. An
+  ECE at or under `ece_floor_p95` is sampling noise, not miscalibration; the report flags a hard-label set only
+  above its p95 *and* above 0.03, and falls back to the fixed 0.10 for results from before the floor (they show no
+  floor column). `evaluate` computes it for every set type, because `metrics_from` scores every type's ECE the same
+  way (max probability; argmax == label, the most-voted answer on vote sets), so the floor is the right null for
+  the number printed; on vote sets that ECE is still not the thing to judge. Rows count as independent: sets with
+  several questions per image (VQAv2, Cauldron) have a somewhat higher true floor. It is not a confidence interval
+  for the ECE.
 - **Sets with human votes** (KonIQ, EvalMuse, CIFAR-10H, FER+, VizWiz, the `score` sets): judge them by
   `soft_xent` / `xent` against `prior_...`, the cross-entropy of always predicting the set's average vote. Lower
   than the prior = the model learned something per image. ECE there compares confidence with the single

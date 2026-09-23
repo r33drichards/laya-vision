@@ -56,6 +56,17 @@ def ece_noise_floor(conf, n_sim: int = 200, seed: int = 0, bins: int = BINS, gro
             "n_sim": int(n_sim)}
 
 
+def ece_floor_fields(conf, key: str, n_sim: int = 200, seed: int = 0) -> Dict:
+    """The floor of one reported ECE, as the keys stored next to it: ``ece_floor`` (mean) and ``ece_floor_p95``
+    of ``ece_noise_floor(conf)``, rows independent. ``conf`` must be exactly the max probabilities that ECE was
+    scored on (15 bins). The stream is seeded by ``(seed, key)`` (the dataset name), so a set's floor does not
+    depend on which other sets were evaluated with it. Empty ``conf``: ``{}`` (no floor to report)."""
+    fl = ece_noise_floor(conf, n_sim=n_sim, seed=_seed_for("ece_floor", seed, key))
+    if not fl["n"] or not np.isfinite(fl["mean"]):
+        return {}
+    return {"ece_floor": fl["mean"], "ece_floor_p95": fl["p95"]}
+
+
 def floor_stats(rows: Sequence[Dict], n_sim: int = 200, seed: int = 0) -> Dict:
     """For one set of prediction rows: its ECE (``robustness._ece``), the noise floor of its confidences with rows
     independent, and the comparison (``ece_ratio`` = ece / floor mean, ``ece_above_floor`` = ece > floor p95);

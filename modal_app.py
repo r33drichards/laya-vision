@@ -702,7 +702,8 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     agent = VLMAgent(_ckpt_path(run_name), device="cuda")
     print("backbone %s, readout %s" % (agent.cfg["backbone"], agent.model.readout))
     records = collect_logits(agent.model, agent.processor, val_ex, batch_size=32, num_workers=14)
-    raw, cal = metrics_from(records), metrics_from(records, agent.temperature)
+    # ece_floor / ece_floor_p95 per set: the ECE a calibrated model scores at the same confidences and size
+    raw, cal = metrics_from(records, ece_floor_sims=200), metrics_from(records, agent.temperature, ece_floor_sims=200)
     print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
     print("[val, T=1]        " + format_metrics(raw))
     print("[val, calibrated] " + format_metrics(cal))
@@ -2353,7 +2354,7 @@ def save_eval_results(run_name: str, filename: str, payload: dict) -> str:
 def _datasets_print(evals: dict) -> None:
     """One line per dataset from ``evaluate``'s calibrated metrics (the model as it would be used)."""
     cal = evals["val_calibrated"]
-    print("%-30s %6s %7s %6s %6s  %s" % ("dataset", "n", "acc", "ECE", "NLL", "vs human votes (prior)"))
+    print("%-30s %6s %7s %6s %6s %6s  %s" % ("dataset", "n", "acc", "ECE", "fl.p95", "NLL", "vs human votes (prior)"))
     for name in sorted(cal, key=lambda n: (n == "all", n)):
         m = cal[name]
         extra = []
@@ -2362,7 +2363,8 @@ def _datasets_print(evals: dict) -> None:
                 extra.append("%s %.3f%s" % (key, m[key], " (%.3f)" % m["prior_" + key] if "prior_" + key in m else ""))
         if "mae" in m:
             extra.append("mae %.2f" % m["mae"])
-        print("%-30s %6d %6.1f%% %6.3f %6.3f  %s" % (name, m["n"], 100 * m["acc"], m["ece"], m["nll"], ", ".join(extra)))
+        p95 = "%6.3f" % m["ece_floor_p95"] if "ece_floor_p95" in m else "%6s" % "-"
+        print("%-30s %6d %6.1f%% %6.3f %s %6.3f  %s" % (name, m["n"], 100 * m["acc"], m["ece"], p95, m["nll"], ", ".join(extra)))
 
 
 FULL_EVAL_PARTS = ("datasets", "games", "latency", "robustness")

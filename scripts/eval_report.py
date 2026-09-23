@@ -65,6 +65,29 @@ def _vs_votes(m: Dict) -> str:
     return ", ".join(parts)
 
 
+def _has_floor(cal: Dict, names: List[str]) -> bool:
+    """Whether any set carries ``ece_floor`` (results from before ``evaluate`` computed it have none, and their
+    tables keep their old columns)."""
+    return any("ece_floor" in cal[n] for n in names)
+
+
+def _floor(m: Dict, dash: str = "–") -> str:
+    """The calibrated noise floor of a set's ECE: mean with the 95th percentile in brackets."""
+    if "ece_floor" not in m:
+        return dash
+    return "%.3f (%.3f)" % (m["ece_floor"], m["ece_floor_p95"])
+
+
+def miscalibrated(m: Dict, threshold: float = 0.1, practical: float = 0.03) -> bool:
+    """Whether a set's ECE is a calibration problem. With a noise floor: above the ECE a perfectly calibrated
+    model stays under 95% of the time on the same confidences and row count (``ece_floor_p95``), and above
+    ``practical``, so a tiny but statistically visible gap on a large set is not called miscalibrated. Without
+    one (older results): above the fixed ``threshold``."""
+    if "ece_floor_p95" in m:
+        return m["ece"] > max(m["ece_floor_p95"], practical)
+    return m["ece"] > threshold
+
+
 def datasets_section(ds: Dict, split: str) -> List[str]:
     cal = ds["val_calibrated"]
     names = sorted(n for n in cal if n != "all")
@@ -82,11 +105,17 @@ def datasets_section(ds: Dict, split: str) -> List[str]:
     if "all" in cal:
         a = cal["all"]
         lines.append("| **all** (pooled) | %d | %d | %s | %.3f |" % (len(names), a["n"], _pct(a["acc"]), a["ece"]))
+    fl = _has_floor(cal, names)
     lines += ["", "<details><summary>Per dataset</summary>", "",
-              "| dataset | n | acc | ECE | NLL | vs human votes: xent (prior) |", "|---|---:|---:|---:|---:|---|"]
+              "| dataset | n | acc | ECE |%s NLL | vs human votes: xent (prior) |" % (" ECE floor (p95) |" if fl else ""),
+              "|---|---:|---:|---:|%s---:|---|" % ("---:|" if fl else "")]
     for n in names:
         m = cal[n]
-        lines.append("| %s | %d | %s | %.3f | %.3f | %s |" % (n, m["n"], _pct(m["acc"]), m["ece"], m["nll"], _vs_votes(m)))
+        lines.append("| %s | %d | %s | %.3f |%s %.3f | %s |" % (n, m["n"], _pct(m["acc"]), m["ece"],
+                                                              (" %s |" % _floor(m)) if fl else "", m["nll"], _vs_votes(m)))
+    if fl:
+        lines += ["", "ECE floor: the ECE a perfectly calibrated model scores on the same confidences and number of "
+                      "questions (mean, 95th percentile in brackets); an ECE under the p95 is sampling noise."]
     temps = ds.get("temperature")
     lines += ["", "Temperatures (choice, score, noul): %s" % ", ".join("%.3f" % t for t in temps) if temps else "",
               "</details>", ""]
@@ -508,17 +537,29 @@ def findings(result: Dict) -> List[tuple]:
                                 "weakest: %s at %s." % (len(names), "{:,}".format(a["n"]), _pct(a["acc"]), _short(best),
                                                          _pct(ds[best]["acc"]), _short(worst), _pct(ds[worst]["acc"]))))
             sev = "good" if a["ece"] < 0.03 else "warn" if a["ece"] < 0.08 else "bad"
+            if "ece_floor_p95" in a and a["ece"] <= a["ece_floor_p95"]:
+                sev = "good"  # within what a perfectly calibrated model scores on these questions
+            floor = (" A perfectly calibrated model would score %.3f on these questions (95%% of the time under %.3f)."
+                     % (a["ece_floor"], a["ece_floor_p95"])) if "ece_floor_p95" in a else ""
             out.append((sev, "Calibration: across all questions, its stated confidence and its actual accuracy differ by "
                              "%.1f points on average (ECE %.3f pooled; under 0.03 means probabilities can be read at "
-                             "face value)." % (100 * a["ece"], a["ece"])))
+                             "face value).%s" % (100 * a["ece"], a["ece"], floor)))
         # ECE scores confidence against the single most-voted label, which says little on sets trained against
         # human vote spreads (a model that copies a 45/40/15 split is "underconfident" by construction), so only
         # hard-label sets are flagged here; vote sets are judged against their prior below
         voted = {n for n in names if "soft_xent" in ds[n] or "xent" in ds[n]}
-        off = sorted([n for n in names if ds[n]["ece"] > 0.1 and n not in voted], key=lambda n: -ds[n]["ece"])
+        # a set's ECE is judged against its own noise floor when it has one: on a few hundred questions a perfectly
+        # calibrated model scores 0.05 or more, so a fixed threshold flags small sets for sampling noise
+        off = sorted([n for n in names if miscalibrated(ds[n]) and n not in voted], key=lambda n: (-ds[n]["ece"], n))
         if off:
-            out.append(("warn", "Poorly calibrated on %d hard-label set%s (ECE above 0.10): %s." % (
-                len(off), "" if len(off) == 1 else "s", ", ".join("%s %.2f" % (_short(n), ds[n]["ece"]) for n in off[:6]))))
+            floored = all("ece_floor_p95" in ds[n] for n in off)
+            rule = ("ECE above what a calibrated model scores on that many questions 95% of the time, and above 0.03"
+                    if floored else "ECE above 0.10" if not any("ece_floor_p95" in ds[n] for n in off)
+                    else "ECE above its calibrated noise floor's p95 and 0.03, or above 0.10 where there is no floor")
+            out.append(("warn", "Poorly calibrated on %d hard-label set%s (%s): %s." % (
+                len(off), "" if len(off) == 1 else "s", rule,
+                ", ".join("%s %.2f%s" % (_short(n), ds[n]["ece"], " (floor p95 %.2f)" % ds[n]["ece_floor_p95"]
+                                         if "ece_floor_p95" in ds[n] else "") for n in off[:6]))))
         vs = []
         for n in names:
             for key in ("soft_xent", "xent"):
@@ -711,12 +752,15 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
                        'is a model that always predicts the dataset\'s average vote, so a teal bar shorter than its pale bar means the model '
                        'has learned something per image.</p><div class="chart">%s</div></div>' % _pair_bars(vs))
         rows = []
+        fl = _has_floor(cal, names)
         for n in names:
             m = cal[n]
             vsh = _vs_votes(m) or '<span class="muted">&ndash;</span>'
-            rows.append([_e(n), "{:,}".format(m["n"]), _pct(m["acc"]), "%.3f" % m["ece"], "%.3f" % m["nll"], vsh])
+            rows.append([_e(n), "{:,}".format(m["n"]), _pct(m["acc"]), "%.3f" % m["ece"]]
+                        + ([_floor(m, "&ndash;")] if fl else []) + ["%.3f" % m["nll"], vsh])
         sec.append('<details><summary>All %d datasets, every number</summary>%s</details>' % (
-            len(names), _table(["dataset", "questions", "accuracy", "ECE", "NLL", "vs votes: xent (prior), levels off"], rows)))
+            len(names), _table(["dataset", "questions", "accuracy", "ECE"] + (["ECE floor (p95)"] if fl else [])
+                               + ["NLL", "vs votes: xent (prior), levels off"], rows)))
         temps = ds.get("temperature")
         if temps:
             sec.append('<p class="muted" style="font-size:13px">Temperatures (choice, score, yes/no): <span class="mono">%s</span></p>'
@@ -814,6 +858,9 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
     parts.append('<section><div class="eyebrow">Reading the numbers</div><h2>Glossary</h2><dl class="gloss">'
                  '<dt>accuracy</dt><dd>Share of questions where the most likely option is the labelled answer.</dd>'
                  '<dt>ECE</dt><dd>Expected calibration error: average gap between stated confidence and actual accuracy, 15 bins. 0.02 means a 70% answer is right about 68&ndash;72% of the time.</dd>'
+                 + ('<dt>ECE floor</dt><dd>The ECE a perfectly calibrated model scores on the same confidences and number of questions '
+                    '(mean, 95th percentile in brackets). ECE is biased upward on a finite set; under the p95 it is sampling noise.</dd>'
+                    if names and _has_floor(cal, names) else '') +
                  '<dt>NLL</dt><dd>Negative log-likelihood of the right answer; punishes confident mistakes.</dd>'
                  '<dt>xent / soft_xent</dt><dd>Cross-entropy against the human vote spread (score questions / choice and yes-no questions). Compare with the prior: always predicting the average vote.</dd>'
                  '<dt>levels off</dt><dd>For rubric scores: how far the expected level is from the humans\' expected level.</dd>'
@@ -920,11 +967,14 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
             L += ["### %s · mean %s" % (GROUP_LABELS.get(grp, grp), _pct(mean)), "", GROUP_ABOUT.get(grp, ""), ""]
             L += mermaid_hbar("%s: accuracy (%%)" % GROUP_LABELS.get(grp, grp), [_short(n) for n in members],
                               [100 * cal[n]["acc"] for n in members], "accuracy (%)", 0, 100)
-            L += ["| dataset | questions | accuracy | ECE | NLL |", "|---|---:|---:|---:|---:|"]
+            fl = _has_floor(cal, names)
+            L += ["| dataset | questions | accuracy | ECE |%s NLL |" % (" ECE floor (p95) |" if fl else ""),
+                  "|---|---:|---:|---:|%s---:|" % ("---:|" if fl else "")]
             for n in members:
                 m = cal[n]
                 star = "\\*" if ("xent" in m or "soft_xent" in m) else ""
-                L.append("| %s%s | %s | %s | %.3f | %.3f |" % (_short(n), star, "{:,}".format(m["n"]), _pct(m["acc"]), m["ece"], m["nll"]))
+                L.append("| %s%s | %s | %s | %.3f |%s %.3f |" % (_short(n), star, "{:,}".format(m["n"]), _pct(m["acc"]), m["ece"],
+                                                                (" %s |" % _floor(m)) if fl else "", m["nll"]))
             L.append("")
         vs = []
         for n in names:
@@ -1033,8 +1083,12 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
     L += ["## Reading the numbers", "",
           "- **accuracy**: share of questions where the most likely option is the labelled answer.",
           "- **ECE**: expected calibration error, the average gap between stated confidence and accuracy (15 bins). "
-          "0.02 means a 70% answer is right about 68–72% of the time.",
-          "- **NLL**: negative log-likelihood of the right answer; punishes confident mistakes.",
+          "0.02 means a 70% answer is right about 68–72% of the time."]
+    if names and _has_floor(cal, names):
+        L += ["- **ECE floor**: the ECE a perfectly calibrated model scores on the same confidences and number of questions "
+              "(mean, 95th percentile in brackets), simulated. ECE is biased upward on a finite set, so an ECE under the p95 "
+              "is sampling noise; a set is only called miscalibrated above it."]
+    L += ["- **NLL**: negative log-likelihood of the right answer; punishes confident mistakes.",
           "- **cross-entropy against human votes**: how far the model's probabilities are from the vote spread; compare "
           "with always predicting the dataset's average vote.",
           "- **levels off**: for rubric scores, how far the model's expected level is from the voters' expected level.",

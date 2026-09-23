@@ -211,3 +211,50 @@ def test_results_without_robustness_render_as_before():
     r = R.merge([{"model": "m", "code": CODE, "datasets": _datasets()}])
     assert "#### Robustness" not in R.render(r) and "Does it use the image?" not in R.render_html(r)
     assert "## Robustness" not in R.render_doc(r) and "robustness" not in R.findings(r).__repr__()
+
+
+def _floored():
+    """``_datasets`` with the noise-floor keys newer ``evaluate`` results carry (the vote set has one too)."""
+    d = _datasets()
+    cal = {n: dict(m) for n, m in d["val_calibrated"].items()}
+    cal["aokvqa"].update(ece=0.12, ece_floor=0.10, ece_floor_p95=0.15)  # high ECE on a small set: sampling noise
+    cal["cauldron_ai2d"].update(ece=0.06, ece_floor=0.02, ece_floor_p95=0.04)  # above its floor: miscalibrated
+    cal["cauldron_raven"].update(ece=0.02, ece_floor=0.005, ece_floor_p95=0.01)  # above its floor but under 0.03
+    cal["eval_cifar10h"].update(ece=0.3, ece_floor=0.05, ece_floor_p95=0.07)  # vote set: never flagged on ECE
+    cal["all"].update(ece=0.02, ece_floor=0.015, ece_floor_p95=0.025)
+    return dict(d, val_raw=cal, val_calibrated=cal)
+
+
+def test_ece_floor_column_only_when_results_have_it():
+    old = R.merge([{"model": "m", "code": CODE, "datasets": _datasets()}])
+    new = R.merge([{"model": "m", "code": CODE, "datasets": _floored()}])
+    for page in (R.render(old), R.render_doc(old), R.render_html(old)):
+        assert "ECE floor" not in page  # older result files render as before
+    md = R.render(new)
+    assert "| dataset | n | acc | ECE | ECE floor (p95) | NLL | vs human votes: xent (prior) |" in md
+    assert "| aokvqa | 100 | 60.0% | 0.120 | 0.100 (0.150) | 0.700 |  |" in md
+    doc = R.render_doc(new, "T")
+    assert doc == R.render_doc(new, "T")
+    assert "| dataset | questions | accuracy | ECE | ECE floor (p95) | NLL |" in doc
+    assert "| ai2d | 200 | 70.0% | 0.060 | 0.020 (0.040) | 0.700 |" in doc and "- **ECE floor**:" in doc
+    assert "| score_ava | 50 | 40.0% | 0.050 | – | 0.700 |" in md  # a set without the keys: a dash
+    html = R.render_html(new)
+    assert "<th class=\"num\">ECE floor (p95)</th>" in html and "0.100 (0.150)" in html and "<dt>ECE floor</dt>" in html
+
+
+def test_miscalibration_finding_uses_each_sets_floor():
+    cal = _floored()["val_calibrated"]
+    assert not R.miscalibrated(cal["aokvqa"])  # 0.12 is under its own p95 of 0.15
+    assert R.miscalibrated(cal["cauldron_ai2d"])  # 0.06 above p95 0.04
+    assert not R.miscalibrated(cal["cauldron_raven"])  # above p95 but a gap under 0.03
+    assert R.miscalibrated(_m(10, 0.5, ece=0.12)) and not R.miscalibrated(_m(10, 0.5, ece=0.09))  # no floor: 0.10
+    fs = R.findings({"model": "m", "datasets": _floored()})
+    warn = [t for s, t in fs if t.startswith("Poorly calibrated")]
+    assert warn == ["Poorly calibrated on 1 hard-label set (ECE above what a calibrated model scores on that many "
+                    "questions 95% of the time, and above 0.03): ai2d 0.06 (floor p95 0.04)."]
+    pooled = next((s, t) for s, t in fs if t.startswith("Calibration:"))
+    assert pooled[0] == "good" and "would score 0.015 on these questions (95% of the time under 0.025)" in pooled[1]
+    # older results: the fixed 0.10 threshold, and a small set with ECE 0.12 is flagged
+    old = _datasets()
+    old["val_calibrated"]["aokvqa"] = _m(100, 0.6, ece=0.12)
+    assert any(t == "Poorly calibrated on 1 hard-label set (ECE above 0.10): aokvqa 0.12." for _, t in R.findings({"model": "m", "datasets": old}))
