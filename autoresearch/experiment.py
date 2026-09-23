@@ -9,7 +9,16 @@ harness's: train only on ``ctx.train_examples()``, stay inside the time budget, 
 
 ``ctx`` has ``time_budget_s``, ``device``, ``ckpt_path(run)`` (a run on the laya-checkpoints volume) and
 ``train_examples(names=...)`` (the data pool's 2,000 examples per Cauldron and score train split, never the
-calibration tail; images are in memory as encoded bytes).
+calibration tail; images are in memory as encoded bytes) and ``game_examples(names=...)`` (the pool's Atari
+Freeway / Breakout and ViZDoom basic expert frames).
+
+Game play is the ``games`` objective (``games_eval.py``). ``import toolkit`` generates more game training data on the
+fly: ``toolkit.maze_examples(n)`` and ``toolkit.snake_examples(n)`` (soft targets over every shortest-path move, a
+``value`` target, the board's 8 symmetries), ``toolkit.control_examples(game, n)`` for CartPole, Acrobot,
+MountainCar and LunarLander, and ``toolkit.game_mix(ctx.train_examples(), games, frac, base_weights=MIX)`` to give
+games ``frac`` of the draws. A model built with ``"value_head": True`` in its config learns the ``value`` targets
+(``train(..., w_value=...)``); setting ``agent.cfg["search"]`` makes the games benchmark plan with ``laya.search``
+on the deterministic games.
 """
 from typing import Dict, Optional
 

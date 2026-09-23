@@ -109,8 +109,9 @@ def test_model_play_is_batched_capped_and_deterministic():
     assert {g: r["scores"] for g, r in out.items()} == {g: r["scores"] for g, r in again.items()}
     maze_calls = [c for c in calls if c[0].shape == calls[0][0].shape]
     assert len(maze_calls[0]) == 8  # the first round asks about every episode in one call
-    assert sum(len(c) for c in calls) == out["Maze4"]["decisions"] + out["Snake10"]["decisions"]
-    assert all(len(a) >= len(b) for a, b in zip(maze_calls, maze_calls[1:]))  # finished episodes drop out
+    assert sum(len(c) for c in calls) == out["Maze4"]["model_frames"] + out["Snake10"]["model_frames"]
+    assert out["Maze4"]["model_frames"] <= out["Maze4"]["decisions"] == sum(ge.make_env(suite["Maze4"], i).env.max_steps
+                                                                            for i in range(8))  # all capped
     # always RIGHT never solves a maze (4x-shortest-path cap) and the snake hits the right wall on step 5
     assert out["Maze4"]["model"] == 0.0 and out["Maze4"]["normalized"] == 0.0
     assert out["Snake10"]["decisions"] == 5 * 5
@@ -210,3 +211,12 @@ def test_search_hook_gets_adapters(monkeypatch):
         suite = small("LunarLander", episodes=2, cap=5)
         out = ge.run_family(StubAgent({"search": {"depth": 2}}), "control", suite, base_for(suite), fixed_probs(0))
         assert not out["LunarLander"]["search"]
+
+
+def test_repeated_screens_are_asked_once():
+    spec = dataclasses.replace(ge.SUITE["Maze4"], episodes=3)
+    calls = []
+    policy = ge.greedy_policy(StubAgent(), ge.question_for(spec), fixed_probs(0, calls))  # always UP: into the wall
+    res = ge.play_lockstep(spec, policy)
+    assert res["decisions"] == sum(res["steps"]) and min(res["steps"]) > 1  # every episode bumps until its cap
+    assert policy.frames == 3 and len(calls) == 1  # but each maze's single screen went to the model once

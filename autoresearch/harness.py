@@ -16,10 +16,15 @@ then, identically for every experiment:
 4. counts its parameters and times ``predict`` on an L4 in bf16 on ``LATENCY_N`` fixed images, alternating with the
    ``REFERENCE`` checkpoint in the same container.
 
-The three objectives (see ``pareto.py``):
+5. plays the games benchmark (``games_eval.py``: Maze, Snake, classic control, Atari Freeway and Breakout, ViZDoom
+   basic, fixed seeds) with the reloaded checkpoint, one L4 container per game family, alongside the latency job.
+
+The four objectives (see ``pareto.py``):
 
 * **quality** = macro accuracy over the eval sets minus the ECE pooled over the questions that have a single right
   answer (not the ones scored against human vote spreads, where ECE is not meaningful). Higher is better.
+* **games** = mean normalized game score, per game (model - random) / (expert - random) clipped to [-0.5, 1.5]
+  against the fixed baselines in ``game_baselines.json``. Higher is better.
 * **params_m**: parameters of the saved model, in millions. Lower is better.
 * **latency_x**: median ``predict`` time on the L4 (preprocessing included) divided by the ``REFERENCE``
   checkpoint's, timed alternately in the same container: raw milliseconds swing by ~50% between L4 hosts (52 vs
@@ -104,13 +109,27 @@ app = modal.App("laya-autoresearch")
 hf_vol = modal.Volume.from_name("laya-hf-cache")
 data_vol = modal.Volume.from_name("laya-datasets")
 ckpt_vol = modal.Volume.from_name("laya-checkpoints")
-image = (
+# The harness's own modules next to the laya package in every container: the games benchmark (and its fixed
+# baselines) and the toolkit experiments import to generate game training data.
+HARNESS_FILES = ("games_eval.py", "game_baselines.json", "toolkit.py")
+
+
+def _with_code(img):
+    img = img.add_local_python_source("laya")
+    for f in HARNESS_FILES:
+        img = img.add_local_file(os.path.join(REPO, "autoresearch", f), "/root/" + f)
+    return img
+
+
+_base = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("torch==2.14.0", "torchvision==0.29.0", "transformers==5.17.0", "safetensors", "huggingface_hub",
-                 "numpy", "pillow", "datasets", "num2words")
-    .env({"HF_HOME": "/cache/hf", "TOKENIZERS_PARALLELISM": "false"})
-    .add_local_python_source("laya")
+                 "numpy", "pillow", "datasets", "num2words", "gymnasium[classic-control,box2d]==1.3.0")
+    .env({"HF_HOME": "/cache/hf", "TOKENIZERS_PARALLELISM": "false", "SDL_VIDEODRIVER": "dummy",
+          "SDL_AUDIODRIVER": "dummy"})
 )
+image = _with_code(_base)
+games_image = _with_code(_base.pip_install("ale-py==0.12.1", "vizdoom"))
 VOLUMES = {"/cache/hf": hf_vol, "/data": data_vol, "/ckpt": ckpt_vol}
 ROOT = "/ckpt/autoresearch"
 
@@ -415,6 +434,31 @@ class Latency:
                 "n": len(ms), "gpu": torch.cuda.get_device_name(0)}
 
 
+@app.cls(image=games_image, gpu="L4", cpu=16, memory=32768, timeout=30 * 60, volumes=VOLUMES,
+         enable_memory_snapshot=True, single_use_containers=True)
+class Games:
+    @modal.enter(snap=True)
+    def load(self):
+        import torch  # noqa: F401
+
+        import games_eval  # noqa: F401
+        import laya.vlm  # noqa: F401
+
+    @modal.method()
+    def run(self, tag: str, commit: str, family: str) -> Dict:
+        """``games_eval.run_family`` on the experiment's saved checkpoint: ``{game: result}`` for ``family``."""
+        import games_eval
+
+        from laya.vlm import VLMAgent
+
+        ckpt_vol.reload()
+        t = time.time()
+        agent = VLMAgent(os.path.join(ROOT, tag, commit), device="cuda", dtype="bf16")
+        out = games_eval.run_family(agent, family)
+        _log(t, "games %s: %s" % (family, ", ".join("%s %.3f" % (g, r["normalized"]) for g, r in out.items())))
+        return out
+
+
 @app.function(image=image, cpu=4, memory=8192, timeout=60 * 60, volumes={"/data": data_vol})
 def build_pool_part(kind: str, name: str) -> Dict:
     """One pool part: the selected examples with their image bytes inline, pickled to the pool directory."""
@@ -465,11 +509,11 @@ def prune_checkpoints(tag: str, keep: List[str]) -> List[str]:
 
 
 def _code_hash() -> str:
-    """What the containers run: this file and the shipped ``laya`` package."""
+    """What the containers run: this file, the games benchmark and toolkit, and the shipped ``laya`` package."""
     import hashlib
 
     h = hashlib.sha256()
-    files = [os.path.abspath(__file__)]
+    files = [os.path.abspath(__file__)] + [os.path.join(REPO, "autoresearch", f) for f in HARNESS_FILES]
     for d, _, names in sorted(os.walk(os.path.join(REPO, "laya"))):
         files += [os.path.join(d, n) for n in sorted(names) if n.endswith(".py")]
     for path in files:
@@ -490,7 +534,7 @@ def follow_logs(name: str):
 
 
 def deployed_classes():
-    """``(TrainEval, Latency)`` from a deployment of exactly this code, deploying it first if needed.
+    """``(TrainEval, Latency, Games)`` from a deployment of exactly this code, deploying it first if needed.
 
     Modal only snapshots deployed apps, so ``modal run`` alone would rebuild everything every time. Each version of
     the code gets its own app, ``laya-autoresearch-<hash>``: redeploying unchanged code is quick and keeps its
@@ -506,7 +550,7 @@ def deployed_classes():
         if p.returncode:
             raise RuntimeError("modal deploy failed:\n" + p.stdout + p.stderr)
         te = modal.Cls.from_name(name, "TrainEval")
-    return te, modal.Cls.from_name(name, "Latency")
+    return te, modal.Cls.from_name(name, "Latency"), modal.Cls.from_name(name, "Games")
 
 
 def _git(*args) -> str:
@@ -541,11 +585,24 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
     with open(exp_path) as f:
         source = f.read()
     t0 = time.time()
-    train_eval, latency = deployed_classes()  # a failed deploy is not the experiment's crash
+    train_eval, latency, games = deployed_classes()  # a failed deploy is not the experiment's crash
     logs = follow_logs(deployment_name())
     try:
+        import games_eval
+
         res = train_eval().run.remote(source, tag, commit)
-        res["summary"].update({k: v for k, v in latency().run.remote(tag, commit).items() if k.startswith("latency")})
+        # the latency job and one games job per family, all on the saved checkpoint, at once
+        lat = latency().run.spawn(tag, commit)
+        fams = {f: games().run.spawn(tag, commit, f) for f in games_eval.FAMILIES}
+        res["summary"].update({k: v for k, v in lat.get().items() if k.startswith("latency")})
+        played = {}
+        for f, call in fams.items():
+            played.update(call.get())
+        g = games_eval.summarize(played)
+        if not g["complete"]:
+            raise RuntimeError("games benchmark incomplete, missing %s" % g["missing"])
+        res["summary"]["games"] = g["games"]
+        res["games"] = {"per_game": g["per_game"], "results": played}
     except Exception as e:
         print("crash: %r" % (e,))
         pareto.append_tsv(tsv, pareto.crash_row(commit, desc))
@@ -561,7 +618,7 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         json.dump(res, f, indent=2)
     s = res["summary"]
     print("---")
-    for k in ("quality", "macro_acc", "ece_hard", "params_m", "latency_x", "latency_ms", "latency_ref_ms"):
+    for k in ("quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x", "latency_ms", "latency_ref_ms"):
         print("%-17s %.4f" % (k + ":", s[k]))
     print("%-17s %.1f" % ("train_seconds:", res["train_s"]))
     print("%-17s %.1f" % ("total_seconds:", res["total_s"]))

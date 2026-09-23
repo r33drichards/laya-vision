@@ -34,8 +34,8 @@ and merges them into ``game_baselines.json``; the Atari expert (CleanRL PPO, ``l
 jax / flax / opencv and is measured by ``atari_expert_scores`` under the same seeds and cap.
 """
 import copy
+import hashlib
 import json
-import math
 import os
 import random
 import re
@@ -75,15 +75,15 @@ class GameSpec:
 
 SUITE: Dict[str, GameSpec] = {s.name: s for s in (
     GameSpec("Maze4", "grid", 128, SEED_BASE["grid"], None, "solve rate", {"game": "maze", "size": 4}),
-    GameSpec("Maze6", "grid", 128, SEED_BASE["grid"] + 10_000, None, "solve rate", {"game": "maze", "size": 6}),
+    GameSpec("Maze6", "grid", 64, SEED_BASE["grid"] + 10_000, None, "solve rate", {"game": "maze", "size": 6}),
     GameSpec("Snake10", "grid", 64, SEED_BASE["grid"] + 20_000, 200, "food eaten", {"game": "snake", "size": 10}),
-    GameSpec("CartPole", "control", 32, SEED_BASE["control"], 200, "reward", {"game": "CartPole"}),
-    GameSpec("Acrobot", "control", 32, SEED_BASE["control"] + 5_000, 200, "reward", {"game": "Acrobot"}),
-    GameSpec("MountainCar", "control", 32, SEED_BASE["control"] + 10_000, 200, "reward", {"game": "MountainCar"}),
-    GameSpec("LunarLander", "control", 32, SEED_BASE["control"] + 15_000, 300, "reward", {"game": "LunarLander"}),
+    GameSpec("CartPole", "control", 16, SEED_BASE["control"], 200, "reward", {"game": "CartPole"}),
+    GameSpec("Acrobot", "control", 16, SEED_BASE["control"] + 5_000, 200, "reward", {"game": "Acrobot"}),
+    GameSpec("MountainCar", "control", 16, SEED_BASE["control"] + 10_000, 200, "reward", {"game": "MountainCar"}),
+    GameSpec("LunarLander", "control", 16, SEED_BASE["control"] + 15_000, 300, "reward", {"game": "LunarLander"}),
     GameSpec("Freeway", "atari", 4, SEED_BASE["atari"], 1000, "game score", {"game": "Freeway"}),
     GameSpec("Breakout", "atari", 4, SEED_BASE["atari"] + 1_000, 1000, "game score", {"game": "Breakout"}),
-    GameSpec("DoomBasic", "doom", 32, SEED_BASE["doom"], None, "reward", {"scenario": "basic"}),
+    GameSpec("DoomBasic", "doom", 64, SEED_BASE["doom"], None, "reward", {"scenario": "basic"}),
 )}
 
 
@@ -248,44 +248,101 @@ def _pool() -> ThreadPoolExecutor:
     return _POOL
 
 
+FORWARD_BATCH = 16  # sequences per model forward: small enough to overlap with the next chunk's preprocessing
+
+
+def _item(agent, q: Dict, frame, prev=None) -> Dict:
+    """One sequence as ``laya.atari_train.action_probs`` builds it (the processor runs here on that backend)."""
+    from laya.common import QTYPES
+    from laya.vlm import build_vlm_inputs
+
+    state = {"image": frame} if prev is None else {"images": [prev, frame]}
+    it = build_vlm_inputs(agent.processor, state, q, agent.cfg.get("max_len", 1024), agent.cfg.get("head_max_len", 256))
+    it["qtype"] = QTYPES["choice"]
+    return it
+
+
+def _forward(agent, items: List[Dict], k: int) -> np.ndarray:
+    """``action_probs``'s forward and calibration (no feature cache) over prepared items. Checked on an L4 in
+    bf16: ``batched_probs`` and ``action_probs`` on the same 24 frames agree exactly (max difference 0.0)."""
+    import torch
+
+    from laya.common import QTYPES, temp_bucket
+    from laya.vlm import collate_vlm
+
+    b = collate_vlm(items, agent.processor.tokenizer.pad_token_id)
+    dev, dtype = agent.device, agent.model.encoder.dtype
+    if b["pixel_values"] is not None:
+        pix = dict(pixel_values=b["pixel_values"].to(dev, dtype), pixel_attention_mask=b["pixel_attention_mask"].to(dev))
+    else:
+        pix = dict(raw_pixels=b["raw_pixels"].to(dev), image_mask=b["image_mask"].to(dev))
+    with torch.no_grad():
+        logits, _ = agent.model(
+            b["input_ids"].to(dev), b["attention_mask"].to(dev), b["marker_pos"].to(dev), b["marker_mask"].to(dev),
+            b["qtype"].to(dev), option_span=b["option_span"].to(dev), **pix,
+        )
+    t = agent.temperature_by_options.get(temp_bucket(QTYPES["choice"], k), agent.temperature[QTYPES["choice"]])
+    return torch.softmax(logits[:, :k].float() / max(1e-3, float(t)), -1).cpu().numpy()
+
+
 def batched_probs(agent, frames: Sequence, question: Dict, prev_frames: Optional[Sequence] = None) -> np.ndarray:
-    """``laya.atari_train.action_probs`` over many frames: the calibrated option probabilities (question order),
-    exactly what ``predict`` computes with one option order.
+    """The calibrated option probabilities (question order) for many frames, as
+    ``laya.atari_train.action_probs(agent, frames, question, prev_frames)`` computes them -- the same sequences,
+    forward and temperature, so the same answer as ``predict`` with one option order -- but fast for big batches.
 
-    With the Hugging Face processor backend (the released checkpoint) preprocessing is ~20-35 ms of CPU per frame
-    and dominates, so the frames are split into chunks that run ``action_probs`` on a thread pool: the processor
-    work runs in parallel and the GPU forwards interleave. The device-side backend has no CPU work, so it runs
-    chunks of 64 one after another. ``question`` is one question definition (``{"type": "choice", ...}``).
-    """
-    from laya.atari_train import action_probs
+    With the Hugging Face processor backend (the released checkpoint) preprocessing costs 30-45 ms of CPU per
+    frame (measured on a Modal L4 host; the forward is ~10 ms per frame there) and would dominate, so every frame's sequence is built on a thread pool and the model runs a forward of
+    ``FORWARD_BATCH`` sequences as soon as they are ready, overlapping the GPU with the rest of the preprocessing.
+    The device-side backend has no CPU work to spread. ``question`` is one question definition
+    (``{"type": "choice", ...}``)."""
+    from laya.common import render_options
+    from laya.vlm import VLMAgent
 
-    frames = [np.asarray(f) for f in frames]
-    prev = None if prev_frames is None else [np.asarray(f) for f in prev_frames]
+    q = VLMAgent._to_internal(question)
+    k = len(render_options(q))
     n = len(frames)
     if n == 0:
-        return np.zeros((0, len(question["criteria"])), np.float32)
+        return np.zeros((0, k), np.float32)
+    frames = [np.asarray(f) for f in frames]
+    prev = [None] * n if prev_frames is None else [np.asarray(f) for f in prev_frames]
     if agent.prep.on_gpu:
-        size, runner = 64, map
+        get = lambda j: _item(agent, q, frames[j], prev[j])  # noqa: E731
     else:
-        workers = _pool()._max_workers
-        size, runner = max(1, min(32, math.ceil(n / workers))), _pool().map
-    starts = list(range(0, n, size))
-    outs = runner(lambda s: action_probs(agent, frames[s:s + size], question,
-                                         None if prev is None else prev[s:s + size]), starts)
-    return np.concatenate(list(outs), 0)
+        futures = [_pool().submit(_item, agent, q, f, p) for f, p in zip(frames, prev)]
+        get = lambda j: futures[j].result()  # noqa: E731
+    return np.concatenate([_forward(agent, [get(j) for j in range(s, min(n, s + FORWARD_BATCH))], k)
+                           for s in range(0, n, FORWARD_BATCH)], 0)
 
 
 ProbsFn = Callable[..., np.ndarray]
 
 
 def greedy_policy(agent, question: Dict, probs_fn: ProbsFn = batched_probs):
-    """``policy(envs) -> actions``: one batched forward over every env's rendered screen, argmax per env."""
+    """``policy(envs) -> actions``: one batched forward over every env's rendered screen, argmax per env.
+
+    The question is fixed, so the answer is a function of the screen alone: each distinct screen goes to the model
+    once per game and repeats reuse its action. A maze agent that walks into a wall sees the same screen again and
+    would bump it until the cap; this makes those steps free (and the answer to a screen consistent across batch
+    compositions). ``policy.frames`` counts the screens actually sent to the model."""
     q = question["action"]
+    memo: Dict = {}
 
     def policy(envs):
-        p = probs_fn(agent, [np.asarray(e.render()) for e in envs], q)
-        return [e.actions[int(row.argmax())] for e, row in zip(envs, p)]
+        frames = [np.asarray(e.render()) for e in envs]
+        keys = [(f.shape, hashlib.blake2b(f.tobytes(), digest_size=16).digest()) for f in frames]
+        new, seen = [], set()
+        for j, k in enumerate(keys):
+            if k not in memo and k not in seen:
+                seen.add(k)
+                new.append((k, j))
+        if new:
+            p = probs_fn(agent, [frames[j] for _, j in new], q)
+            for (k, _), row in zip(new, p):
+                memo[k] = int(row.argmax())
+            policy.frames += len(new)
+        return [e.actions[memo[k]] for e, k in zip(envs, keys)]
 
+    policy.frames = 0
     return policy
 
 
@@ -464,6 +521,7 @@ def play_model(spec: GameSpec, agent, probs_fn: ProbsFn = batched_probs) -> Dict
         policy = search_policy(agent, q, settings) if use_search else greedy_policy(agent, q, probs_fn)
         out = play_lockstep(spec, policy)
         out["search"] = use_search
+        out["model_frames"] = getattr(policy, "frames", None)
         return out
     if spec.family == "atari":
         from laya.atari_train import game_actions
@@ -477,17 +535,30 @@ def run_family(agent, family: str, suite: Dict[str, GameSpec] = SUITE, baselines
                probs_fn: ProbsFn = batched_probs) -> Dict[str, Dict]:
     """Play every ``family`` game of ``suite`` with ``agent`` and score it against the stored baselines:
     ``{game: {"model", "normalized", "episodes", "seconds", ...}}``."""
+    global _POOL
     baselines = load_baselines() if baselines is None else baselines
     out = {}
-    for spec in family_games(family, suite):
-        base = check_baseline(spec, baselines.get(spec.name))
+    try:
+        _run_games(agent, family, suite, baselines, probs_fn, out)
+    finally:
+        if _POOL is not None:
+            _POOL.shutdown()
+            _POOL = None
+    return out
+
+
+def _run_games(agent, family, suite, baselines, probs_fn, out) -> None:
+    specs = family_games(family, suite)
+    bases = {s.name: check_baseline(s, baselines.get(s.name)) for s in specs}  # fail before playing anything
+    for spec in specs:
+        base = bases[spec.name]
         t0 = time.time()
         res = play_model(spec, agent, probs_fn)
         out[spec.name] = {"model": res["mean"], "normalized": normalize(res["mean"], base["random"], base["expert"]),
                           "episodes": spec.episodes, "seconds": round(time.time() - t0, 1),
                           "random": base["random"], "expert": base["expert"], "scores": res["scores"],
-                          "decisions": res["decisions"], "search": res.get("search", False)}
-    return out
+                          "decisions": res["decisions"], "model_frames": res.get("model_frames", res["decisions"]),
+                          "search": res.get("search", False)}
 
 
 def summarize(results: Dict[str, Dict], suite: Dict[str, GameSpec] = SUITE) -> Dict:
