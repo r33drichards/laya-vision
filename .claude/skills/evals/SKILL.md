@@ -77,7 +77,7 @@ modal run modal_app.py::full_eval --model <run>/best [--parts datasets,games,lat
   `prepare_eval` is still going, then `--parts datasets` afterwards. `eval_report.py` merges the files.
 
 Single pieces, when that is all you need: `evaluate --run-name` (prints only, saves nothing), `games_eval`,
-`maze_eval` / `snake_eval` / `doom_eval --models a/best,b/best` to compare checkpoints on one game,
+`maze_eval` / `snake_eval` / `control_eval` / `doom_eval --models a/best,b/best` to compare checkpoints on one game,
 `modal_atari_train.py::atari_eval` for every trained Atari game, `bench_latency --run-name`. Evals outside
 `full_eval` (robustness, row-level evidence, benchmarks) are in section 8.
 
@@ -115,6 +115,11 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
 - **Atari** `normalized` = (model - random) / (expert - random). A checkpoint not trained on a game plays at
   random-level or degenerate constant-action policies (look at the top actions); ViZDoom "identical to
   always-attack" means it only shoots.
+- **Classic control** `normalized` is the same formula with a scripted controller as the expert, both baselines
+  played live on the same seeds. Returns are negative per step in Acrobot and MountainCar, so a model that never
+  finishes scores exactly the random baseline (-500 / -200, normalized 0). `solved` is the share of episodes at
+  the environment's solved score (CartPole 475, Acrobot -100, MountainCar -110, LunarLander 200). One step costs
+  one `predict`, so a good CartPole run is 5,000 calls; the games part takes longer than the 12 min above.
 - **GPU type**: `evaluate` runs on any of A10G, L4 or A100, and bf16 scores shift slightly between them (up to
   about a point on a ~100-question set, 0.01 points pooled). Its result records the GPU (`datasets.gpu`, shown in
   the report's datasets heading); compare two runs' dataset numbers only on the same GPU type. Results from before
@@ -138,7 +143,11 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
   `laya.vlm_train.jsonl_example`.
 - **Grid game**: an env class in `laya/gridgames.py` with `step`, `done`, `render`, `expert`, plus its question in
   `laya/games.py`; `play_episodes` and the Modal functions pick it up by name. Keep eval seeds at `GRID_SEED`.
-- Run `python -m pytest tests/test_evalsets.py tests/test_gridgames.py tests/test_metrics.py tests/test_eval_report.py`
+- **Classic control game** (any discrete-action Gymnasium env): an entry in `GAMES` in `laya/controlgames.py`
+  (env id, action names in the env's order, solved score), a scripted expert in `_expert_action`, and its goal and
+  action wording in `CONTROL_GOALS` / `CONTROL_ACTIONS` in `laya/games.py`; add it to `SUITE_CONTROL_GAMES` in
+  `modal_app.py` to put it in the suite. `tests/test_controlgames.py` checks the expert beats random.
+- Run `python -m pytest tests/test_evalsets.py tests/test_gridgames.py tests/test_controlgames.py tests/test_metrics.py tests/test_eval_report.py`
   (CPU, no downloads).
 
 ## 8. Robustness, row-level evidence and benchmarks

@@ -129,7 +129,19 @@ def games_section(games: Dict) -> List[str]:
             ends = ", ".join("%s %d" % kv for kv in sorted(r["ends"].items()))
             lines.append("| %s | %d | %.1f | %d | %.1f | %s |" % (r["policy"], r["size"], r["mean_eaten"], r["max_eaten"], r["mean_steps"], ends))
         lines.append("")
+    if games.get("control"):
+        lines += ["**Classic control** (greedy; normalized: 0 = random, 1 = scripted expert; solved: share of episodes at the solved score)", "",
+                  "| game | model | random | expert | normalized | solved | top actions |", "|---|---:|---:|---:|---:|---:|---|"]
+        for r in sorted(games["control"], key=lambda r: r["game"]):
+            lines.append("| %s | %.1f | %.1f | %.1f | %s | %s | %s |" % (r["game"], r["model_score"], r["random_score"], r["expert_score"],
+                                                                     _fmt(r.get("normalized"), "%.2f"), _pct(r["model_solved"]), _top_actions(r["actions"])))
+        lines.append("")
     return lines
+
+
+def _top_actions(actions: Dict[str, int], k: int = 3) -> str:
+    total = max(1, sum(actions.values()))
+    return ", ".join("%s %d%%" % (a, 100 * n / total) for a, n in sorted(actions.items(), key=lambda kv: (-kv[1], kv[0]))[:k])
 
 
 def render(result: Dict, status: Optional[Dict[str, str]] = None, run_url: str = "") -> str:
@@ -413,6 +425,12 @@ def findings(result: Dict) -> List[tuple]:
                         "Snake: eats %.1f food per game on a %d&times;%d board%s; games end by %s."
                         % (r["mean_eaten"], r["size"], r["size"], (" (expert %.1f)" % exp["mean_eaten"]) if exp else "",
                            ", ".join("%s %d" % kv for kv in sorted(r["ends"].items())))))
+    for r in sorted(g.get("control") or [], key=lambda r: r["game"]):
+        norm = r.get("normalized")
+        sev = "good" if norm is not None and norm >= 0.5 else "warn" if r["model_score"] > r["random_score"] else "bad"
+        out.append((sev, "%s: scores %.1f against %.1f for random play and %.1f for the scripted expert (normalized %s); "
+                         "solved in %s of episodes." % (r["game"], r["model_score"], r["random_score"], r["expert_score"],
+                                                        _fmt(norm, "%.2f"), _pct(r["model_solved"]))))
     lat = result.get("latency")
     if lat:
         out.append(("info", "Latency: %.0f ms median per predict call on an L4 in bf16 (p90 %.0f ms)." % (lat["median_ms"], lat["p90_ms"])))
@@ -566,6 +584,18 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
             sec.append('<div class="card"><h3>Snake &middot; %d&times;%d</h3><p class="lede">Food eaten per game, and how the games ended.</p>'
                        '<div class="chart">%s</div></div>' % (rows[0]["size"], rows[0]["size"],
                                                             _hbars(bars, vmax=vmax, fmt=lambda v: "%.1f" % v)))
+        if g.get("control"):
+            rows = []
+            for r in sorted(g["control"], key=lambda r: r["game"]):
+                norm = r.get("normalized")
+                cls = "" if norm is None else "good" if norm >= 0.5 else "warn" if norm > 0 else "bad"
+                rows.append([_e(r["game"]), "%.1f" % r["model_score"], "%.1f" % r["random_score"], "%.1f" % r["expert_score"],
+                             '<span class="%s">%s</span>' % (cls, "&ndash;" if norm is None else "%.2f" % norm),
+                             _pct(r["model_solved"]), _e(_top_actions(r["actions"], 2))])
+            sec.append('<div class="card"><h3>Classic control</h3><p class="lede">Gymnasium CartPole, Acrobot, MountainCar and LunarLander, '
+                       'greedy, %d episodes each; the screen ghosts the previous frame so motion is visible. Normalized: 0 = random, '
+                       '1 = scripted expert.</p>%s</div>'
+                       % (g["control"][0].get("episodes") or 0, _table(["game", "model", "random", "expert", "norm.", "solved", "most used"], rows)))
         sec.append("</div></section>")
         parts.append("".join(sec))
 
@@ -581,7 +611,7 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
                  '<dt>NLL</dt><dd>Negative log-likelihood of the right answer; punishes confident mistakes.</dd>'
                  '<dt>xent / soft_xent</dt><dd>Cross-entropy against the human vote spread (score questions / choice and yes-no questions). Compare with the prior: always predicting the average vote.</dd>'
                  '<dt>levels off</dt><dd>For rubric scores: how far the expected level is from the humans\' expected level.</dd>'
-                 '<dt>normalized</dt><dd>Atari score rescaled so random play is 0 and the expert is 1.</dd></dl></section>')
+                 '<dt>normalized</dt><dd>Atari or classic-control score rescaled so random play is 0 and the expert is 1.</dd></dl></section>')
     parts.append("</div>")
     page = "\n".join(parts)
     return page.encode("ascii", "xmlcharrefreplace").decode("ascii")
@@ -740,6 +770,20 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
                                                                   r["mean_eaten"], r["max_eaten"], r["mean_steps"],
                                                                   ", ".join("%s %d" % kv for kv in sorted(r["ends"].items()))))
             L.append("")
+        if g.get("control"):
+            rows = sorted(g["control"], key=lambda r: r["game"])
+            L += ["### Classic control", "", "Gymnasium CartPole, Acrobot, MountainCar and LunarLander from pixels, greedy; the screen ghosts "
+                  "the previous frame so motion is visible. Normalized: 0 = random, 1 = scripted expert; solved is the share of "
+                  "episodes reaching the environment's solved score.", ""]
+            L += mermaid_hbar("Classic control: normalized score", [r["game"] for r in rows],
+                              [max(-1.0, min(1.5, r["normalized"])) if r.get("normalized") is not None else 0.0 for r in rows],
+                              "normalized", -1, 1.5, [1.0] * len(rows))
+            L += ["| game | model | random | expert | normalized | solved | most used actions |", "|---|---:|---:|---:|---:|---:|---|"]
+            for r in rows:
+                L.append("| %s | %.1f | %.1f | %.1f | %s | %s | %s |" % (r["game"], r["model_score"], r["random_score"], r["expert_score"],
+                                                                        _fmt(r.get("normalized"), "%.2f"), _pct(r["model_solved"]),
+                                                                        _top_actions(r["actions"])))
+            L.append("")
 
     if lat:
         extra = ", ".join("%s %s" % (k.replace("_", " "), round(lat[k], 1) if isinstance(lat[k], float) else lat[k])
@@ -755,7 +799,7 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
           "- **cross-entropy against human votes**: how far the model's probabilities are from the vote spread; compare "
           "with always predicting the dataset's average vote.",
           "- **levels off**: for rubric scores, how far the model's expected level is from the voters' expected level.",
-          "- **normalized** (Atari): score rescaled so random play is 0 and the expert is 1.", ""]
+          "- **normalized** (Atari, classic control): score rescaled so random play is 0 and the expert is 1.", ""]
     return "\n".join(L).rstrip() + "\n"
 
 

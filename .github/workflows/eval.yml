@@ -25,7 +25,7 @@ on:
         type: boolean
         default: true
       games:
-        description: "Run the games suite (Atari, ViZDoom, Maze, Snake)"
+        description: "Run the games suite (Atari, ViZDoom, Maze, Snake, classic control)"
         type: boolean
         default: true
       latency:
