@@ -29,7 +29,7 @@ BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
 # size and latency: 0 keeps what the checkpoint has
-KEEP_TEXT_LAYERS = 20      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+KEEP_TEXT_LAYERS = 15      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
