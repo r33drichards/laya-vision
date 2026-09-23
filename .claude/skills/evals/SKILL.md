@@ -115,6 +115,10 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
 - **Atari** `normalized` = (model - random) / (expert - random). A checkpoint not trained on a game plays at
   random-level or degenerate constant-action policies (look at the top actions); ViZDoom "identical to
   always-attack" means it only shoots.
+- **GPU type**: `evaluate` runs on any of A10G, L4 or A100, and bf16 scores shift slightly between them (up to
+  about a point on a ~100-question set, 0.01 points pooled). Its result records the GPU (`datasets.gpu`, shown in
+  the report's datasets heading); compare two runs' dataset numbers only on the same GPU type. Results from before
+  this field have none: `thaitea/laya-vision`'s baseline in `eval-results/laya-vision-datasets.json` ran on an L4.
 - **Provenance**: every `predict` output carries a `provenance` block (prompt-format version, checkpoint and
   backbone revisions, dtype, device, library versions, `input_ids_sha256`, temperatures used). Two results with
   the same `input_ids_sha256` scored the same token sequences.

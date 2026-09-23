@@ -681,13 +681,15 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
              max_val: int = 0):
     """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
     raw and with its temperatures. Defaults to every prepared set (the official VQA splits and the Cauldron
-    holdouts); sets that are not prepared are skipped."""
+    holdouts); sets that are not prepared are skipped. The result records the GPU it ran on: the function takes any of
+    three types, and bf16 scores shift slightly between them (up to about a point on a set of ~100 questions)."""
     import torch
 
     from laya.vlm import VLMAgent
     from laya.vlm_train import collect_logits, format_metrics, metrics_from
 
-    print("GPU:", torch.cuda.get_device_name(0))
+    gpu = torch.cuda.get_device_name(0)
+    print("GPU:", gpu)
     data_vol.reload()
     val_ex = []
     for name in _ready(datasets):
@@ -708,7 +710,8 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
                 metas[name] = json.load(f)
         except (OSError, ValueError):
             metas[name] = None
-    return {"val_raw": raw, "val_calibrated": cal, "temperature": list(agent.temperature), "dataset_meta": metas}
+    return {"val_raw": raw, "val_calibrated": cal, "temperature": list(agent.temperature), "dataset_meta": metas,
+            "gpu": gpu}
 
 
 def _file_sha256(path: str) -> str:
