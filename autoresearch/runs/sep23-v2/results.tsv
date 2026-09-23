@@ -9,3 +9,4 @@ d8a7aa6	0.6635	0.6793	0.0157	0.1695	183.4609	0.7594	keep	exp: keep 15 of 30 text
 0124a9d	0.0000	0.0000	0.0000	0.0000	0.0000	0.0000	crash	exp: 2x LR on the 20-layer point (15-minute harness, pool v2)
 4e5af50	0.6776	0.7104	0.0328	0.1678	201.1613	0.8316	discard	exp: 2x LR on the 20-layer point, rerun of 0124a9d (pruned by a concurrent run)
 3ab9e08	0.6819	0.7074	0.0255	0.1759	201.1613	0.8299	discard	exp: game data at 35% on the 20-layer point (15-minute harness, pool v2)
+4d8c1bf	0.6537	0.6768	0.0231	0.1776	183.4609	0.7498	discard	exp: game data at 35% on the 15-layer point (15-minute harness, pool v2)
