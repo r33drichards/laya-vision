@@ -73,7 +73,7 @@ modal run modal_app.py::prepare_eval                                      # -> /
 modal run --detach modal_app.py::finetune_long --run-name my-run --epochs 2 --max-passes 4 --max-minutes 240 \
     --option-attention bidirectional --mix score_vlfeedback=3 --datasets cauldron,score --val-datasets vqa,cauldron,score
 modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name my-run --datasets cauldron
-modal run --detach modal_app.py::full_eval --model my-run/best          # every eval below at once, one results JSON
+modal run modal_app.py::full_eval --model my-run/best                   # every eval below at once, one results JSON (no --detach: results are collected locally)
 modal run modal_app.py::evaluate --run-name my-run/best                   # every prepared val set, raw and calibrated
 modal run modal_app.py::evaluate --run-name my-run/best --datasets eval   # only the held-out evaluation sets
 modal run --detach modal_app.py::split_bench                              # SmolVLM2, image splitting off / 1024 / 2048
