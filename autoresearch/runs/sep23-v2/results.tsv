@@ -1,3 +1,4 @@
 commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 c37ae78	0.6699	0.7119	0.0420	-0.0344	236.5623	1.0029	keep	baseline
 0f23827	0.6744	0.7120	0.0377	0.1545	236.5623	0.9920	keep	exp: game data at 25% of draws on the 15-minute harness with pool v2
+0728d7a	0.6806	0.7058	0.0252	0.1498	201.1613	0.8333	keep	exp: keep 20 of 30 text layers (15-minute harness, pool v2)
