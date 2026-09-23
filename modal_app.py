@@ -34,7 +34,8 @@
     modal run modal_app.py::snake_eval --models <run>/best    # Snake on a 10x10 board: greedy expert, random, models
     modal run modal_app.py::control_eval --models <run>/best  # CartPole / Acrobot / MountainCar / LunarLander: expert, random, models
     modal run modal_app.py::full_eval --model <run>/best  # EVERYTHING on one checkpoint, in parallel: evaluate over
-                                                     # vqa,cauldron,score,eval + games suite + latency; one JSON in
+                                                     # vqa,cauldron,score,eval + games suite + latency + robustness
+                                                     # controls (shuffled / no image, option order); one JSON in
                                                      # eval-results/ and <run>/evals/ on the checkpoint volume
     modal run modal_app.py::games_eval --model <run>/best --out games.json
                                                      # the games suite on one checkpoint: Atari Freeway / Breakout /
@@ -701,7 +702,8 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
     agent = VLMAgent(_ckpt_path(run_name), device="cuda")
     print("backbone %s, readout %s" % (agent.cfg["backbone"], agent.model.readout))
     records = collect_logits(agent.model, agent.processor, val_ex, batch_size=32, num_workers=14)
-    raw, cal = metrics_from(records), metrics_from(records, agent.temperature)
+    # ece_floor / ece_floor_p95 per set: the ECE a calibrated model scores at the same confidences and size
+    raw, cal = metrics_from(records, ece_floor_sims=200), metrics_from(records, agent.temperature, ece_floor_sims=200)
     print("temperatures (choice, score, noul):", [round(t, 3) for t in agent.temperature])
     print("[val, T=1]        " + format_metrics(raw))
     print("[val, calibrated] " + format_metrics(cal))
@@ -862,13 +864,14 @@ ROBUSTNESS_ROOT = CKPT_ROOT + "/robustness"  # <tag>/{predictions.jsonl.gz, summ
               volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol})
 def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: str = ",".join(ROBUSTNESS_DATASETS),
                n_per_dataset: int = 300, families: str = "", seed: int = 0, n_boot: int = 1000, val_split: str = "val",
-               tag: str = ""):
+               tag: str = "", evals_name: str = "", write: bool = True):
     """Meaning-preserving perturbations of ``n_per_dataset`` seeded val rows per set (``laya.robustness``): option
     order, rewording, image corruptions, and the shuffled-image / no-image controls, scored with the checkpoint's
     temperatures. ``families`` (comma-separated) may also name the opt-in ``R.EXTRA_FAMILIES`` (option set /
     abstention, question form / negation, text and typographic injection), summarised under their own keys. Writes the per-row predictions and the summary to ``ROBUSTNESS_ROOT/<tag>/`` (a new directory;
     the job refuses an existing one) so a detached run's results survive the local client, and returns the
-    summary."""
+    summary. ``full_eval``'s ``robustness`` part passes ``evals_name`` to write them to ``<run dir>/evals/<evals_name>/``
+    instead, beside its other result files, or ``write=False`` (``--no-save``) to write nothing."""
     import gzip
 
     import torch
@@ -876,9 +879,12 @@ def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
     from laya import robustness as R
     from laya.vlm import VLMAgent
 
-    out_dir = os.path.join(ROBUSTNESS_ROOT, tag or "%s-n%d-s%d" % (run_name.replace("/", "_"), n_per_dataset, seed))
     ckpt_vol.reload()
-    if os.path.exists(out_dir):
+    if evals_name:
+        out_dir = os.path.join(os.path.dirname(_ckpt_path(run_name).rstrip("/")), "evals", evals_name)
+    else:
+        out_dir = os.path.join(ROBUSTNESS_ROOT, tag or "%s-n%d-s%d" % (run_name.replace("/", "_"), n_per_dataset, seed))
+    if write and os.path.exists(out_dir):
         raise SystemExit("%s exists; pass a new --tag" % out_dir)
     t0 = time.time()
     print("GPU:", torch.cuda.get_device_name(0))
@@ -904,6 +910,8 @@ def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
             "families": fams, "seed": seed, "n_boot": n_boot, "val_split": val_split,
             "temperature": list(agent.temperature), "gpu": torch.cuda.get_device_name(0), "row_counts": counts,
             "minutes": (time.time() - t0) / 60}
+    if not write:
+        return {"meta": meta, "summary": summary, "compact": R.compact(summary), "out_dir": None}
     os.makedirs(out_dir)
     with gzip.open(os.path.join(out_dir, "predictions.jsonl.gz"), "wt") as f:
         for p in preds:
@@ -912,7 +920,7 @@ def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
         json.dump({"meta": meta, **summary}, f, indent=1)
     ckpt_vol.commit()
     print("wrote %s (%d rows)" % (out_dir, len(preds)))
-    return {"meta": meta, "summary": summary, "out_dir": out_dir}
+    return {"meta": meta, "summary": summary, "compact": R.compact(summary), "out_dir": out_dir}
 
 
 @app.local_entrypoint()
@@ -2439,7 +2447,7 @@ def save_eval_results(run_name: str, filename: str, payload: dict) -> str:
 def _datasets_print(evals: dict) -> None:
     """One line per dataset from ``evaluate``'s calibrated metrics (the model as it would be used)."""
     cal = evals["val_calibrated"]
-    print("%-30s %6s %7s %6s %6s  %s" % ("dataset", "n", "acc", "ECE", "NLL", "vs human votes (prior)"))
+    print("%-30s %6s %7s %6s %6s %6s  %s" % ("dataset", "n", "acc", "ECE", "fl.p95", "NLL", "vs human votes (prior)"))
     for name in sorted(cal, key=lambda n: (n == "all", n)):
         m = cal[name]
         extra = []
@@ -2448,19 +2456,49 @@ def _datasets_print(evals: dict) -> None:
                 extra.append("%s %.3f%s" % (key, m[key], " (%.3f)" % m["prior_" + key] if "prior_" + key in m else ""))
         if "mae" in m:
             extra.append("mae %.2f" % m["mae"])
-        print("%-30s %6d %6.1f%% %6.3f %6.3f  %s" % (name, m["n"], 100 * m["acc"], m["ece"], m["nll"], ", ".join(extra)))
+        p95 = "%6.3f" % m["ece_floor_p95"] if "ece_floor_p95" in m else "%6s" % "-"
+        print("%-30s %6d %6.1f%% %6.3f %s %6.3f  %s" % (name, m["n"], 100 * m["acc"], m["ece"], p95, m["nll"], ", ".join(extra)))
+
+
+FULL_EVAL_PARTS = ("datasets", "games", "latency", "robustness")
+# the subset of R.ALL_FAMILIES full_eval runs: the image-dependence controls, option order, and typographic injection
+# (the target answer drawn into the image; scored by R.score_rows, whose default loader transform draws it)
+FULL_EVAL_ROBUSTNESS = "image_shuffle,text_only,option_order,inject_image"
+
+
+def _robustness_print(rob: dict) -> None:
+    """One line per dataset: unperturbed accuracy, then accuracy change / flip rate per family (the injection
+    families from ``rob["injection"]``, with their attack success rate)."""
+    inj = (rob.get("injection") or {}).get("datasets") or {}
+    fams = [f for f in rob["meta"]["families"]]
+    print("%-20s %6s %7s  %s" % ("dataset", "groups", "orig", "  ".join("%-22s" % f for f in fams)))
+    for name, rep in sorted(rob["datasets"].items()):
+        o = rep.get("orig", {})
+        cells = []
+        for f in fams:
+            s = rep.get(f) or inj.get(name, {}).get(f)
+            if s and "attack_success_rate" in s:
+                cells.append("%-22s" % ("d %+5.1f pts, ASR %4.1f%%" % (100 * s["delta_acc"], 100 * s["attack_success_rate"])))
+                continue
+            cells.append("%-22s" % ("d %+5.1f pts, flip %4.1f%%" % (100 * s["delta_acc"], 100 * s["flip_rate"]) if s else "-"))
+        print("%-20s %6d %6.1f%%  %s" % (name, o.get("n_groups", 0), 100 * o.get("acc", float("nan")), "  ".join(cells)))
 
 
 @app.local_entrypoint()
-def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str = "vqa,cauldron,score,eval",
+def full_eval(model: str, parts: str = ",".join(FULL_EVAL_PARTS), datasets: str = "vqa,cauldron,score,eval",
               val_split: str = "val", atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
               doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
               snake_episodes: int = 20, control_games: str = ",".join(SUITE_CONTROL_GAMES), control_episodes: int = 10,
-              out: str = "", save: bool = True):
+              robustness_n: int = 300, robustness_families: str = FULL_EVAL_ROBUSTNESS, out: str = "", save: bool = True):
     """modal run modal_app.py::full_eval --model <run>/best  -- every eval on one checkpoint, in parallel, one file.
 
     ``parts`` picks from ``datasets`` (``evaluate`` over ``datasets``: accuracy, ECE, NLL, and the human-vote and
-    ordinal metrics), ``games`` (the ``games_eval`` suite) and ``latency`` (``bench_latency``); they all run at
+    ordinal metrics), ``games`` (the ``games_eval`` suite), ``latency`` (``bench_latency``) and ``robustness``
+    (``robustness`` on ``robustness_n`` seeded val rows of each ``ROBUSTNESS_DATASETS`` set with only
+    ``robustness_families``: by default the shuffled-image and no-image controls, which show whether the model uses
+    the image at all, option order, and typographic injection (a wrong answer written into the image; reported as
+    its attack success rate under ``robustness.injection``); the results file keeps ``laya.robustness.compact`` of its summary and the
+    per-row predictions go to ``<run>/evals/<leaf>-<time>-<commit>-robustness/`` on the volume); they all run at
     once. The combined result, with the git commit and each dataset's meta.json, is written to ``out`` (default
     ``eval-results/<run>-<commit>.json``) and, unless ``--no-save``, to ``<run>/evals/`` on the checkpoint volume
     next to the checkpoint. ``scripts/eval_report.py`` turns result files into Markdown; the ``eval`` GitHub
@@ -2469,12 +2507,21 @@ def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str =
     import datetime
 
     wanted = [p.strip() for p in parts.split(",") if p.strip()]
-    unknown = set(wanted) - {"datasets", "games", "latency"}
+    unknown = set(wanted) - set(FULL_EVAL_PARTS)
     if unknown or not wanted:
-        raise SystemExit("--parts takes datasets, games and latency (got %r)" % parts)
+        raise SystemExit("--parts takes %s (got %r)" % (", ".join(FULL_EVAL_PARTS), parts))
     code = _git_state()
     t0 = time.time()
     _ERRORS.clear()
+    leaf = model.rstrip("/").rsplit("/", 1)[-1]  # best / last share the run's evals/
+    rob_call = None
+    if "robustness" in wanted:
+        if not robustness_families.strip(", "):
+            raise SystemExit("--robustness-families is empty")
+        rob_name = "%s-%s-%s%s-robustness" % (leaf, datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+                                             (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "")
+        rob_call = robustness.spawn(model, ",".join(ROBUSTNESS_DATASETS), robustness_n, robustness_families,
+                                    evals_name=rob_name, write=save)
     ds_call = evaluate.spawn(model, ",".join(_expand_datasets(datasets)), val_split) if "datasets" in wanted else None
     lat_call = bench_latency.spawn(model) if "latency" in wanted else None
     game_calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes,
@@ -2484,6 +2531,11 @@ def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str =
     results["datasets"] = _get(ds_call, "evaluate") if ds_call else None
     results["latency"] = _get(lat_call, "bench_latency") if lat_call else None
     results["games"] = _games_collect(game_calls) if game_calls else None
+    if rob_call:  # the key only when asked for, so a datasets,games,latency file is shaped as before
+        rob = _get(rob_call, "robustness")
+        # laya.robustness.compact ran remotely: the GitHub runner has only the modal client, no numpy
+        results["robustness"] = dict({"meta": dict(rob["meta"], rows_dir=rob["out_dir"] and os.path.relpath(
+            rob["out_dir"], "/ckpt"))}, **rob["compact"]) if rob else None
     results["minutes"] = round((time.time() - t0) / 60, 1)
     results["errors"] = list(_ERRORS)
 
@@ -2495,8 +2547,13 @@ def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str =
         print("\n== Latency: median %.1f ms, p90 %.1f ms per predict (L4, bf16)" % (lat["median_ms"], lat["p90_ms"]))
     if results["games"]:
         _games_print(results["games"])
+    if results.get("robustness"):
+        print("\n== Robustness (%d seeded val rows per set; change in accuracy from unperturbed, flip rate)"
+              % results["robustness"]["meta"]["n_per_dataset"])
+        _robustness_print(results["robustness"])
 
-    tag = "" if len(wanted) == 3 else "-" + "-".join(wanted)
+    # every part (or the three from before robustness existed) = no suffix, so those file names stay as they were
+    tag = "" if set(wanted) >= {"datasets", "games", "latency"} else "-" + "-".join(wanted)
     stem = "%s-%s%s%s" % (model.replace("/", "-"), (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "", tag)
     out = out or os.path.join("eval-results", stem + ".json")
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
@@ -2506,7 +2563,6 @@ def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str =
     failed = [p for p in wanted if not results[p] or (p == "games" and not any(results["games"].values()))]
     if save:
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        leaf = model.rstrip("/").rsplit("/", 1)[-1]  # best / last share the run's evals/
         name = "%s-%s-%s%s%s.json" % (leaf, stamp, (code["commit"] or "nocommit")[:8], "-dirty" if code["dirty"] else "", tag)
         path = _get(save_eval_results.spawn(model, name, results), "save to volume")
         if path:

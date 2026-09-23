@@ -71,3 +71,19 @@ def test_score_prior_is_the_mean_histogram():
     mean = [0.25, 0.5, 0.25]
     prior = sum(-sum(v * math.log(p) for v, p in zip(t, mean) if v) for t in (t1, t2)) / 2
     assert m["q"]["prior_xent"] == pytest.approx(prior, abs=1e-5) and m["q"]["xent"] == pytest.approx(math.log(3), abs=1e-5)
+
+
+def test_ece_floor_is_opt_in_and_uses_the_reported_confidences():
+    from laya.common import ece_score
+    from laya.robustness_floor import ece_floor_fields
+
+    g = torch.Generator().manual_seed(0)
+    recs = [rec((torch.randn(3, generator=g) * 2).tolist(), [1, 0, 0], "choice", "c") for _ in range(60)]
+    recs += [rec((torch.randn(5, generator=g) * 2).tolist(), [0, 1, 3, 1, 0], "score", "s") for _ in range(40)]
+    assert "ece_floor" not in metrics_from(recs)["c"]  # off by default: training loops call this every eval
+    m = metrics_from(recs, temperatures=(1.5, 0.7, 1.0), ece_floor_sims=50)
+    for name, rs in (("c", recs[:60]), ("s", recs[60:]), ("all", recs)):
+        conf = [float(torch.softmax(r["logits"] / (1.5 if r["qtype"] == QTYPES["choice"] else 0.7), -1).max()) for r in rs]
+        right = [float(int(torch.softmax(r["logits"], -1).argmax()) == r["label"]) for r in rs]
+        assert m[name]["ece"] == pytest.approx(ece_score(torch.tensor(conf).numpy(), torch.tensor(right).numpy()))
+        assert {k: m[name][k] for k in ("ece_floor", "ece_floor_p95")} == pytest.approx(ece_floor_fields(conf, name, n_sim=50))

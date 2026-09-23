@@ -60,18 +60,28 @@ one; Galaxian does not, so it is scored against random play only).
 
 ## 4. Run
 
-One command, three parts in parallel, one results file:
+One command, four parts in parallel, one results file:
 
 ```bash
-modal run modal_app.py::full_eval --model <run>/best [--parts datasets,games,latency] \
-    [--datasets vqa,cauldron,score,eval] [--val-split test] [--out eval-results/<name>.json]
+modal run modal_app.py::full_eval --model <run>/best [--parts datasets,games,latency,robustness] \
+    [--datasets vqa,cauldron,score,eval] [--val-split test] [--out eval-results/<name>.json] \
+    [--robustness-n 300] [--robustness-families image_shuffle,text_only,option_order,inject_image]
 ```
 
 - **No `--detach`.** The local entrypoint gathers the results and writes the files; a detached run whose client
   goes away loses them. For long runs start it as a background shell command and wait for it.
-- Runtime on the last run: datasets part 16.5 min (59k questions), games and latency together 12 min.
+- Runtime on the last run: datasets part 16.5 min (59k questions), games and latency together 12 min. The
+  robustness part scores `--robustness-n` seeded val rows of each of the 7 `ROBUSTNESS_DATASETS` sets under
+  `--robustness-families` (any of `laya.robustness.ALL_FAMILIES`, e.g. add `text,image` or `inject_text`); it runs
+  alongside the others on its own L4 and is shorter than the datasets part (the manual run of five families at
+  n=300 took 8.4 min).
+- `--parts datasets,games,latency` behaves exactly as before robustness was a part (same file name, no
+  `robustness` key).
 - It writes `eval-results/<run>-<commit>[-dirty][-parts].json` locally and `<run>/evals/<leaf>-<time>-<commit>.json`
-  on the volume (beside the checkpoint, outside `best/`, so `publish` never uploads it). Exit code is non-zero if
+  on the volume (beside the checkpoint, outside `best/`, so `publish` never uploads it). The robustness part's
+  per-row predictions and full summary go to a new `<run>/evals/<leaf>-<time>-<commit>-robustness/` directory
+  (`predictions.jsonl.gz`, `summary.json`; `robustness.meta.rows_dir` in the results file names it; nothing is
+  written with `--no-save`); the results file keeps only the compact summary. Exit code is non-zero if
   a requested part produced nothing; single failed games are listed under `errors`.
 - Split the parts to start early: `--parts games,latency` does not need the eval datasets, so it can run while
   `prepare_eval` is still going, then `--parts datasets` afterwards. `eval_report.py` merges the files.
@@ -82,7 +92,7 @@ Single pieces, when that is all you need: `evaluate --run-name` (prints only, sa
 `full_eval` (robustness, row-level evidence, benchmarks) are in section 8.
 
 From GitHub: Actions → **eval** → Run workflow on the checkpoint's branch, or
-`gh workflow run eval.yml --ref <branch> -f model=<run>/best`. Each part is a job streaming the Modal logs; the
+`gh workflow run eval.yml --ref <branch> -f model=<run>/best [-f robustness=false]`. Each part is a job streaming the Modal logs; the
 report lands in the run summary and as a comment on the branch's open PR (updated in place per checkpoint).
 Needs the `MODAL_TOKEN_ID` / `MODAL_TOKEN_SECRET` repo secrets.
 
@@ -109,6 +119,17 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
 
 - **accuracy / ECE / NLL** are on calibrated probabilities (the checkpoint's per-type temperatures), as `predict`
   returns them. ECE under ~0.03 means probabilities can be taken at face value.
+- **ECE floor** (`ece_floor`, `ece_floor_p95` next to each set's `ece`, and on the pooled `all`): ECE on n rows is
+  biased upward, so read it against the ECE a *perfectly calibrated* model scores on the same confidences and row
+  count (`laya.robustness_floor.ece_floor_fields`: correctness redrawn as Bernoulli(confidence) 200 times, same 15
+  bins, seeded by the set's name). On a few hundred rows the floor is ~0.05; on the 59k pooled rows ~0.005. An
+  ECE at or under `ece_floor_p95` is sampling noise, not miscalibration; the report flags a hard-label set only
+  above its p95 *and* above 0.03, and falls back to the fixed 0.10 for results from before the floor (they show no
+  floor column). `evaluate` computes it for every set type, because `metrics_from` scores every type's ECE the same
+  way (max probability; argmax == label, the most-voted answer on vote sets), so the floor is the right null for
+  the number printed; on vote sets that ECE is still not the thing to judge. Rows count as independent: sets with
+  several questions per image (VQAv2, Cauldron) have a somewhat higher true floor. It is not a confidence interval
+  for the ECE.
 - **Sets with human votes** (KonIQ, EvalMuse, CIFAR-10H, FER+, VizWiz, the `score` sets): judge them by
   `soft_xent` / `xent` against `prior_...`, the cross-entropy of always predicting the set's average vote. Lower
   than the prior = the model learned something per image. ECE there compares confidence with the single
@@ -155,7 +176,8 @@ python scripts/eval_report.py eval-results/<name>*.json --title "<Name> scorecar
 
 ## 8. Robustness, row-level evidence and benchmarks
 
-These sit outside `full_eval`. All write **create-only** outputs: each refuses an existing path, so pass a new
+These sit outside `full_eval` (the robustness table below is the full manual run; `full_eval`'s `robustness` part
+runs a cheap subset of it on every eval, see "Reading the robustness block"). All write **create-only** outputs: each refuses an existing path, so pass a new
 `--out` / `--name` / `--tag` / `--output`. `AGENTS.md` has the rules for publishing a number.
 
 | What | Command | Output | Time on an L4 |
@@ -177,6 +199,20 @@ These sit outside `full_eval`. All write **create-only** outputs: each refuses a
   no-image accuracy should fall toward the majority-label rate. On `cauldron-score-2ep-bidir-full/best` they fall
   23-46 points on 6 of 7 sets, but **`cauldron_mapqa` fails**: removing the map changes nothing and accuracy sits
   below the majority rate. A new checkpoint that still fails there has not learned MapQA.
+- **Reading the robustness block** of a `full_eval` result (`results["robustness"]`, rendered by `eval_report.py` as
+  one table): `meta` (run, `n_per_dataset`, families, seed, GPU, `rows_dir`), then per dataset `orig` (accuracy on the
+  unperturbed rows) and per family `acc`, `delta_acc` with `delta_acc_ci`, `flip_rate`, `ece`, and for the controls
+  `majority_label_acc` and `agree_with_text_only`; `macro` averages over sets; `injection` holds the injection
+  families' own summary (`attack_success_rate` per set and in its `macro`). The report flags (⚠️, and a **weak**
+  finding) a set where the two controls cost under 5 points of accuracy **on average** (signed, so controls that
+  help are flagged) or where accuracy with the image is not above the majority-label rate: that is the check that
+  would have caught the SigLIP-projector failure (shuffled-image accuracy equal to real-image accuracy). On the
+  published run `cauldron_mapqa` falls 5.3 points with a shuffled image and 0.3 without one (mean 2.8, flagged);
+  every other set falls 18+ on both. The mean rather than either control alone because one control is noisy at
+  small n (at n=50 `vqav2_yesno`'s no-image change was -2 points, against -19 at n=300).
+  It also flags typographic-injection attack success above 20% (0.28-0.74 on four sets of the published
+  checkpoint). At the default n=300 the Δ intervals are about ±6 points; with a small `--robustness-n` (e.g. 50 for
+  a smoke test) read the intervals before trusting a flag.
 - **After `evidence` (or any change under `results/raw/`)**: run `python benchmarks/verify_published.py`. It
   checks `SHA256SUMS` in both directions (every file under `results/raw/` except `README.md` must be listed),
   recomputes accuracy and calibrated ECE from the rows, and compares them with the metrics JSON and the README

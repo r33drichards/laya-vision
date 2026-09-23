@@ -97,3 +97,15 @@ def test_matches_robustness_summary():
     assert f["macro"]["orig"]["n_datasets"] == 1
     table = F.format_floor_table(f)
     assert table.count("\n") == 3 and "| toy | text |" in table
+
+
+def test_ece_floor_fields_per_dataset():
+    """The keys ``metrics_from`` stores next to a set's ECE: the independent floor, seeded by the set's name only."""
+    conf = np.random.default_rng(2).uniform(0.5, 1.0, 282)
+    f = F.ece_floor_fields(conf, "cauldron_ai2d")
+    assert set(f) == {"ece_floor", "ece_floor_p95"} and 0 < f["ece_floor"] <= f["ece_floor_p95"] < 1
+    assert f == F.ece_floor_fields(conf, "cauldron_ai2d")  # deterministic
+    full = F.ece_noise_floor(conf, seed=R._seed_for("ece_floor", 0, "cauldron_ai2d"))
+    assert f == {"ece_floor": full["mean"], "ece_floor_p95": full["p95"]}
+    assert F.ece_floor_fields(conf, "aokvqa")["ece_floor"] != f["ece_floor"]  # own stream per set
+    assert F.ece_floor_fields([], "empty") == {}
