@@ -4,19 +4,20 @@ Autonomous research on the Laya Vision decision model: you edit one file, the ha
 H100 and measures it, and you keep what pushes the Pareto frontier out. Adapted from
 [karpathy/autoresearch](https://github.com/karpathy/autoresearch) (see `UPSTREAM.md`).
 
-The goal: **the best eval quality for the smallest, fastest model.** There is no single number to minimize. Three
-objectives are measured for every experiment, and a result is kept when no earlier kept result is at least as good on
-all three:
+The goal: **the best eval quality and game play for the smallest, fastest model.** There is no single number to
+minimize. Four objectives are measured for every experiment, and a result is kept when no earlier kept result is at
+least as good on all four:
 
 | objective | what | better |
 |---|---|---|
 | `quality` | macro accuracy over 34 eval sets (300 fixed questions each) minus the calibration error (ECE) on the questions with one right answer | higher |
+| `games` | mean normalized score over the games suite (Maze, Snake, CartPole, Acrobot, MountainCar, LunarLander, Atari Freeway and Breakout, ViZDoom basic): per game (model - random) / (expert - random), clipped to [-0.5, 1.5], fixed seeds (`autoresearch/games_eval.py`) | higher |
 | `params_m` | parameters of the saved model, millions | lower |
 | `latency_x` | median `predict` time on an L4 in bf16, preprocessing included, divided by the base checkpoint's timed in the same container (1.0 = as fast as the released model) | lower |
 
-Progress is the frontier's **hypervolume**: how much of the quality × size × latency space it covers. A smaller
-model that is only slightly worse is a win, as is a better model at the same size. `pareto.py` makes the keep /
-discard call, not you.
+Progress is the frontier's **hypervolume**: how much of the quality × games × size × latency space it covers. A
+smaller model that is only slightly worse is a win, as is a better player at the same size. `pareto.py` makes the
+keep / discard call, not you.
 
 ## Setup
 
@@ -57,7 +58,7 @@ The harness writes `autoresearch/runs/<tag>/<commit>.json` (every metric, per da
 `autoresearch/runs/<tag>/results.tsv`:
 
 ```
-commit	quality	macro_acc	ece_hard	params_m	latency_x	status	description
+commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 ```
 
 It also prunes saved checkpoints that are no longer on the frontier from `/ckpt/autoresearch/<tag>/`.
@@ -97,6 +98,33 @@ A change only counts if it survives `agent.save` and reload. The harness measure
 disk, so an architecture change must also be written into the backbone config, as the helpers in `experiment.py`
 do.
 
+## Lessons from autogo
+
+[autogo](https://github.com/r33drichards/autogo) runs the same kind of loop on an AlphaGo-style Go player, and its
+architecture plays far better than ours. What carries over, with its evidence:
+
+- **Check the target plumbing before anything clever.** autogo's single biggest gain was a one-line label-mask fix
+  (policy trained on only the winner's moves, discarding half the search labels): +0.034 on its metric, more than any
+  architecture change.
+- **Train the policy on soft teacher distributions, not one-hot actions.** autogo's policy learns MCTS visit counts
+  (visits^(1/T)), and falls back to label smoothing (0.1) where there is no search. Our loss takes soft targets;
+  `toolkit.py` builds them for Maze and Snake (every shortest-path move, not one).
+- **Give the policy a value head.** autogo trains policy and value 1:1 and cutting the value weight to 0.25 hurt the
+  policy (0.322 vs 0.334). `laya` models take `"value_head": true`, and game examples can carry a `value` target.
+- **Spend test-time compute through search.** autogo plays with 1024-simulation MCTS over a policy + value network,
+  with the network's calls batched across leaves (19x faster than unbatched). Set `agent.cfg["search"]` to turn on
+  `laya.search` for the deterministic games; the latency objective prices what it costs.
+- **Variety beats per-episode strength, and don't throw away old data.** More games at 1024 simulations beat fewer at
+  2048; training only on the newest data overfit (0.273 vs 0.305).
+- **Augment with the game's symmetries** where they hold (mirrors in Maze; not in Atari, whose screens have text).
+- **Size the LR schedule to the time budget** so it fully decays inside the 5 minutes; `laya.vlm_train.train` already
+  decays on wall-clock progress, keep it that way if you write your own loop.
+- **Change one thing at a time**, in this order when unsure: learning rate and schedule, then batch size and steps,
+  then architecture. Simpler wins at equal score.
+- **Noise compounds; gate on it.** autogo's gains stopped compounding when exploration noise accumulated across
+  iterations. Here the margins in `pareto.py` are the gate: re-measure them (repeat the baseline) when the harness
+  changes.
+
 ## Ideas to start from
 
 - **Cut depth**: `KEEP_TEXT_LAYERS` (30 in SmolVLM-256M) and `KEEP_VISION_LAYERS` (12), then use the 5 minutes to
@@ -106,6 +134,9 @@ do.
 - **Smaller head**: fewer head transformer layers, or none.
 - **Distillation**: train the cut model toward the full checkpoint's probabilities instead of only the labels.
 - **Data mix**: the eval sets reward breadth; weight the weakest groups.
+- **Game data**: mix `toolkit` game examples (soft BFS targets for Maze and Snake, expert frames for classic
+  control) into the training stream, and the pool's Atari and ViZDoom expert frames via `ctx.game_examples()`.
+- **Value head + search**: `"value_head": true` with `value` targets, then `cfg["search"]` at play time.
 - **Calibration**: the harness fits temperatures, but training with the proper scoring rules (`w_ce_schedule`, `w_sph`)
   changes how well a single temperature can fix things.
 

@@ -92,6 +92,13 @@ CALIB_DATASETS = CAULDRON + SCORE          # their last N_CALIB train records ca
 # What experiments may train on. The eval_* sets stay held out entirely (even where they have a train split): they
 # measure how the model does on data it was never tuned toward. The vqa sets' train splits are not prepared.
 TRAINABLE_DATASETS = CAULDRON + SCORE
+# Expert game frames experiments may train on (``ctx.game_examples()``): name -> (root, prepared name). The games
+# eval plays on seeds these were never recorded on.
+GAME_DATASETS = {
+    "game_atari_freeway": ("/data/atari/expert", "Freeway"),
+    "game_atari_breakout": ("/data/atari/expert", "Breakout"),
+    "game_doom_basic": ("/data/vqa", "doom_basic"),
+}
 
 app = modal.App("laya-autoresearch")
 hf_vol = modal.Volume.from_name("laya-hf-cache")
@@ -151,7 +158,13 @@ def pool_selection(kind: str, name: str) -> List[Dict]:
     """The examples (with image paths) that go into pool part ``kind`` for dataset ``name``, deterministically."""
     import random
 
+    from laya.vlm_train import load_jsonl_examples
+
     rng = random.Random("%d:%s:%s" % (SEED, kind, name))
+    if kind == "games":
+        root, prepared = GAME_DATASETS[name]
+        exs = [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train")]
+        return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
     if kind == "eval":
         exs = load_split(name, "val")
         return rng.sample(exs, min(EVAL_PER_SET, len(exs)))
@@ -167,10 +180,10 @@ def _pool_file(kind: str, name: str) -> str:
 
 
 POOL_PARTS = ([("train", n) for n in TRAINABLE_DATASETS] + [("calib", n) for n in CALIB_DATASETS]
-              + [("eval", n) for n in EVAL_DATASETS])
+              + [("eval", n) for n in EVAL_DATASETS] + [("games", n) for n in GAME_DATASETS])
 
 
-def load_pool(kinds=("train", "calib", "eval")) -> Dict[str, Dict[str, List[Dict]]]:
+def load_pool(kinds=("train", "calib", "eval", "games")) -> Dict[str, Dict[str, List[Dict]]]:
     """``{kind: {dataset: examples}}`` from the pool; fails with the command to build it when it is missing."""
     import pickle
     from concurrent.futures import ThreadPoolExecutor
@@ -196,11 +209,23 @@ class Context:
     """What an experiment gets: the budget, the device, checkpoint lookup and training data. Training data never
     includes the val splits or the calibration tail the harness fits temperatures on."""
 
-    def __init__(self, time_budget_s: float, train: Dict[str, List[Dict]]):
+    def __init__(self, time_budget_s: float, train: Dict[str, List[Dict]], games: Dict[str, List[Dict]]):
         self.time_budget_s = time_budget_s
         self.device = "cuda"
         self.ckpt_path = ckpt_path
         self._train = train  # name -> train records minus the calibration tail
+        self._games = games  # name -> expert game frames
+
+    def game_examples(self, names=tuple(GAME_DATASETS)) -> List[Dict]:
+        """Expert frames from the data pool: Atari Freeway and Breakout (the expert agents' action distributions as
+        soft targets where recorded) and ViZDoom basic (the scripted labeller). ``toolkit.py`` generates Maze, Snake
+        and classic-control examples on the fly."""
+        out = []
+        for name in names:
+            if name not in GAME_DATASETS:
+                raise ValueError("%s is not a game dataset here (one of %s)" % (name, tuple(GAME_DATASETS)))
+            out += self._games[name]
+        return out
 
     def train_examples(self, names=TRAINABLE_DATASETS) -> List[Dict]:
         out = []
@@ -279,7 +304,7 @@ class TrainEval:
         torch.manual_seed(SEED)
         random.seed(SEED)
         exp = _import_experiment(source)
-        ctx = Context(TIME_BUDGET, self._train_lists())
+        ctx = Context(TIME_BUDGET, self._train_lists(), self.pool["games"])
         t_setup = time.time()
         agent = exp.build(ctx)
         setup_s = time.time() - t_setup

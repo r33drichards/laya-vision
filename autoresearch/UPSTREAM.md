@@ -15,3 +15,10 @@ This directory adapts [karpathy/autoresearch](https://github.com/karpathy/autore
 
 Upstream's `train.py`, `prepare.py`, `analysis.ipynb` and dependencies (nanochat LLM pretraining, a BPE tokenizer,
 FineWeb shards) are not copied, since none of it applies to this model.
+
+## autogo
+
+[r33drichards/autogo](https://github.com/r33drichards/autogo) (an AlphaGo-style Go player driven by the same kind of
+autoresearch loop) contributed lessons rather than code: soft teacher targets, a value head beside the policy,
+batched test-time search, symmetry augmentation and its experiment findings. They are listed with their evidence in
+`program.md` ("Lessons from autogo") and built into `toolkit.py`, `games_eval.py`, `laya.search` and the value head.
