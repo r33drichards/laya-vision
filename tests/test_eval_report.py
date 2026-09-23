@@ -90,6 +90,6 @@ def test_html_report_is_self_contained_and_explains_the_run():
     assert "prefers-color-scheme:dark" in page and ':root[data-theme="dark"]' in page
     fs = R.findings(r)
     assert any("630 questions" in t for _, t in fs)  # pooled accuracy line
-    assert any("Galaxian: scores 500 against 300 for random play" in t for _, t in fs)
+    assert any("Galaxian: scores 500.0 against 300.0 for random play" in t for _, t in fs)
     assert any(t.startswith("Against human vote spreads it beats") for _, t in fs)
     assert "Maze: solves 4&times;4: 50.0%" in page

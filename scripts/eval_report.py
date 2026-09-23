@@ -260,7 +260,7 @@ details{border:1px solid var(--rule);background:var(--panel)}
 details summary{cursor:pointer;padding:10px 14px;font-weight:600}
 details summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 details .table{border:0;border-top:1px solid var(--rule)}
-.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:20px 28px}
+.stack{display:flex;flex-direction:column;gap:28px}
 .card{display:flex;flex-direction:column;gap:10px}
 dl.gloss{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0;font-size:13px}
 dl.gloss dt{font-family:"IBM Plex Mono",ui-monospace,monospace;color:var(--accent)}
@@ -346,12 +346,16 @@ def findings(result: Dict) -> List[tuple]:
                                 "weakest: %s at %s." % (len(names), "{:,}".format(a["n"]), _pct(a["acc"]), _short(best),
                                                          _pct(ds[best]["acc"]), _short(worst), _pct(ds[worst]["acc"]))))
             sev = "good" if a["ece"] < 0.03 else "warn" if a["ece"] < 0.08 else "bad"
-            out.append((sev, "Calibration: its stated confidence is off by %.1f points on average (ECE %.3f pooled), "
-                             "so a 70%% answer is right about %s of the time." % (100 * a["ece"], a["ece"],
-                                                                                   "70%" if a["ece"] < 0.03 else "roughly 70%")))
-        off = sorted([n for n in names if ds[n]["ece"] > 0.1], key=lambda n: -ds[n]["ece"])
+            out.append((sev, "Calibration: across all questions, its stated confidence and its actual accuracy differ by "
+                             "%.1f points on average (ECE %.3f pooled; under 0.03 means probabilities can be read at "
+                             "face value)." % (100 * a["ece"], a["ece"])))
+        # ECE scores confidence against the single most-voted label, which says little on sets trained against
+        # human vote spreads (a model that copies a 45/40/15 split is "underconfident" by construction), so only
+        # hard-label sets are flagged here; vote sets are judged against their prior below
+        voted = {n for n in names if "soft_xent" in ds[n] or "xent" in ds[n]}
+        off = sorted([n for n in names if ds[n]["ece"] > 0.1 and n not in voted], key=lambda n: -ds[n]["ece"])
         if off:
-            out.append(("warn", "Poorly calibrated on %d set%s (ECE above 0.10): %s." % (
+            out.append(("warn", "Poorly calibrated on %d hard-label set%s (ECE above 0.10): %s." % (
                 len(off), "" if len(off) == 1 else "s", ", ".join("%s %.2f" % (_short(n), ds[n]["ece"]) for n in off[:6]))))
         vs = []
         for n in names:
@@ -364,22 +368,26 @@ def findings(result: Dict) -> List[tuple]:
             lost = [n for n, m, p in vs if m >= p]
             sev = "good" if not lost else "warn" if len(beat) >= len(lost) else "bad"
             out.append((sev, "Against human vote spreads it beats the always-predict-the-average baseline on %d of %d "
-                             "sets%s." % (len(beat), len(vs), (" (not on %s)" % ", ".join(_short(n) for n in lost)) if lost else "")))
+                             "sets%s. (ECE is not meaningful on these sets: it compares confidence with the single "
+                             "most-voted answer, while the model is trained to spread probability like the voters.)"
+                        % (len(beat), len(vs), (" (not on %s)" % ", ".join(_short(n) for n in lost)) if lost else "")))
     g = result.get("games") or {}
     for r in g.get("atari") or []:
         if r.get("normalized") is not None:
             sev = "good" if r["normalized"] >= 0.5 else "warn" if r["model_score"] > r["random_score"] else "bad"
-            out.append((sev, "%s: scores %.0f against %.0f for random play and %.0f for the expert (normalized %.2f)."
+            out.append((sev, "%s: scores %.1f against %.1f for random play and %.1f for the expert (normalized %.2f)."
                         % (r["game"], r["model_score"], r["random_score"], r["expert_score"], r["normalized"])))
         else:
             sev = "good" if r["model_score"] > r["random_score"] else "bad"
-            out.append((sev, "%s: scores %.0f against %.0f for random play (no expert baseline)." % (r["game"], r["model_score"], r["random_score"])))
+            out.append((sev, "%s: scores %.1f against %.1f for random play (no expert baseline)." % (r["game"], r["model_score"], r["random_score"])))
     doom = g.get("doom") or {}
     model = next((r for p, r in doom.items() if p == "model"), None)
     if model and "expert" in doom:
         sev = "good" if model["mean_reward"] >= 0.8 * doom["expert"]["mean_reward"] else "warn" if model["mean_reward"] > doom.get("random", {}).get("mean_reward", -1e9) else "bad"
-        out.append((sev, "ViZDoom basic: mean reward %.1f (expert %.1f, random %.1f), kills in %s of episodes."
-                    % (model["mean_reward"], doom["expert"]["mean_reward"], doom.get("random", {}).get("mean_reward", float("nan")), _pct(model["kill_rate"]))))
+        same = doom.get("always_attack") and abs(doom["always_attack"]["mean_reward"] - model["mean_reward"]) < 1e-6
+        out.append((sev, "ViZDoom basic: mean reward %.1f (expert %.1f, random %.1f), kills in %s of episodes.%s"
+                    % (model["mean_reward"], doom["expert"]["mean_reward"], doom.get("random", {}).get("mean_reward", float("nan")),
+                       _pct(model["kill_rate"]), " Identical to always pressing attack." if same else "")))
     for game in ("maze", "snake"):
         mods = [r for r in g.get(game) or [] if str(r["policy"]).startswith("model")]
         if not mods:
@@ -387,7 +395,9 @@ def findings(result: Dict) -> List[tuple]:
         if game == "maze":
             solved = ", ".join("%d&times;%d: %s" % (r["size"], r["size"], _pct(r["solve_rate"])) for r in sorted(mods, key=lambda r: r["size"]))
             best = max(r["solve_rate"] for r in mods)
-            out.append(("good" if best >= 0.5 else "warn" if best > 0 else "bad", "Maze: solves %s (the shortest-path expert solves all; random none)." % solved))
+            rnd = max([x["solve_rate"] for x in g[game] if x["policy"] == "random"] or [0.0])
+            out.append(("good" if best >= 0.5 else "warn" if best > rnd else "bad",
+                        "Maze: solves %s (the shortest-path expert solves all; random play at most %s)." % (solved, _pct(rnd))))
         else:
             r = mods[0]
             exp = next((x for x in g[game] if x["policy"] == "expert" and x["size"] == r["size"]), None)
@@ -454,7 +464,7 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
     mz = [r for r in g.get("maze") or [] if str(r["policy"]).startswith("model")]
     if mz:
         r = max(mz, key=lambda r: r["size"])
-        stats.append(_stat("Maze solved, %d&times;%d" % (r["size"], r["size"]), _pct(r["solve_rate"]), "expert 100%"))
+        stats.append(_stat("Maze solved, %d\u00d7%d" % (r["size"], r["size"]), _pct(r["solve_rate"]), "expert 100%"))
     sn = [r for r in g.get("snake") or [] if str(r["policy"]).startswith("model")]
     if sn:
         stats.append(_stat("Snake food per game", "%.1f" % sn[0]["mean_eaten"], "%d&times;%d board" % (sn[0]["size"], sn[0]["size"])))
@@ -470,11 +480,14 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
             groups.setdefault(group_of(n), []).append(n)
         sec = ['<section><div class="eyebrow">Datasets</div><h2>Accuracy and calibration by dataset</h2>'
                '<p class="lede">Calibrated answers (the per-type temperature applied), as <code>predict</code> returns them. '
-               'Bars are accuracy; the note is the calibration error (ECE), where lower means its confidence can be taken at face value.</p>']
+               'Bars are accuracy; the note is the calibration error (ECE), where lower means its confidence can be taken at face value. '
+               '* marks sets scored against human vote spreads, where accuracy and ECE use only the most-voted answer; '
+               'read those in the human-disagreement chart instead.</p>']
         order = [k for k in ("eval", "score", "vqa", "cauldron", "cauldronfull") if k in groups]
         for grp in order:
             rows = sorted(groups[grp], key=lambda n: -cal[n]["acc"])
-            bars = [(_short(n), cal[n]["acc"], "--bar", "ECE %.2f" % cal[n]["ece"]) for n in rows]
+            bars = [(_short(n), cal[n]["acc"], "--bar", "ECE %.2f%s" % (cal[n]["ece"], "*" if ("xent" in cal[n] or "soft_xent" in cal[n]) else ""))
+                    for n in rows]
             mean = sum(cal[n]["acc"] for n in rows) / len(rows)
             sec.append('<div class="card"><h3>%s <span class="muted mono">&middot; mean %s</span></h3><p class="lede">%s</p>'
                        '<div class="chart">%s</div></div>' % (_e(GROUP_LABELS.get(grp, grp)), _pct(mean), _e(GROUP_ABOUT.get(grp, "")), _hbars(bars)))
@@ -505,7 +518,7 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
 
     if g and any(g.values()):
         sec = ['<section><div class="eyebrow">Games</div><h2>Playing games from pixels</h2><p class="lede">Each step the screen is the '
-               'image and the options are the game\'s buttons. Every policy plays the same seeded episodes.</p><div class="grid2">']
+               'image and the options are the game\'s buttons. Every policy plays the same seeded episodes.</p><div class="stack">']
         if g.get("atari"):
             rows = []
             for r in sorted(g["atari"], key=lambda r: r["game"]):
@@ -526,7 +539,7 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
             hi = max(b[1] for b in bars) or 1.0
             shifted = [(l, v - lo, c, n) for l, v, c, n in bars]
             sec.append('<div class="card"><h3>ViZDoom &middot; basic</h3><p class="lede">Mean episode reward (a kill is +100, each step costs; '
-                       'bars start at %.0f).</p><div class="chart">%s</div></div>' % (lo, _hbars(shifted, vmax=hi - lo, label_w=110, width=460,
+                       'bars start at %.0f).</p><div class="chart">%s</div></div>' % (lo, _hbars(shifted, vmax=hi - lo, label_w=190, width=640,
                                                                                             fmt=lambda v, lo=lo: "%.0f" % (v + lo))))
         if g.get("maze"):
             rows = sorted(g["maze"], key=lambda r: (r["size"], 0 if str(r["policy"]).startswith("model") else 1, r["policy"]))
@@ -544,7 +557,7 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
                      ", ".join("%s %d" % kv for kv in sorted(r["ends"].items()))) for r in rows]
             sec.append('<div class="card"><h3>Snake &middot; %d&times;%d</h3><p class="lede">Food eaten per game, and how the games ended.</p>'
                        '<div class="chart">%s</div></div>' % (rows[0]["size"], rows[0]["size"],
-                                                            _hbars(bars, vmax=vmax, label_w=80, width=460, fmt=lambda v: "%.1f" % v)))
+                                                            _hbars(bars, vmax=vmax, fmt=lambda v: "%.1f" % v)))
         sec.append("</div></section>")
         parts.append("".join(sec))
 
