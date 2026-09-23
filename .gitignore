@@ -28,4 +28,4 @@ _vizdoom.ini
 checkpoints/
 
 # autoresearch: per-run logs stay local; results.tsv and the per-experiment JSONs are committed
-autoresearch/runs/*/run.log
+autoresearch/runs/*/*.log
