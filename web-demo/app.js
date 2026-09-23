@@ -33,18 +33,26 @@ function setStatus(el, text, kind = "") {
 
 const mb = (n) => (n / 1e6).toFixed(1) + " MB";
 
-$("image").addEventListener("change", async (ev) => {
-  const file = ev.target.files[0];
-  if (!file) return;
-  // the browser decodes (and applies EXIF orientation); the model's own resize runs in the worker
-  const bmp = await createImageBitmap(file);
+/** Decode ``blob`` into the preview canvas and the RGBA buffer the worker resizes. The browser decodes (and applies
+ * EXIF orientation); the model's own resize runs in the worker. */
+async function showImage(blob) {
+  const bmp = await createImageBitmap(blob);
   const c = $("preview");
   c.width = bmp.width;
   c.height = bmp.height;
   const ctx = c.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(bmp, 0, 0);
   image = { rgba: ctx.getImageData(0, 0, bmp.width, bmp.height).data, width: bmp.width, height: bmp.height };
+}
+
+$("image").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (file) await showImage(file);
 });
+
+// preload the example photo (two turntables and a mixer) so a first visit can press Run straight away
+fetch("example.jpg").then((r) => (r.ok ? r.blob() : null)).then((b) => { if (b && !image) return showImage(b); })
+  .catch(() => {});
 
 $("clear-image").addEventListener("click", () => {
   image = null;

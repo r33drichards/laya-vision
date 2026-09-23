@@ -6,7 +6,7 @@ name: pages
 on:
   push:
     branches: [main]
-    paths: ["web-demo/*.html", "web-demo/*.js", "web-demo/*.css", ".github/workflows/pages.yml"]
+    paths: ["web-demo/*.html", "web-demo/*.js", "web-demo/*.css", "web-demo/example.jpg", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -29,7 +29,7 @@ jobs:
       - name: Stage the page (the tests and their fixtures stay behind)
         run: |
           mkdir -p _site
-          cp web-demo/index.html web-demo/app.js web-demo/worker.js web-demo/laya.js web-demo/style.css _site/
+          cp web-demo/index.html web-demo/app.js web-demo/worker.js web-demo/laya.js web-demo/style.css web-demo/example.jpg _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
