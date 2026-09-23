@@ -10,6 +10,7 @@
     modal run modal_app.py::prepare_score             # rubric-scored sets (score questions) -> /data/vqa/score_<name>
     modal run modal_app.py::prepare_eval              # held-out eval sets (KonIQ, EvalMuse, CIFAR-10H, FER+, VizWiz,
                                                      # POPE) -> /data/vqa/eval_<name>; evaluate scores them by default
+    modal run modal_app.py::prepare_yoga              # Kaggle yoga postures (47-pose choice) -> /data/vqa/yoga_poses
     modal run --detach modal_app.py::finetune_long --run-name cauldron-score-2ep --epochs 2 --max-passes 4 \
         --datasets cauldron,score --val-datasets vqa,cauldron,score
                                                      # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
@@ -48,8 +49,10 @@ responses, aesthetics votes, generated-image ratings and damage levels; add them
 The held-out evaluation sets (``EVAL_DATASETS``, written by ``prepare_eval`` from ``laya.evalsets``) score
 calibration against human vote histograms, abstention, hallucination and rubric scoring; ``evaluate`` includes
 them, and ``--val-split test`` reads the official test split where one exists (KonIQ, FER+).
+The Kaggle yoga postures (``YOGA_DATASETS``, written by ``prepare_yoga`` from ``laya.yoga``) are a 47-pose ``choice``
+set; add ``yoga`` to ``--datasets`` to train on them.
 ``--datasets`` and ``--val-datasets`` take dataset names and the group names ``vqa``, ``cauldron``, ``cauldronfull``,
-``score`` and ``eval`` (``DATASET_GROUPS``).
+``score``, ``eval`` and ``yoga`` (``DATASET_GROUPS``).
 
 Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
 (``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``games_eval``, ``--init-from``)
@@ -107,6 +110,7 @@ SCORE_DATASETS = tuple("score_" + s for s in SCORE_SOURCES)  # rubric-scored set
 EVAL_SOURCES = ("koniq", "evalmuse", "cifar10h", "ferplus", "vizwiz", "pope_random", "pope_popular",
                 "pope_adversarial")  # see laya/evalsets.py
 EVAL_DATASETS = tuple("eval_" + s for s in EVAL_SOURCES)  # held-out sets written by prepare_eval
+YOGA_DATASETS = ("yoga_poses",)  # Kaggle yoga postures, 47-pose choice, written by prepare_yoga (laya/yoga.py)
 DATASETS = CAULDRON_DATASETS
 CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", SMOLVLM2: "/ckpt/smolvlm2", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
@@ -198,7 +202,7 @@ def _load_split(name: str, split: str, limit):
 
 
 DATASET_GROUPS = {"vqa": VQA_DATASETS, "cauldron": CAULDRON_DATASETS, "cauldronfull": CAULDRON_FULL_DATASETS,
-                  "score": SCORE_DATASETS, "eval": EVAL_DATASETS}
+                  "score": SCORE_DATASETS, "eval": EVAL_DATASETS, "yoga": YOGA_DATASETS}
 
 
 def _expand_datasets(names: str) -> list:
@@ -669,7 +673,8 @@ def finetune_long(
     timeout=60 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
-def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS + EVAL_DATASETS),
+def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS + EVAL_DATASETS
+                                                      + YOGA_DATASETS),
              val_split: str = "val",
              max_val: int = 0):
     """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
@@ -1486,6 +1491,105 @@ def prepare_eval(names: str = ",".join(EVAL_SOURCES), max_rows: int = 10000, max
             print("FAILED:", repr(meta)[:300])
             continue
         print("%-18s %-40s %s" % (meta["source"], meta["records"], meta["labels"].get("val")))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Kaggle yoga postures (laya.yoga): 47-pose ``choice`` training data
+# ---------------------------------------------------------------------------------------------------------
+
+
+def _flatten_rgb(im):
+    """Any PIL mode -> RGB, with transparency composited onto white (a transparent PNG would otherwise go black)."""
+    from PIL import Image
+
+    if im.mode == "P" and "transparency" in im.info:
+        im = im.convert("RGBA")
+    if im.mode in ("RGBA", "LA"):
+        bg = Image.new("RGB", im.size, (255, 255, 255))
+        bg.paste(im.convert("RGBA"), mask=im.convert("RGBA").split()[3])
+        return bg
+    return im.convert("RGB")
+
+
+@app.function(image=eval_image, cpu=4, memory=16384, timeout=60 * 60, volumes={"/data": data_vol})
+def prepare_yoga_dataset(n_options: int = 12, val_pct: float = 15.0, max_side: int = 1024, min_side: int = 64,
+                         seed: int = 0, name: str = "yoga_poses"):
+    """Download the Kaggle yoga posture archive and write /data/vqa/<name>/{train,val}.jsonl + images/.
+
+    One ``choice`` per distinct image over ``n_options`` poses (``laya.yoga``); files under two poses and images
+    under ``min_side`` px on their longest side are dropped. ``val_pct`` of the files, by content hash, are val.
+    The train records are shuffled, since training holds out the last ``n_calib`` of them for calibration.
+    """
+    import io
+    import random
+    import shutil
+    import zipfile
+    from collections import Counter
+
+    import requests
+    from PIL import Image
+
+    from laya.evalsets import stable_split
+    from laya.yoga import KAGGLE_DATASET, KAGGLE_URL, POSES, unique_files, yoga_record
+
+    t0 = time.time()
+    resp = requests.get(KAGGLE_URL, timeout=600)
+    resp.raise_for_status()
+    zf = zipfile.ZipFile(io.BytesIO(resp.content))
+    files = [(n.split("/")[0], n.split("/")[-1], zf.read(n)) for n in zf.namelist()
+             if n.count("/") == 1 and not n.endswith("/")]
+    unknown = sorted({f for f, _, _ in files} - set(POSES))
+    if unknown:
+        raise SystemExit("poses not in laya.yoga.POSES: %s" % unknown)
+    uniq = unique_files(files)
+    print("yoga: %d files, %d distinct after dropping duplicates and cross-labelled files" % (len(files), len(uniq)))
+
+    final_dir = os.path.join("/data/vqa", name)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    rng = random.Random(seed)
+    recs = {"train": [], "val": []}
+    skipped = Counter()
+    for h, f in uniq.items():
+        try:
+            im = _flatten_rgb(Image.open(io.BytesIO(f["data"])))
+        except Exception:
+            skipped["unreadable"] += 1
+            continue
+        if max(im.size) < min_side:
+            skipped["too_small"] += 1
+            continue
+        rec = yoga_record(f["folder"], h[:12], rng, n_options)
+        im.thumbnail((max_side, max_side))
+        rec["image"] = "images/%s.jpg" % h[:12]
+        im.save(os.path.join(tmp_dir, rec["image"]), quality=92)
+        recs[stable_split(h, val_pct, seed)].append(rec)
+    rng.shuffle(recs["train"])
+    for split in ("train", "val"):
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as f:
+            for rec in recs[split]:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    poses = {s: dict(sorted(Counter(r["source"].split("/", 1)[1] for r in rs).items())) for s, rs in recs.items()}
+    meta = {"source": "kaggle:" + KAGGLE_DATASET, "name": name, "records": {s: len(r) for s, r in recs.items()},
+            "files": len(files), "distinct": len(uniq), "skipped": dict(skipped), "poses": poses,
+            "n_options": n_options, "val_pct": val_pct, "max_side": max_side, "min_side": min_side, "seed": seed,
+            "minutes": round((time.time() - t0) / 60, 1)}
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    print("%s: records %s, skipped %s, %.1f min" % (name, meta["records"], meta["skipped"], meta["minutes"]))
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_yoga(n_options: int = 12, val_pct: float = 15.0, max_side: int = 1024, min_side: int = 64):
+    """modal run modal_app.py::prepare_yoga -> /data/vqa/yoga_poses; train on it with ``--datasets cauldron,score,yoga``."""
+    meta = prepare_yoga_dataset.remote(n_options=n_options, val_pct=val_pct, max_side=max_side, min_side=min_side)
+    print("%s: records %s, skipped %s" % (meta["name"], meta["records"], meta["skipped"]))
 
 
 # ---------------------------------------------------------------------------------------------------------
