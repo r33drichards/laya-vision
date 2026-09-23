@@ -1268,6 +1268,35 @@ def push_space(repo_id: str, files: dict):
     return info.commit_url
 
 
+web_image = (base_image.pip_install("onnx==1.23.0", "onnxruntime==1.30.0", "onnxscript==0.7.2")
+             .add_local_dir("scripts", "/root/scripts").add_local_python_source("laya"))
+
+
+@app.function(image=web_image, cpu=8, memory=32768, timeout=2 * 60 * 60, volumes={"/cache/hf": hf_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def push_web_models(checkpoint: str, repo_id: str, quantize: str):
+    """Export ``checkpoint`` for web-demo/ (scripts/export_onnx.py, validated against PyTorch) and upload the
+    folder to the Hub model repo ``repo_id``, where the GitHub Pages copy of the demo loads it from."""
+    from huggingface_hub import HfApi
+
+    out = "/tmp/laya-web"
+    subprocess.run([sys.executable, "/root/scripts/export_onnx.py", checkpoint, "--out", out,
+                    "--quantize", quantize, "--validate"], check=True)
+    api = HfApi()
+    api.create_repo(repo_id, exist_ok=True)
+    info = api.upload_folder(folder_path=out, repo_id=repo_id,
+                             commit_message="ONNX export of %s for web-demo/" % checkpoint)
+    print("uploaded:", info.commit_url)
+    return "https://huggingface.co/%s" % repo_id
+
+
+@app.local_entrypoint()
+def publish_web(checkpoint: str = "thaitea/laya-vision", repo: str = "thaitea/laya-vision-web",
+                quantize: str = "fp16,q8,q4"):
+    """modal run modal_app.py::publish_web  -- export the checkpoint to ONNX and host it on the Hub for web-demo/."""
+    print(push_web_models.remote(checkpoint, repo, quantize))
+
+
 @app.local_entrypoint()
 def publish_space(repo: str = "thaitea/laya-vision-demo", folder: str = "space"):
     """modal run modal_app.py::publish_space  -- push the demo's source (space/) to its Hugging Face Space."""

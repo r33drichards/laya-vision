@@ -9,11 +9,16 @@ and no build step. The image never leaves the page.
 **Status: experimental, partial.** What has been checked, and how, is in [What works](#what-works); what has not
 is in [What does not, or is untested](#what-does-not-or-is-untested).
 
-## Model files are not hosted
+## Where the model files live
 
-The ONNX files (250 MB to 950 MB, depending on precision) are **not** on Hugging Face or anywhere else. The
-page loads them from a folder URL you give it (default `./models/laya-vision/`, or `?models=<url>`). Produce them
-from a checkpoint with the export script, from the repository root:
+The ONNX files (250 MB to 950 MB, depending on precision) are too big for GitHub Pages, so they are published to
+the Hub at [thaitea/laya-vision-web](https://huggingface.co/thaitea/laya-vision-web) by
+`modal run modal_app.py::publish_web` (the export below, run on Modal, then uploaded with the `huggingface-thaitea`
+secret). The page loads `?models=<url>` if given, else `./models/laya-vision/` if a local export is there, else
+the Hub copy. The public site is https://r33drichards.github.io/laya-vision/, deployed by
+`.github/workflows/pages.yml` on every push to `main` that touches the page.
+
+To produce the files locally from a checkpoint, from the repository root:
 
 ```bash
 pip install onnx onnxruntime onnxscript          # export and validation only; the page needs none of this

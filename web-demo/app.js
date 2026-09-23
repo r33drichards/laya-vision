@@ -12,7 +12,13 @@ const DEFAULT_QUESTIONS = {
 $("questions").value = JSON.stringify(DEFAULT_QUESTIONS, null, 2);
 
 const params = new URLSearchParams(location.search);
+// ?models=<url> wins; otherwise a local export in ./models/laya-vision/ if there is one (local development),
+// else the published copy on the Hub (the GitHub Pages site, where the files are too big to host)
+const HUB_MODELS = "https://huggingface.co/thaitea/laya-vision-web/resolve/main/";
 if (params.get("models")) $("base-url").value = params.get("models");
+else fetch(new URL("laya_web.json", new URL($("base-url").value, location.href)), { method: "HEAD" })
+  .then((r) => { if (!r.ok) $("base-url").value = HUB_MODELS; })
+  .catch(() => { $("base-url").value = HUB_MODELS; });
 if (params.get("variant")) $("variant").value = params.get("variant");
 if (params.get("backend")) $("backend").value = params.get("backend");
 
