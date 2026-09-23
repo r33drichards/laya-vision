@@ -79,3 +79,17 @@ def test_cli_writes_the_report(tmp_path, capsys):
     assert out.startswith(R.marker("m")) and "median **40.0 ms**" in out
     assert R.main(["--model", "m", "--status", "datasets=failure"]) == 0
     assert "⚠️ **datasets**: failure" in capsys.readouterr().out
+
+
+def test_html_report_is_self_contained_and_explains_the_run():
+    r = R.merge([{"model": "run/best", "code": CODE, "started": "2026-09-23T01:40:00+00:00", "datasets": _datasets(),
+                  "games": _games(), "latency": {"median_ms": 41.0, "p90_ms": 45.0}}])
+    page = R.render_html(r, {"datasets": "success", "games": "success", "latency": "success"}, "https://run")
+    assert page.startswith("<title>run/best</title>") and page.isascii()
+    assert "<script" not in page and "<svg" in page and "What happened" in page
+    assert "prefers-color-scheme:dark" in page and ':root[data-theme="dark"]' in page
+    fs = R.findings(r)
+    assert any("630 questions" in t for _, t in fs)  # pooled accuracy line
+    assert any("Galaxian: scores 500 against 300 for random play" in t for _, t in fs)
+    assert any(t.startswith("Against human vote spreads it beats") for _, t in fs)
+    assert "Maze: solves 4&times;4: 50.0%" in page
