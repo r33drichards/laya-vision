@@ -22,3 +22,9 @@ FineWeb shards) are not copied, since none of it applies to this model.
 autoresearch loop) contributed lessons rather than code: soft teacher targets, a value head beside the policy,
 batched test-time search, symmetry augmentation and its experiment findings. They are listed with their evidence in
 `program.md` ("Lessons from autogo") and built into `toolkit.py`, `games_eval.py`, `laya.search` and the value head.
+
+## KataGo
+
+[Accelerating Self-Play Learning in Go](https://arxiv.org/abs/1902.10565) (David J. Wu, 2019): lessons only, no code.
+`program.md` "Lessons from KataGo" lists the techniques that carry over to training here, with the paper's ablation
+factors (its Table 2).

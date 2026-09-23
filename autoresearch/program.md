@@ -127,6 +127,25 @@ architecture plays far better than ours. What carries over, with its evidence:
   iterations. Here the margins in `pareto.py` are the gate: re-measure them (repeat the baseline) when the harness
   changes.
 
+## Lessons from KataGo
+
+[Accelerating Self-Play Learning in Go](https://arxiv.org/abs/1902.10565) (Wu 2019, KataGo) ablates each of its
+techniques as the factor more training it takes to reach the same strength without it (Table 2). The ones that
+carry over, used at training time only (the benchmark plays greedy):
+
+- **Dense auxiliary targets beat one scalar (1.65x).** Ownership and score targets say *where* the net misjudged
+  the board, instead of one win/loss bit per game to assign credit from. Here a single `value` did not help (one
+  run); denser targets might: distance to the goal per maze cell, danger per Snake cell, the next frame.
+- **Predict the next turn's move as a regulariser (1.30x)**, weight 0.15, never used for play. The paper notes it
+  works single-agent: predict your own next action. The toolkit's trajectories give the expert's move at t+1 free.
+- **Spend most rollouts cheap, record a few well (playout cap randomization, 1.37x).** For DAgger: roll the model
+  out greedy on many training seeds, label only a sample of the visited states with the expert.
+- **Grow the data window; lower the LR early.** Train on a window of recent data that grows with training (as
+  autogo: never only the newest), with a lower LR at the start (our warmup).
+
+Global pooling (1.60x) and Go-specific input features (1.55x) do not carry over: a transformer already pools
+globally, and the benchmark fixes what the model sees.
+
 ## Ideas to start from
 
 - **Cut depth**: `KEEP_TEXT_LAYERS` (30 in SmolVLM-256M) and `KEEP_VISION_LAYERS` (12), then use the 5 minutes to
