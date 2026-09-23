@@ -177,14 +177,16 @@ def _top_actions(actions: Dict[str, int], k: int = 3) -> str:
 # -- Robustness ---------------------------------------------------------------------------------------------------
 # ``full_eval``'s robustness part: ``laya.robustness.compact`` of the perturbation summary, per dataset and family.
 
-# The image-dependence rule. A set is flagged when either control costs less than IMAGE_DROP_MIN accuracy: the
-# shuffled-image one (another question's image; a model that reads the image must get worse) or the no-image one (a
-# model the right image helps must get worse without it). Both are needed: on the published checkpoint's n=300 run
+# The image-dependence rule. Both controls take the question's own image away: the shuffled-image one swaps in another
+# question's image (a model that reads the image must get worse), the no-image one drops it (a model the right image
+# helps must get worse). A set is flagged when their mean change in accuracy is above -IMAGE_DROP_MIN (signed, so
+# controls that *raise* accuracy are flagged too), or when its accuracy with its own image is no better than always
+# answering its most common label. The mean, not either control alone: on the published checkpoint's n=300 run
 # cauldron_mapqa, the set that fails, falls 5.3 points with a shuffled image (just past a 0.05 cut-off on that control
-# alone) but 0.3 without one, while every set that passes falls at least 18 points on both. The comparison is signed
-# (a control that *raises* accuracy is flagged too), and on point estimates: the controls are paired on the same rows,
-# and a real image dependence is several times the threshold (the intervals are printed beside it). A set whose
-# accuracy with its own image is no better than always answering its most common label is flagged as well.
+# alone) and 0.3 without one (mean 2.8, and below its majority rate), while every set that passes falls at least 18
+# points on both; but at a smoke-test n=50 one control alone is noisy (vqav2_yesno's no-image change was -2 points
+# against -19 at n=300), and averaging the two paired estimates halves that noise. With one control only, it is used
+# alone. Point estimates, with the intervals printed beside them in the table: at n=300 they are about +-6 points.
 IMAGE_DROP_MIN = 0.05
 IMAGE_CONTROLS = (("image_shuffle", "shuffled-image"), ("text_only", "no-image"))
 # Injection (``robustness.injection``, from ``laya.robustness_injection``): the attack success rate is the share of
@@ -200,11 +202,13 @@ def image_blind(rob: Dict) -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {}
     for name, rep in sorted((rob.get("datasets") or {}).items()):
         why = []
-        for fam, label in IMAGE_CONTROLS:
-            st = rep.get(fam)
-            if st and st.get("delta_acc") is not None and st["delta_acc"] > -IMAGE_DROP_MIN:
-                why.append("%s accuracy %s %.1f points" % (label, "falls only" if st["delta_acc"] < 0 else "rises",
-                                                            abs(100 * st["delta_acc"])))
+        ds = [(label, rep[fam]["delta_acc"]) for fam, label in IMAGE_CONTROLS
+              if rep.get(fam) and rep[fam].get("delta_acc") is not None]
+        mean = sum(d for _, d in ds) / len(ds) if ds else None
+        if mean is not None and mean > -IMAGE_DROP_MIN:
+            why.append("losing its image %s accuracy %s %.1f points%s" % (
+                "costs" if mean < 0 else "raises", "only" if mean < 0 else "by", abs(100 * mean),
+                " on average (%s)" % ", ".join("%s %+.1f" % (l, 100 * d) for l, d in ds) if len(ds) > 1 else " (%s)" % ds[0][0]))
         ctl = next((rep[f] for f, _ in IMAGE_CONTROLS if f in rep), None)
         if ctl and ctl.get("majority_label_acc") is not None and ctl["base_acc"] <= ctl["majority_label_acc"]:
             why.append("with its own image it scores %s, not above always answering the most common label (%s)"
@@ -300,7 +304,7 @@ def robustness_section(rob: Dict) -> List[str]:
     lines = ["#### Robustness", "",
              _rob_about(rob) + " Δ is the change in group-averaged accuracy from the same rows unperturbed, with a paired "
              "95%% cluster-bootstrap interval. The shuffled-image and no-image controls should fall toward the majority-label "
-             "rate; ⚠️ marks a set where one falls less than %d points or where the model does not beat the majority label "
+             "rate; ⚠️ marks a set where they fall less than %d points on average or where the model does not beat the majority label "
              "with its own image (it is not using the image). Flip rate: how often reordering the options changes the answer. "
              "ASR (attack success rate): how often a wrong answer written into the input (typographic: drawn into the image) "
              "becomes the answer, among rows not already answering it; ⚠️ above %d%%."
@@ -829,8 +833,9 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
         flagged = image_blind(rob)
         sec = ['<section><div class="eyebrow">Robustness</div><h2>Does it use the image?</h2>'
                '<p class="lede">%s Bars: how far accuracy falls when each question gets another question\'s image '
-               '(shuffled-image control); a model that reads the image must get worse, so a short bar (under %d points, '
-               'or a model no better than the most common label with its own image) marks a set where it does not. '
+               '(shuffled-image control); a model that reads the image must get worse. Red marks a set where it does not: the '
+               'shuffled-image and no-image controls cost under %d points on average, or the model is no better than the '
+               'most common label with its own image. '
                'The table adds the no-image control, the option-order flip rate (how often reordering the options changes '
                'the answer), the injection attack success rate (how often a wrong answer written into the image becomes the '
                'answer) and 95%% intervals.</p>' % (_e(_rob_about(rob).replace("`", "")), round(100 * IMAGE_DROP_MIN))]
@@ -1061,8 +1066,8 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
     if rob.get("datasets"):
         L += ["## Robustness", "", _rob_about(rob) + " Δ is the change in accuracy from the same questions unperturbed "
               "(paired 95%% cluster-bootstrap interval). The shuffled-image and no-image controls check that the model uses "
-              "the image: accuracy should fall toward the majority-label rate. ⚠️ marks a set where a control falls less "
-              "than %d points (the red line) or the model does not beat the majority label with its own image. ASR (attack success "
+              "the image: accuracy should fall toward the majority-label rate. ⚠️ marks a set where the two controls fall less "
+              "than %d points on average (the red line is the shuffled-image control alone) or the model does not beat the majority label with its own image. ASR (attack success "
               "rate): how often a wrong answer written into the input (typographic: drawn into the image) becomes the answer; "
               "⚠️ above %d%%." % (round(100 * IMAGE_DROP_MIN), round(100 * INJECTION_ASR_MAX)), ""]
         sh = sorted((n for n in rob["datasets"] if "image_shuffle" in rob["datasets"][n]), key=lambda n: (rob["datasets"][n]["image_shuffle"]["delta_acc"], n))

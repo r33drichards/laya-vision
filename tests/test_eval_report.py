@@ -160,11 +160,19 @@ def _robustness():
 
 def test_image_blind_rule():
     flagged = R.image_blind(_robustness())
-    # mapqa: shuffled falls 5.3 points (past the cut-off) but no image only 0.3, and it is below its majority label
-    assert set(flagged) == {"cauldron_mapqa", "cauldron_vsr"}
-    assert flagged["cauldron_mapqa"][0] == "no-image accuracy falls only 0.3 points"
+    # mapqa: shuffled falls 5.3 points (past the cut-off alone) but no image only 0.3, and it is below its majority label
+    assert set(flagged) == {"cauldron_mapqa"}
+    assert flagged["cauldron_mapqa"][0] == \
+        "losing its image costs accuracy only 2.8 points on average (shuffled-image -5.3, no-image -0.3)"
     assert "not above always answering the most common label (60.7%)" in flagged["cauldron_mapqa"][1]
-    assert flagged["cauldron_vsr"] == ["shuffled-image accuracy rises 2.0 points"]  # a control that helps is flagged too
+    # vsr: +2 with a shuffled image, but -38 without one; one noisy control does not flag a set on its own
+    assert "cauldron_vsr" not in flagged
+    vsr = _robustness()["datasets"]["cauldron_vsr"]
+    helps = {"datasets": {"x": dict(vsr, text_only=dict(vsr["text_only"], delta_acc=0.04))}}
+    assert R.image_blind(helps) == {"x": ["losing its image raises accuracy by 3.0 points on average "
+                                          "(shuffled-image +2.0, no-image +4.0)"]}
+    one = {"datasets": {"x": {k: v for k, v in vsr.items() if k != "text_only"}}}
+    assert R.image_blind(one) == {"x": ["losing its image raises accuracy by 2.0 points (shuffled-image)"]}
     assert R.image_blind({"datasets": {"aokvqa": _robustness()["datasets"]["aokvqa"]}}) == {}
     assert R.image_blind({"datasets": {"x": {"orig": {"acc": 0.5}, "option_order": _fam(0.5, 0.0, 0.1)}}}) == {}
 
@@ -186,9 +194,10 @@ def test_robustness_in_markdown_html_doc_and_merge():
     assert "⚠️ **robustness**" not in md
     assert "⚠️ **robustness**: failure" in R.render(R.merge(parts[:1]), {"robustness": "failure"})
     fs = R.findings(r)
-    assert ("bad", "mapqa may not be using the image: no-image accuracy falls only 0.3 points; with its own image it "
-                   "scores 58.3%, not above always answering the most common label (60.7%) (robustness controls).") in fs
-    assert any(sev == "warn" and t.startswith("Image-dependence controls pass on 1 of 3 sets") for sev, t in fs)
+    assert ("bad", "mapqa may not be using the image: losing its image costs accuracy only 2.8 points on average "
+                   "(shuffled-image -5.3, no-image -0.3); with its own image it scores 58.3%, not above always answering "
+                   "the most common label (60.7%) (robustness controls).") in fs
+    assert any(sev == "warn" and t.startswith("Image-dependence controls pass on 2 of 3 sets") for sev, t in fs)
     assert any(t.startswith("Option order: reordering the options changes the answer on 3.3% of rows") for _, t in fs)
     assert ("bad", "Typographic injection: a wrong answer drawn into the image pulls the model to it on aokvqa 74.0%, "
                    "vsr 28.0% (attack success rate, flagged above 20.0%).") in fs
@@ -200,7 +209,7 @@ def test_robustness_in_markdown_html_doc_and_merge():
     assert "ASR |" not in R.robustness_section(no_inj)[4]  # the column only when the family ran
     page = R.render_html(r)
     assert "Does it use the image?" in page and page.isascii() and "<script" not in page
-    assert "Image controls passed" in page and "1 / 3" in page and "Typographic injection" in page and 'class="bad">&#9888;</span>' in page
+    assert "Image controls passed" in page and "2 / 3" in page and "Typographic injection" in page and 'class="bad">&#9888;</span>' in page
     doc = R.render_doc(r, "t")
     assert "## Robustness" in doc and "| aokvqa | 300 | 58.7% |" in doc
     assert 'title "Accuracy lost with a shuffled image (points)"' in doc and "    line [5, 5, 5]" in doc

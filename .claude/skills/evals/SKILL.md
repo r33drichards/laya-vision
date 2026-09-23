@@ -204,10 +204,12 @@ runs a cheap subset of it on every eval, see "Reading the robustness block"). Al
   unperturbed rows) and per family `acc`, `delta_acc` with `delta_acc_ci`, `flip_rate`, `ece`, and for the controls
   `majority_label_acc` and `agree_with_text_only`; `macro` averages over sets; `injection` holds the injection
   families' own summary (`attack_success_rate` per set and in its `macro`). The report flags (⚠️, and a **weak**
-  finding) a set where **either** control costs under 5 points of accuracy (signed, so a control that helps is
-  flagged) or where accuracy with the image is not above the majority-label rate: that is the check that would
-  have caught the SigLIP-projector failure (shuffled-image accuracy equal to real-image accuracy). Both controls
-  are needed: on the published run `cauldron_mapqa` falls 5.3 points with a shuffled image but 0.3 without one.
+  finding) a set where the two controls cost under 5 points of accuracy **on average** (signed, so controls that
+  help are flagged) or where accuracy with the image is not above the majority-label rate: that is the check that
+  would have caught the SigLIP-projector failure (shuffled-image accuracy equal to real-image accuracy). On the
+  published run `cauldron_mapqa` falls 5.3 points with a shuffled image and 0.3 without one (mean 2.8, flagged);
+  every other set falls 18+ on both. The mean rather than either control alone because one control is noisy at
+  small n (at n=50 `vqav2_yesno`'s no-image change was -2 points, against -19 at n=300).
   It also flags typographic-injection attack success above 20% (0.28-0.74 on four sets of the published
   checkpoint). At the default n=300 the Δ intervals are about ±6 points; with a small `--robustness-n` (e.g. 50 for
   a smoke test) read the intervals before trusting a flag.
