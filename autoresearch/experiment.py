@@ -31,23 +31,20 @@ OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a che
 # size and latency: 0 keeps what the checkpoint has
 KEEP_TEXT_LAYERS = 0      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
-IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
+IMAGE_SIZE = 384            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
 # training
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-LR_HEAD = 1e-4
-LR_BACKBONE = 2e-5
+LR_HEAD = 5e-5
+LR_BACKBONE = 1e-5
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.25
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
-# relative share of each game inside GAME_FRAC (1 = an equal split): less for games already near their ceiling
-GAME_WEIGHTS = {"game_doom_basic": 0.5, "game_atari_freeway": 0.25, "game_snake": 2.0, "game_cartpole": 2.0,
-                "game_acrobot": 1.5, "game_mountaincar": 1.5}
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
@@ -103,10 +100,6 @@ def build(ctx):
         for g in CONTROL_GAMES:
             games += toolkit.control_examples(g, 5000)
         ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
-        g = {k: v * GAME_WEIGHTS.get(k, 1.0) for k, v in ctx.mix.items() if k.startswith("game_")}
-        scale = sum(v for k, v in ctx.mix.items() if k.startswith("game_")) / sum(g.values())
-        ctx.mix.update({k: v * scale for k, v in g.items()})
-        print("game mix:", {k: round(v, 4) for k, v in g.items()})
     return agent
 
 
