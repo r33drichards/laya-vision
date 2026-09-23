@@ -8,6 +8,8 @@
                                                      # the same run on the bidirectional backbone
     modal run modal_app.py::prepare_cauldron          # The Cauldron's closed-form subsets -> /data/vqa/cauldron_<subset>
     modal run modal_app.py::prepare_score             # rubric-scored sets (score questions) -> /data/vqa/score_<name>
+    modal run modal_app.py::prepare_eval              # held-out eval sets (KonIQ, EvalMuse, CIFAR-10H, FER+, VizWiz,
+                                                     # POPE) -> /data/vqa/eval_<name>; evaluate scores them by default
     modal run --detach modal_app.py::finetune_long --run-name cauldron-score-2ep --epochs 2 --max-passes 4 \
         --datasets cauldron,score --val-datasets vqa,cauldron,score
                                                      # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
@@ -35,8 +37,11 @@ and the uncapped ``cauldronfull_<subset>`` sets (``CAULDRON_FULL_DATASETS``, eve
 ``--datasets aokvqa,scienceqa,vqav2_yesno`` and as ``--val-datasets`` for a Cauldron-trained model. The ``score``
 head has its own sets (``SCORE_DATASETS``, written by ``prepare_score`` from ``laya.rubric``): rubric-graded
 responses, aesthetics votes, generated-image ratings and damage levels; add them to ``--datasets`` to train it.
-``--datasets`` and ``--val-datasets`` take dataset names and the group names ``vqa``, ``cauldron``, ``cauldronfull``
-and ``score`` (``DATASET_GROUPS``).
+The held-out evaluation sets (``EVAL_DATASETS``, written by ``prepare_eval`` from ``laya.evalsets``) score
+calibration against human vote histograms, abstention, hallucination and rubric scoring; ``evaluate`` includes
+them, and ``--val-split test`` reads the official test split where one exists (KonIQ, FER+).
+``--datasets`` and ``--val-datasets`` take dataset names and the group names ``vqa``, ``cauldron``, ``cauldronfull``,
+``score`` and ``eval`` (``DATASET_GROUPS``).
 
 Run names: ``finetune`` and ``finetune_long`` take ``--backbone`` and write under that backbone's root
 (``CKPT_ROOTS``). Everywhere a job takes a saved run (``evaluate``, ``try_model``, ``doom_eval``, ``--init-from``)
@@ -91,6 +96,9 @@ CAULDRON_DATASETS = tuple("cauldron_" + s for s in CAULDRON_SUBSETS)
 CAULDRON_FULL_DATASETS = tuple("cauldronfull_" + s for s in CAULDRON_SUBSETS)  # uncapped prep, see the docstring
 SCORE_SOURCES = ("vlfeedback", "ava", "richhf", "crisismmd")  # see laya/rubric.py
 SCORE_DATASETS = tuple("score_" + s for s in SCORE_SOURCES)  # rubric-scored sets for the ``score`` head, written by prepare_score
+EVAL_SOURCES = ("koniq", "evalmuse", "cifar10h", "ferplus", "vizwiz", "pope_random", "pope_popular",
+                "pope_adversarial")  # see laya/evalsets.py
+EVAL_DATASETS = tuple("eval_" + s for s in EVAL_SOURCES)  # held-out sets written by prepare_eval
 DATASETS = CAULDRON_DATASETS
 CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", SMOLVLM2: "/ckpt/smolvlm2", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
@@ -182,7 +190,7 @@ def _load_split(name: str, split: str, limit):
 
 
 DATASET_GROUPS = {"vqa": VQA_DATASETS, "cauldron": CAULDRON_DATASETS, "cauldronfull": CAULDRON_FULL_DATASETS,
-                  "score": SCORE_DATASETS}
+                  "score": SCORE_DATASETS, "eval": EVAL_DATASETS}
 
 
 def _expand_datasets(names: str) -> list:
@@ -653,7 +661,8 @@ def finetune_long(
     timeout=30 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
 )
-def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS), val_split: str = "val",
+def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS + EVAL_DATASETS),
+             val_split: str = "val",
              max_val: int = 0):
     """Evaluate a saved checkpoint (``<run>`` under /ckpt/smolvlm, or ``modernvbert/<run>``) on the val splits,
     raw and with its temperatures. Defaults to every prepared set (the official VQA splits and the Cauldron
@@ -1210,6 +1219,258 @@ def prepare_score(names: str = ",".join(SCORE_SOURCES), max_rows: int = 0, max_t
             print("FAILED:", repr(meta)[:300])
             continue
         print("%-12s %-28s %-24s  %s" % (meta["name"], meta["rows"], meta["records"], meta["levels"]["train"]))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Held-out evaluation sets (laya.evalsets): human-vote calibration, abstention, hallucination, rubric scoring
+# ---------------------------------------------------------------------------------------------------------
+
+eval_image = _with_local_code(base_image.pip_install("requests"))
+
+
+def _hf_file_url(repo: str, filename: str) -> str:
+    from huggingface_hub import hf_hub_url
+
+    return hf_hub_url(repo, filename, repo_type="dataset")
+
+
+def _hf_headers() -> dict:
+    token = os.environ.get("HF_TOKEN")
+    return {"Authorization": "Bearer " + token} if token else {}
+
+
+def _koniq_source(rng):
+    """KonIQ-10k from the pyiqa mirror's tarball, streamed: its own label csv comes first, then the 512x384
+    images, whose JPEG bytes are kept as they are (re-encoding would change the quality being rated)."""
+    import csv
+    import io
+    import tarfile
+
+    import requests
+
+    from laya.evalsets import SOURCES, koniq_record
+
+    url = _hf_file_url(SOURCES["koniq"], "koniq10k.tgz")
+    rows = None
+    with requests.get(url, headers=_hf_headers(), stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with tarfile.open(fileobj=r.raw, mode="r|gz") as tar:
+            for m in tar:
+                if m.name.endswith("koniq10k_distributions_sets.csv"):
+                    rows = {row["image_name"]: row for row in csv.DictReader(io.StringIO(tar.extractfile(m).read().decode("utf-8")))}
+                    left = set(rows)
+                elif "/512x384/" in m.name and m.name.endswith(".jpg"):
+                    if rows is None:
+                        raise RuntimeError("koniq10k.tgz: images before the label csv")
+                    fn = m.name.rsplit("/", 1)[1]
+                    got = koniq_record(rows[fn], rng) if fn in rows else None
+                    if got is None:
+                        continue
+                    split, rec = got
+                    yield split, rec["id"], (tar.extractfile(m).read(), ".jpg"), [rec]
+                    left.discard(fn)
+                    if not left:
+                        return
+
+
+def _evalmuse_source(rng, max_rows: int, val_pct: float, seed: int, workers: int = 16):
+    """EvalMuse-40K: labels from train_list.json, val a seeded share of prompts, and each needed image read out of
+    the 54 GB split zip by range requests (``laya.evalsets.MultiPartZip``) instead of downloading it."""
+    import io
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    import requests
+    from huggingface_hub import hf_hub_download
+    from PIL import Image
+
+    from laya.evalsets import SOURCES, MultiPartZip, evalmuse_record, stable_split
+
+    repo = SOURCES["evalmuse"]
+    with open(hf_hub_download(repo, "train_list.json", repo_type="dataset")) as f:
+        rows = json.load(f)
+    todo = {"train": [], "val": []}
+    for row in rows:
+        rec = evalmuse_record(row, rng)
+        if rec is not None:
+            todo[stable_split(str(row["prompt_id"]), val_pct, seed)].append((row["img_path"], rec))
+    if max_rows and len(todo["train"]) > max_rows:
+        todo["train"] = rng.sample(todo["train"], max_rows)
+    parts = ["images.zip.part-a%s" % c for c in "abcdef"]
+    urls = [_hf_file_url(repo, p) for p in parts]
+    sess = requests.Session()
+    sess.headers.update(_hf_headers())
+    sizes = [int(sess.head(u, allow_redirects=True, timeout=60).headers["Content-Length"]) for u in urls]
+
+    def fetch(i, start, end):
+        for attempt in range(5):
+            try:
+                r = sess.get(urls[i], headers={"Range": "bytes=%d-%d" % (start, end - 1)}, timeout=120)
+                r.raise_for_status()
+                if len(r.content) == end - start:
+                    return r.content
+            except requests.RequestException:
+                pass
+            time.sleep(2 ** attempt)
+        raise RuntimeError("range read failed: %s [%d, %d)" % (parts[i], start, end))
+
+    archive, local = MultiPartZip(sizes, fetch), threading.local()
+    names = {n.split("dataset/images/", 1)[-1]: n for n in archive.open().namelist()}
+
+    def read(img_path):
+        if not hasattr(local, "zf"):
+            local.zf = archive.open()
+        return local.zf.read(names[img_path])
+
+    for split in ("val", "train"):
+        with ThreadPoolExecutor(workers) as pool:
+            items = todo[split]
+            for (img_path, rec), data in zip(items, pool.map(lambda it: read(it[0]), items)):
+                # rated for prompt alignment, not image quality, so re-encoding (JPEG, max_side) loses nothing
+                yield split, rec["id"], Image.open(io.BytesIO(data)), [rec]
+
+
+def _eval_source(name: str, rng, max_rows: int, val_pct: float, seed: int, info: dict):
+    """Yield ``(split, image_key, image, records)`` for one evaluation source; ``image`` is a PIL image or
+    ``(bytes, ext)`` kept verbatim. ``info`` collects source checks for meta.json."""
+    import csv
+    import io
+
+    from datasets import load_dataset
+
+    from laya import evalsets as E
+
+    repo = E.SOURCES[name]
+    if name == "koniq":
+        yield from _koniq_source(rng)
+    elif name == "evalmuse":
+        yield from _evalmuse_source(rng, max_rows, val_pct, seed)
+    elif name == "cifar10h":
+        for i, row in enumerate(load_dataset(repo, split="train", streaming=True)):
+            rec = E.cifar10h_record(row, i, rng)
+            if rec:
+                yield "val", rec["id"], row["image"], [rec]
+    elif name == "ferplus":
+        import requests
+
+        text = requests.get(E.FERPLUS_VOTES_URL, timeout=120).text
+        votes = list(csv.DictReader(io.StringIO(text)))
+        for usage, hf_split in (("Training", "train"), ("PublicTest", "valid"), ("PrivateTest", "test")):
+            ds = load_dataset(repo, split=hf_split)
+            sub = [(i, v) for i, v in enumerate(votes) if v["Usage"] == usage]
+            if len(sub) != len(ds):
+                raise RuntimeError("FER+ %s: %d vote rows but %d images" % (usage, len(sub), len(ds)))
+            labels = ds["label"]
+            agree = E.ferplus_agreement((v, labels[k]) for k, (_, v) in enumerate(sub))
+            info["fer2013_agreement_" + usage] = round(agree, 3)
+            if agree < 0.45:  # ~0.65 when aligned, ~0.17 when off by one row
+                raise RuntimeError("FER+ %s: votes do not line up with %s (agreement %.2f)" % (usage, repo, agree))
+            for k, (i, v) in enumerate(sub):
+                got = E.ferplus_record(v, i, rng)
+                if got:
+                    yield got[0], got[1]["id"], ds[k]["image"], [got[1]]
+    elif name == "vizwiz":
+        for row in load_dataset(repo, split="val", streaming=True):
+            rec = E.vizwiz_record(row, rng)
+            if rec:
+                yield "val", rec["id"], row["image"], [rec]
+    elif name.startswith("pope_"):
+        for row in load_dataset(repo, "Full", split=name.split("_", 1)[1], streaming=True):
+            rec = E.pope_record(row)
+            if rec:
+                yield "val", "pope-" + str(row["image_source"]), row["image"], [rec]
+    else:
+        raise ValueError("unknown eval source %r (one of %s)" % (name, sorted(E.SOURCES)))
+
+
+def _save_eval_image(image, base: str, key: str, max_side: int) -> str:
+    """Write one image under ``base/images``: ``(bytes, ext)`` verbatim; a PIL image as PNG when it is tiny
+    (CIFAR, FER faces: JPEG would smear them), else as JPEG with the longest side at most ``max_side``."""
+    safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in key)
+    if isinstance(image, tuple):
+        rel = "images/%s%s" % (safe, image[1])
+        with open(os.path.join(base, rel), "wb") as f:
+            f.write(image[0])
+        return rel
+    im = image.convert("RGB")
+    if max(im.size) <= 64:
+        rel = "images/%s.png" % safe
+        im.save(os.path.join(base, rel))
+    else:
+        rel = "images/%s.jpg" % safe
+        im.thumbnail((max_side, max_side))
+        im.save(os.path.join(base, rel), quality=92)
+    return rel
+
+
+@app.function(image=eval_image, cpu=8, memory=32768, timeout=6 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def prepare_eval_dataset(name: str, max_rows: int = 10000, max_val: int = 0, val_pct: float = 10.0, max_side: int = 1024,
+                         seed: int = 0, prefix: str = "eval_"):
+    """Write one ``laya.evalsets`` source to /data/vqa/<prefix><name>/{train,val[,test]}.jsonl + images/.
+
+    Splits follow the source (see ``laya.evalsets``); sets without a train split get an empty train.jsonl, so they
+    are for ``evaluate`` / ``--val-datasets`` only. ``max_rows`` caps the train records (0: all), ``max_val`` the
+    val and test records each (0: all: these are eval sets, so none are dropped by default); ``val_pct`` is the
+    share of prompts held out where the source has no labelled val split (EvalMuse). No level balancing: an
+    evaluation set keeps its natural label distribution.
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    final_dir = os.path.join("/data/vqa", prefix + name)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    rng = random.Random(seed)
+    t0 = time.time()
+    recs = {"train": [], "val": [], "test": []}
+    saved, info = {}, {}
+    for n_seen, (split, key, image, rows) in enumerate(_eval_source(name, rng, max_rows, val_pct, seed, info), 1):
+        cap = max_rows if split == "train" else max_val
+        if cap and len(recs[split]) >= cap:
+            continue
+        if key not in saved:
+            saved[key] = _save_eval_image(image, tmp_dir, key, max_side)
+        for rec in rows:
+            rec["image"] = saved[key]
+        recs[split] += rows
+        if n_seen % 2000 == 0:
+            print("%s: %s records, %d images in %.1f min" % (name, {k: len(v) for k, v in recs.items()}, len(saved),
+                                                            (time.time() - t0) / 60), flush=True)
+    for split in ("train", "val", "test"):
+        if split == "test" and not recs["test"]:
+            continue
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as f:
+            for rec in recs[split]:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    meta = {"source": name, "records": {s: len(r) for s, r in recs.items()}, "images": len(saved),
+            "labels": {s: dict(sorted(Counter(int(x["label"]) for x in r).items())) for s, r in recs.items() if r},
+            "soft_targets": sum("target" in x for r in recs.values() for x in r), "max_rows": max_rows, "max_val": max_val,
+            "val_pct": val_pct, "max_side": max_side, "seed": seed, "minutes": round((time.time() - t0) / 60, 1), **info}
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    print("%s: records %s, %d images, labels %s, %.1f min" % (name, meta["records"], len(saved), meta["labels"], meta["minutes"]))
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_eval(names: str = ",".join(EVAL_SOURCES), max_rows: int = 10000, max_val: int = 0, val_pct: float = 10.0,
+                 max_side: int = 1024, prefix: str = "eval_"):
+    """modal run modal_app.py::prepare_eval [--names koniq,pope_adversarial] -- one container per source, in parallel."""
+    kw = dict(max_rows=max_rows, max_val=max_val, val_pct=val_pct, max_side=max_side, prefix=prefix)
+    print("%-18s %-40s %s" % ("source", "records", "labels (val)"))
+    for meta in prepare_eval_dataset.map([n for n in names.split(",") if n], kwargs=kw, order_outputs=True,
+                                         return_exceptions=True):
+        if isinstance(meta, Exception):
+            print("FAILED:", repr(meta)[:300])
+            continue
+        print("%-18s %-40s %s" % (meta["source"], meta["records"], meta["labels"].get("val")))
 
 
 # ---------------------------------------------------------------------------------------------------------

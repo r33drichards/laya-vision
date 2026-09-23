@@ -54,22 +54,25 @@ Everything is a prepared dataset on the `laya-datasets` Modal volume: `/data/vqa
 
 - **The Cauldron** (`laya/cauldron.py`, `prepare_cauldron`): the 19 subsets of [HuggingFaceM4/the_cauldron](https://huggingface.co/datasets/HuggingFaceM4/the_cauldron) whose answers are closed. Lettered choices and option lists become `choice`, yes/no turns become `noul`, RAVEN's letters become an 8-way `choice`; numbers, captions and free text are skipped. 270k questions.
 - **Rubric-scored sets** (`laya/rubric.py`, `prepare_score`): VLFeedback (response helpfulness and visual faithfulness, 1 to 5), AVA (photo aesthetics, human vote histograms as soft targets), RichHF-18K (generated-image plausibility, alignment, aesthetics, overall) and CrisisMMD (damage severity). Each level is a short rubric clause in the style you would write for `predict`, with several instruction phrasings per question. How they were cleaned, and why, is in [docs/score-data.md](docs/score-data.md).
+- **Held-out evaluation sets** (`laya/evalsets.py`, `prepare_eval`): KonIQ-10k photo quality and EvalMuse-40K prompt alignment as `score` questions, CIFAR-10H and FER+ as `choice`, VizWiz answerability and POPE (random, popular, adversarial) as `noul`. KonIQ, EvalMuse, CIFAR-10H, FER+ and VizWiz keep each image's human vote histogram as a soft target, so `evaluate` also reports cross-entropy against how people actually split (`soft_xent`, `xent`) next to the same number for the set's average histogram (`prior_…`). Evaluation only, except KonIQ, EvalMuse and FER+, which have train splits. KonIQ and FER+ also get their official test split (`evaluate --val-split test`).
 - **The original three** (`aokvqa`, `scienceqa`, `vqav2_yesno`): the official train splits, prepared on the [`siglip-projector-experiment`](https://github.com/r33drichards/laya-vision/tree/siglip-projector-experiment) branch.
 - **Games**: frames auto-labelled by a scripted expert or a trained agent; see below.
 
 ## Running it on Modal
 
-`modal_app.py` expects the volumes `laya-hf-cache`, `laya-datasets` and `laya-checkpoints`, and a `huggingface-thaitea` secret for the publish jobs. Dataset arguments take names or the groups `vqa`, `cauldron` and `score`.
+`modal_app.py` expects the volumes `laya-hf-cache`, `laya-datasets` and `laya-checkpoints`, and a `huggingface-thaitea` secret for the publish jobs. Dataset arguments take names or the groups `vqa`, `cauldron`, `score` and `eval`.
 
 ```bash
 modal run modal_app.py::try_model --image photo.jpg --questions q.json --run cauldron-score-2ep-bidir-full/best
 modal run modal_app.py::test                                              # GPU tests + latency, both backbones
 modal run modal_app.py::prepare_cauldron                                  # -> /data/vqa/cauldron_<subset>
 modal run modal_app.py::prepare_score                                     # -> /data/vqa/score_<name>
+modal run modal_app.py::prepare_eval                                      # -> /data/vqa/eval_<name>
 modal run --detach modal_app.py::finetune_long --run-name my-run --epochs 2 --max-passes 4 --max-minutes 240 \
     --option-attention bidirectional --mix score_vlfeedback=3 --datasets cauldron,score --val-datasets vqa,cauldron,score
 modal run --detach modal_app.py::finetune_long --backbone ModernVBERT/modernvbert --run-name my-run --datasets cauldron
 modal run modal_app.py::evaluate --run-name my-run/best                   # every prepared val set, raw and calibrated
+modal run modal_app.py::evaluate --run-name my-run/best --datasets eval   # only the held-out evaluation sets
 modal run --detach modal_app.py::split_bench                              # SmolVLM2, image splitting off / 1024 / 2048
 modal run modal_app.py::publish --repo user/name --run my-run/best --card hf_model_card_score.md
 modal run modal_app.py::publish_space                                     # push space/ to the demo Space
