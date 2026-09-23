@@ -8,3 +8,4 @@ a430602	0.6750	0.7140	0.0390	0.1099	236.7113	0.9991	discard	exp: value head trai
 88f111b	0.6739	0.7168	0.0428	0.1656	236.5623	0.9958	discard	exp: double both learning rates (head 1e-4, backbone 2e-5)
 02e7aa8	0.6655	0.7131	0.0475	0.0142	236.5623	1.0065	discard	exp: 2x LR + per-game weights inside the 25% game share (favour unlearned games)
 90f9087	0.6066	0.6405	0.0339	0.0967	236.5623	0.9656	keep	exp: 384px images (36 image tokens) on the 25% game mix
+ced98b7	0.6694	0.7075	0.0381	0.0821	201.1613	0.8322	keep	exp: keep 20 of 30 text layers on the 25% game mix
