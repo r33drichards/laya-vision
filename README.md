@@ -36,6 +36,8 @@ Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/la
 
 Accuracies are on the official validation splits (VQAv2 yes/no is a re-split of the official val set by image, so not comparable to published VQAv2 numbers). Calibrated ECE is 0.02 to 0.03 for all three over their full validation sets. The original checkpoint is ahead on ScienceQA because it made 12 passes over that one train split; the others made 3 to 4 as one of 19 to 23 sets, and are far broader: the recommended one averages 75% over 26 validation sets, and 93.7% on IconQA, 91.8% on DVQA, 89.9% on Hateful Memes.
 
+The full scorecard for the recommended checkpoint covers 34 validation sets, human-vote calibration, the games suite and latency: [docs/evals/laya-vision.md](docs/evals/laya-vision.md).
+
 The recommended checkpoint is the only one whose `score` answers mean anything. On held-out rubric data it scores 54% over 5 levels on VLFeedback response grading (prior-only baseline 27.5%), is 0.8 levels off on average against 1.4 for the baseline, and 0.38 levels off on 3-level damage severity. Full tables, the ordinal metrics and what each run changed are in [docs/score-results.md](docs/score-results.md).
 
 ## How it works
@@ -80,7 +82,7 @@ modal run modal_app.py::publish --repo user/name --run my-run/best --card hf_mod
 modal run modal_app.py::publish_space                                     # push space/ to the demo Space
 ```
 
-`full_eval` runs the whole suite on one checkpoint in parallel and saves one file. That covers the `evaluate` dataset groups (`vqa,cauldron,score,eval`), the games suite and `bench_latency`. It writes the results to `eval-results/<run>-<commit>.json` locally, and to `<run>/evals/` on the checkpoint volume, beside the weights but outside the folder `publish` uploads. The file records the git commit it ran from, and each dataset's `meta.json`. To evaluate a branch's checkpoint, run it from that branch's checkout, since the Modal images ship the local `laya/` code. `--parts datasets,games,latency`, `--datasets` and `--val-split test` narrow it down.
+`full_eval` runs the whole suite on one checkpoint in parallel and saves one file. That covers the `evaluate` dataset groups (`vqa,cauldron,score,eval`), the games suite and `bench_latency`. It writes the results to `eval-results/<run>-<commit>.json` locally, and to `<run>/evals/` on the checkpoint volume, beside the weights but outside the folder `publish` uploads. The file records the git commit it ran from, and each dataset's `meta.json`. To evaluate a branch's checkpoint, run it from that branch's checkout, since the Modal images ship the local `laya/` code. `--parts datasets,games,latency`, `--datasets` and `--val-split test` narrow it down. `python scripts/eval_report.py <result files> --doc docs/evals/<name>.md` turns results into a Markdown report whose charts are Mermaid blocks GitHub renders; `--html` writes the same as a standalone page.
 
 The same suite runs from GitHub Actions with the `eval` workflow (`.github/workflows/eval.yml`). Start it from Actions → eval → Run workflow, on the branch whose code trained the checkpoint, or with `gh workflow run eval.yml --ref <branch> -f model=<run>/best`.
 - The datasets, games and latency parts run as parallel jobs, and each job's log is the live Modal output.

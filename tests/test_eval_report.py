@@ -93,3 +93,18 @@ def test_html_report_is_self_contained_and_explains_the_run():
     assert any("Galaxian: scores 500.0 against 300.0 for random play" in t for _, t in fs)
     assert any(t.startswith("Against human vote spreads it beats") for _, t in fs)
     assert "Maze: solves 4&times;4: 50.0%" in page
+
+
+def test_markdown_doc_is_deterministic_with_mermaid_charts():
+    r = R.merge([{"model": "run/best", "code": CODE, "started": "2026-09-23T01:40:00+00:00", "datasets": _datasets(),
+                  "games": _games(), "latency": {"median_ms": 41.0, "p90_ms": 45.0}}])
+    doc = R.render_doc(r, "Run scorecard", ["../../eval-results/a.json"])
+    assert doc == R.render_doc(r, "Run scorecard", ["../../eval-results/a.json"])
+    assert doc.startswith("# Run scorecard\n") and "[`a.json`](../../eval-results/a.json)" in doc
+    charts = doc.split("```mermaid\n")[1:]
+    assert charts and all(c.startswith(R.MERMAID_INIT + "\nxychart-beta horizontal\n") for c in charts)
+    assert '    x-axis ["iconqa' not in doc  # the fixture has no iconqa; labels come from the results only
+    assert '"ai2d", "raven"' in doc.replace('"aokvqa"', "")  # cauldron group sorted by accuracy, descending
+    assert "| cifar10h | 0.500 | 2.200 | -1.700 better |" in doc
+    assert "- **weak** ·" not in doc or "- **good** ·" in doc
+    assert "&times;" not in doc and "×" in doc
