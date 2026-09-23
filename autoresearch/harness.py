@@ -28,8 +28,8 @@ The result lands in ``autoresearch/runs/<tag>/<commit>.json`` and ``pareto.py`` 
 The data pool. Every image the harness touches comes from a fixed, versioned pool (``POOL_DIR`` on the
 ``laya-datasets`` volume), not from the prepared datasets' image folders: reading those small files from the volume
 costs about 0.4 s each (measured: 2.4 files/s serially, ~28 files/s with 32 threads), which starved training of
-data. ``modal run autoresearch/harness.py::prepare_pool`` builds the pool once, one container per dataset, as pickles
-of examples with the encoded image bytes inline:
+data. ``modal run autoresearch/harness.py --prepare-pool`` builds the pool once, one container per dataset, as
+pickles of examples with the encoded image bytes inline:
 
 * ``train``: ``TRAIN_POOL_PER_SET`` seeded examples of each ``TRAINABLE_DATASETS`` train split, calibration tail
   excluded. A 5-minute experiment sees ~30k samples, so a 46k pool is enough, and every experiment trains from
@@ -175,7 +175,7 @@ def load_pool(kinds=("train", "calib", "eval")) -> Dict[str, Dict[str, List[Dict
     missing = [_pool_file(k, n) for k, n in parts if not os.path.exists(_pool_file(k, n))]
     if missing:
         raise FileNotFoundError("the autoresearch data pool %s is incomplete (%d parts missing, e.g. %s); build it "
-                                "with: modal run autoresearch/harness.py::prepare_pool" % (POOL_DIR, len(missing), missing[0]))
+                                "with: modal run autoresearch/harness.py --prepare-pool" % (POOL_DIR, len(missing), missing[0]))
 
     def read(part):
         with open(_pool_file(*part), "rb") as f:
@@ -396,9 +396,8 @@ def build_pool_part(kind: str, name: str) -> Dict:
             "seconds": round(time.time() - t, 1)}
 
 
-@app.local_entrypoint()
-def prepare_pool():
-    """modal run autoresearch/harness.py::prepare_pool  -- build every missing pool part, all in parallel."""
+def build_pool():
+    """Build every missing pool part, all in parallel (``modal run autoresearch/harness.py --prepare-pool``)."""
     total = 0.0
     for r in build_pool_part.starmap(POOL_PARTS, order_outputs=False, return_exceptions=True):
         if isinstance(r, Exception):
@@ -464,8 +463,14 @@ def _git(*args) -> str:
 
 
 @app.local_entrypoint()
-def main(tag: str, desc: str = "", prune: bool = True):
+def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool = False):
     import pareto
+
+    if prepare_pool:
+        build_pool()
+        return
+    if not tag:
+        raise SystemExit("--tag is required (the run tag, e.g. sep23)")
 
     exp_path = os.path.join(REPO, "autoresearch", "experiment.py")
     if _git("status", "--porcelain", "--", exp_path):

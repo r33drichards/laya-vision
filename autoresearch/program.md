@@ -31,7 +31,7 @@ discard call, not you.
 4. **Modal**: `modal volume ls laya-checkpoints` must work. In a Claude Code cloud sandbox, set it up as
    `.claude/skills/evals/SKILL.md` section 1 describes (the proxy extra and CA bundle, in a scratch venv).
 5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v1`). If it is missing, build
-   it once with `modal run autoresearch/harness.py::prepare_pool` (it reads the prepared `cauldron_*`, `score_*` and
+   it once with `modal run autoresearch/harness.py --prepare-pool` (it reads the prepared `cauldron_*`, `score_*` and
    `eval_*` sets). Every image the harness uses comes from this pool: reading the datasets' small image files
    straight from the volume is too slow to keep an H100 fed.
 6. **Baseline**: run the unmodified `experiment.py` first. It continues training the released checkpoint for 5
