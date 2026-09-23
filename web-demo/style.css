@@ -37,3 +37,6 @@ canvas { max-width: 100%; max-height: 320px; display: block; margin: 8px 0; bord
 .bar .val { text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
 pre { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow: auto; max-height: 400px; }
 #limits li { margin: 6px 0; }
+
+/* while an image file is dragged over the page */
+body.dragging #preview, body.dragging #image { outline: 3px dashed var(--accent, #4a9); outline-offset: 4px; }

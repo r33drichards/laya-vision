@@ -50,6 +50,44 @@ $("image").addEventListener("change", async (ev) => {
   if (file) await showImage(file);
 });
 
+// paste an image from the clipboard (screenshot, copied photo) anywhere on the page; text pastes pass through
+document.addEventListener("paste", async (ev) => {
+  const item = [...(ev.clipboardData?.items || [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
+  if (!item) return;
+  ev.preventDefault();
+  $("image").value = "";
+  await showImage(item.getAsFile());
+});
+
+// drag and drop an image file anywhere on the page; other drops (text into the boxes) behave as usual
+const imageFile = (dt) => [...(dt?.files || [])].find((f) => f.type.startsWith("image/"));
+const hasFiles = (dt) => [...(dt?.types || [])].includes("Files");
+let dragDepth = 0;
+document.addEventListener("dragenter", (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  dragDepth++;
+  document.body.classList.add("dragging");
+});
+document.addEventListener("dragleave", (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); }
+});
+document.addEventListener("dragover", (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  ev.preventDefault(); // without this the browser opens the file instead of dropping it here
+  ev.dataTransfer.dropEffect = "copy";
+});
+document.addEventListener("drop", async (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  ev.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove("dragging");
+  const file = imageFile(ev.dataTransfer);
+  if (!file) return;
+  $("image").value = "";
+  await showImage(file);
+});
+
 // preload the example photo (two turntables and a mixer) so a first visit can press Run straight away
 fetch("example.jpg").then((r) => (r.ok ? r.blob() : null)).then((b) => { if (b && !image) return showImage(b); })
   .catch(() => {});
