@@ -135,7 +135,7 @@ def show(rows: Sequence[Dict]) -> str:
         lines.append("hypervolume %.4f (baseline alone %.4f)" % (hypervolume(front, base), hypervolume([base], base)))
         lines.append("frontier (%d):" % len(front))
         for r in sorted(front, key=lambda r: r["params_m"]):
-            lines.append("  %s  quality %.4f  acc %.4f  ece %.4f  %7.1fM params  %6.1f ms  %s" % (
+            lines.append("  %s  quality %.4f  acc %.4f  ece %.4f  %7.1fM params  %5.3fx latency  %s" % (
                 r["commit"], r["quality"], r["macro_acc"], r["ece_hard"], r["params_m"], r["latency_x"], r["description"]))
     return "\n".join(lines)
 
