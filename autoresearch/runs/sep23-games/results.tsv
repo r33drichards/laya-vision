@@ -2,3 +2,4 @@ commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 7b6c14f	0.6704	0.7136	0.0432	-0.0344	236.5623	1.0101	keep	baseline
 4022e33	0.6713	0.7135	0.0423	-0.0344	236.5623	1.0055	discard	baseline repeat
 a82ec1d	0.6757	0.7160	0.0403	0.1439	236.5623	1.0008	keep	exp: mix game data (toolkit maze/snake/control + pool atari/doom) at 25% of draws
+596dab2	0.6633	0.7105	0.0472	0.1530	236.5623	1.0048	discard	exp: game data at 50% of draws
