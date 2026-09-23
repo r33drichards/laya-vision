@@ -37,13 +37,13 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-LR_HEAD = 1e-4
-LR_BACKBONE = 2e-5
+LR_HEAD = 5e-5
+LR_BACKBONE = 1e-5
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
-GAME_FRAC = 0.25
+GAME_FRAC = 0.35
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
