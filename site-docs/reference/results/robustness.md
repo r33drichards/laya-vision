@@ -192,7 +192,7 @@ training data never phrases a question this way.
 **Abstention: the model does not abstain.**
 - With the gold option removed, the top pick still averages 0.65–0.75 probability, and 22–46% of rows keep it above 0.8.
 - An added "none of the above" is almost never chosen with the real image (0–0.7%).
-- With a mismatched image it is chosen 2–3% of the time on three of the four choice sets, and 17.7% on visual7w.
+- With a mismatched image it is chosen 1.6–3.3% of the time on three of the four choice sets, and 17.7% on visual7w.
 
 Treat the probabilities as calibrated only among the options offered. If "none of these" is a possible answer, it
 has to be an option the model was trained with.
