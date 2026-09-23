@@ -18,8 +18,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def test_endpoint_defaults_and_opt_outs(monkeypatch):
-    monkeypatch.delenv("OTEL_SDK_DISABLED", raising=False)
-    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    for var in ("OTEL_SDK_DISABLED", "OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_HEADERS", "LAYA_OTLP_TOKEN"):
+        monkeypatch.delenv(var, raising=False)
+    assert telemetry.endpoint() is None  # the default collector needs a token
+    assert telemetry._headers() is None
+    monkeypatch.setenv("LAYA_OTLP_TOKEN", "t0k")
+    assert telemetry.endpoint() == telemetry.DEFAULT_ENDPOINT
+    assert telemetry._headers() == {"authorization": "Bearer t0k"}
+    monkeypatch.delenv("LAYA_OTLP_TOKEN")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "authorization=Bearer%20t0k")
     assert telemetry.endpoint() == telemetry.DEFAULT_ENDPOINT
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://collector:4318/")
     assert telemetry.endpoint() == "http://collector:4318"

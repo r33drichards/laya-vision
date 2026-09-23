@@ -88,6 +88,11 @@ base_image = (
     .env({"HF_HOME": "/cache/hf", "TOKENIZERS_PARALLELISM": "false"})
 )
 
+# The token for laya.telemetry's collector (LAYA_OTLP_TOKEN). LAYA_OTEL_SECRET picks another Modal secret; set it
+# empty to run without one (telemetry is then off).
+_otel_secret = os.environ.get("LAYA_OTEL_SECRET", "laya-otel")
+OTEL = [modal.Secret.from_name(_otel_secret)] if _otel_secret else []
+
 
 def _traced(*attrs):
     """``laya.telemetry.traced_job`` on a Modal function: a span per call named after it, with these arguments as
@@ -269,6 +274,7 @@ def _load_data(datasets: str, train_split: str, val_split: str, n_calib: int, ma
     memory=32768,
     timeout=40 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
+    secrets=OTEL,
 )
 @_traced("run_name", "backbone", "freeze")
 def finetune(
@@ -394,6 +400,7 @@ def finetune(
     timeout=300 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
     retries=modal.Retries(max_retries=3, initial_delay=10.0),
+    secrets=OTEL,
 )
 @_traced("run_name", "backbone")
 def finetune_long(
@@ -701,6 +708,7 @@ def finetune_long(
     memory=32768,
     timeout=60 * 60,
     volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()},
+    secrets=OTEL,
 )
 @_traced("run_name", "val_split")
 def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DATASETS + SCORE_DATASETS + EVAL_DATASETS),
@@ -750,7 +758,7 @@ def _public_question(q: dict) -> dict:
 
 
 @app.function(image=image, gpu="L4", cpu=4, memory=16384, timeout=60 * 60,
-              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
 @_traced("run_name", "dtype")
 def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = "bf16", seed: int = 0):
     """Time ``predict`` on real val images, one question each, as a user would call it: the checkpoint's own
@@ -844,7 +852,7 @@ def _split_table(rows: list, names: list) -> str:
     return "\n".join(lines) + "\n"
 
 
-@app.function(image=image, cpu=1, memory=4096, timeout=24 * 60 * 60, volumes={"/ckpt": ckpt_vol})
+@app.function(image=image, cpu=1, memory=4096, timeout=24 * 60 * 60, volumes={"/ckpt": ckpt_vol}, secrets=OTEL)
 @_traced()
 def split_bench(
     bench: str = "split-bench",
@@ -1608,7 +1616,7 @@ def prepare_doom_basic(n_train: int = 20000, n_val: int = 2000, eps: float = 0.3
     return meta
 
 
-@app.function(image=doom_image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+@app.function(image=doom_image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
 @_traced("policy", "model")
 def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int = 50, tics: int = 4, seed: int = 50_000):
     """Play ``episodes`` of ViZDoom ``basic`` and report reward and kill rate.
@@ -1708,7 +1716,7 @@ def _play_grid(game: str, policy: str, model: str, episodes: int, size: int, see
     return out
 
 
-@app.function(image=image, cpu=2, timeout=30 * 60)
+@app.function(image=image, cpu=2, timeout=30 * 60, secrets=OTEL)
 @_traced("game", "policy", "size")
 def play_grid_baseline(game: str, policy: str = "expert", episodes: int = 50, size: int = 0, seed: int = GRID_SEED,
                        max_steps: int = 0):
@@ -1716,7 +1724,7 @@ def play_grid_baseline(game: str, policy: str = "expert", episodes: int = 50, si
     return _play_grid(game, policy, "", episodes, size, seed, max_steps)
 
 
-@app.function(image=image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+@app.function(image=image, gpu="L4", timeout=60 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
 @_traced("game", "model", "size")
 def play_grid(game: str, model: str, episodes: int = 50, size: int = 0, seed: int = GRID_SEED, max_steps: int = 0):
     """Play ``episodes`` of Maze or Snake (``laya.gridgames``) with a checkpoint (bf16): each step the rendered
@@ -1778,7 +1786,7 @@ def _atari_baseline(game: str) -> dict:
 
 
 @app.function(image=atari_image, gpu="L4", cpu=4, timeout=60 * 60,
-              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()}, secrets=OTEL)
 @_traced("game", "model")
 def play_atari_game(game: str, model: str, episodes: int = 3, max_steps: int = 4500, seed: int = 100_000,
                     random_episodes: int = 10):

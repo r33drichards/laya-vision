@@ -62,7 +62,8 @@ The Atari jobs are in `modal_atari_*.py`.
   `modal volume ls laya-checkpoints smolvlm2/split-bench`, not `/ckpt/smolvlm2/...`.
 - **Run names** passed to `evaluate`, `bench_latency`, `--init-from` and similar are relative to `/ckpt/smolvlm`
   or to `/ckpt`, so a SmolVLM2 run is `smolvlm2/<run>/best`.
-- **Secrets:** `huggingface-thaitea` (used by `publish*` and `prepare_*`). Pushing to the Hub publishes; confirm with
+- **Secrets:** `huggingface-thaitea` (used by `publish*` and `prepare_*`), and `laya-otel` (`LAYA_OTLP_TOKEN` for
+  `laya.telemetry`, used by the training, eval and game jobs; `LAYA_OTEL_SECRET=` runs without it). Pushing to the Hub publishes; confirm with
   the user first.
 
 Typical order for new training code:

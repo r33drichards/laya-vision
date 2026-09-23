@@ -1,10 +1,12 @@
 """OpenTelemetry for training, eval and Modal jobs: traces, metrics and the job's stdout as logs, over OTLP/HTTP.
 
 On by default whenever the ``opentelemetry-sdk`` and ``opentelemetry-exporter-otlp-proto-http`` packages are
-installed (``pip install laya[otel]``; the Modal images have them): data goes to ``DEFAULT_ENDPOINT``, the
-project's otel-lgtm collector, or to ``OTEL_EXPORTER_OTLP_ENDPOINT`` when that is set (``/v1/traces``,
-``/v1/metrics`` and ``/v1/logs`` are appended). ``OTEL_SDK_DISABLED=true`` or an empty
-``OTEL_EXPORTER_OTLP_ENDPOINT`` turns it off; ``tests/conftest.py`` does that for pytest.
+installed (``pip install laya[otel]``; the Modal images have them) and a token is available: data goes to
+``DEFAULT_ENDPOINT``, the project's otel-lgtm collector behind a bearer-token proxy, with the token from
+``LAYA_OTLP_TOKEN`` (or the standard ``OTEL_EXPORTER_OTLP_HEADERS``). The Modal jobs get it from the ``laya-otel``
+Modal secret. ``OTEL_EXPORTER_OTLP_ENDPOINT`` sends to another collector (``/v1/traces``, ``/v1/metrics`` and
+``/v1/logs`` are appended; no token needed). ``OTEL_SDK_DISABLED=true`` or an empty ``OTEL_EXPORTER_OTLP_ENDPOINT``
+turns it off; ``tests/conftest.py`` does that for pytest.
 
     @telemetry.traced_job(attrs=("run_name",))       # a span per call, stdout -> logs, numeric results -> metrics
     def evaluate(run_name, ...): ...
@@ -28,7 +30,8 @@ import traceback
 from typing import Dict, Iterable, Optional
 
 SERVICE_NAME = "laya-vision"
-DEFAULT_ENDPOINT = "https://otel-lgtm-production-ee87.up.railway.app"  # grafana/otel-lgtm on Railway (irc project)
+# otlp-auth on Railway (irc project; infra/telemetry/otlp-auth-proxy.ts): checks the token, forwards to otel-lgtm
+DEFAULT_ENDPOINT = "https://otlp-auth-production.up.railway.app"
 METRIC_EXPORT_MS = 15_000
 FLUSH_MS = 10_000
 
@@ -38,11 +41,21 @@ _lock = threading.Lock()
 
 
 def endpoint() -> Optional[str]:
-    """The collector's base URL, or None when telemetry is turned off."""
+    """The collector's base URL, or None when telemetry is turned off (including the default collector without a
+    token, which would only answer 401)."""
     if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
         return None
-    url = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", DEFAULT_ENDPOINT).strip()
-    return url.rstrip("/") or None
+    if "OTEL_EXPORTER_OTLP_ENDPOINT" in os.environ:
+        return os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"].strip().rstrip("/") or None
+    if not (os.environ.get("LAYA_OTLP_TOKEN") or os.environ.get("OTEL_EXPORTER_OTLP_HEADERS")):
+        return None
+    return DEFAULT_ENDPOINT
+
+
+def _headers() -> Optional[Dict[str, str]]:
+    """``LAYA_OTLP_TOKEN`` as a bearer header; None lets the exporters read ``OTEL_EXPORTER_OTLP_HEADERS``."""
+    token = os.environ.get("LAYA_OTLP_TOKEN", "").strip()
+    return {"authorization": "Bearer " + token} if token else None
 
 
 def enabled() -> bool:
@@ -89,14 +102,16 @@ def setup(service_name: str = SERVICE_NAME) -> bool:
         resource = Resource.create(res)  # also merges OTEL_RESOURCE_ATTRIBUTES
 
         tp = TracerProvider(resource=resource)
-        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=url + "/v1/traces")))
+        headers = _headers()
+        tp.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=url + "/v1/traces", headers=headers)))
         trace.set_tracer_provider(tp)
-        reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=url + "/v1/metrics"),
+        reader = PeriodicExportingMetricReader(OTLPMetricExporter(endpoint=url + "/v1/metrics", headers=headers),
                                                export_interval_millis=METRIC_EXPORT_MS)
         mp = MeterProvider(resource=resource, metric_readers=[reader])
         metrics.set_meter_provider(mp)
         lp = LoggerProvider(resource=resource)
-        lp.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=url + "/v1/logs")))
+        lp.add_log_record_processor(
+            BatchLogRecordProcessor(OTLPLogExporter(endpoint=url + "/v1/logs", headers=headers)))
         set_logger_provider(lp)
 
         stdout_log = logging.getLogger("laya.stdout")
