@@ -37,7 +37,7 @@ keep / discard call, not you.
    straight from the volume is too slow to keep an H100 fed.
 6. **Baseline**: run the unmodified `experiment.py` first. It continues training the released checkpoint for 5
    minutes, so it should land near the released model's numbers.
-7. **Noise**: run the baseline twice more (`--desc "baseline repeat"`), look at the spread of the three objectives,
+7. **Noise**: run the baseline twice more (`--desc "baseline repeat"`), look at the spread of the four objectives (the games margin in `pareto.py` is provisional until this is done),
    and if it exceeds the margins at the top of `pareto.py` tell the human before going on. Those margins decide what
    counts as a real improvement.
 
@@ -51,7 +51,8 @@ grep -A12 "^---" autoresearch/runs/<tag>/run.log        # the summary and the ke
 
 Never pass `--detach`: the local entrypoint collects the result, decides and writes the files. The first run of a
 new harness version deploys it and snapshots the loaded data (slower); later runs restore that snapshot. A run is
-5 minutes of training plus loading, calibration, eval and the L4 latency job.
+5 minutes of training plus loading, calibration and eval, then the L4 latency job and the four games jobs (one per
+family) in parallel.
 Start it as a background shell command and wait for it; do not let its output into your context.
 
 The harness writes `autoresearch/runs/<tag>/<commit>.json` (every metric, per dataset) and appends a row to
@@ -88,9 +89,10 @@ You CAN change anything in `experiment.py`: the starting checkpoint, what gets c
 and in what mix, the loss weights, freezing, learning rates, batch size, schedules, or a training loop of your own.
 
 You CANNOT:
-- modify `harness.py`, `pareto.py`, or the eval data;
-- train on anything but `ctx.train_examples()` (the pool's 2,000 examples per Cauldron and score set): no val
-  splits, no `eval_*` sets, no calibration tail;
+- modify `harness.py`, `pareto.py`, `games_eval.py`, `game_baselines.json`, `toolkit.py`, or the eval data;
+- train on anything but `ctx.train_examples()` (the pool's 2,000 examples per Cauldron and score set),
+  `ctx.game_examples()` and what `toolkit.py` generates (on seeds below 100,000; the games benchmark plays 700,000+):
+  no val splits, no `eval_*` sets, no calibration tail;
 - exceed the 5-minute training budget (the harness fails runs over budget + 60 s);
 - add dependencies beyond what the harness image installs.
 
