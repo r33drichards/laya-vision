@@ -149,6 +149,23 @@ accuracy/flip table above would misread them, so it leaves them out. Each one is
 **Repeat and batch invariance** ([`robustness_invariance`](https://github.com/r33drichards/laya-vision/blob/main/laya/robustness_invariance.py)) is a separate check.
 It scores the same rows alone and next to unrelated neighbours, with the prefix cache on and off, and with several
 questions in one `predict` call against one call per question. It reports the largest |Δp| and argmax flips.
+Right padding, a different number of images per row, a different number of options, several questions in one
+call, and the prefix cache should all leave a row's logits unchanged. With the **untrained** SmolVLM-256M on CPU
+(fp32, the 9 fixture rows, batch size 8), they did:
+
+| condition | max \|Δp\| | max \|Δlogit\| | flips |
+|---|---:|---:|---:|
+| repeat (batch path and `predict`) | 0 (bitwise) | 0 | 0 |
+| batched / reversed batch order | 1.8e-07 | 8.5e-07 | 0 |
+| hostile neighbours (long text, two images, text-only, eight options) | 2.1e-07 | 8.8e-07 | 0 |
+| `predict`, all of a state's questions in one call (+ hostile) | 2.2e-07 | 8.8e-07 | 0 |
+| `predict` with the prefix cache | 1.1e-07 | 6.0e-07 | 0 |
+| bf16 backbone vs fp32 (report only) | 2.2e-03 | 1.0e-02 | 0 (1 of 9 near-50/50 rows in a single-thread run) |
+
+`tests/test_robustness_invariance.py` asserts bitwise-identical repeats. For the other fp32 conditions it asserts no
+flips, |Δp| < 1e-5 and |Δlogit| < 1e-4. On CUDA, `collect_logits` runs under bf16 autocast and `predict` does
+not, so there the batch-path deltas will be bf16-sized. These numbers show the mechanics only. The trained
+checkpoint has not been measured on GPU yet (`python -m laya.robustness_invariance --model <ckpt> ...`).
 
 ### ECE noise floor
 
