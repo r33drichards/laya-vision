@@ -401,6 +401,9 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
     Items from the GPU preprocessing path carry ``raw_images`` (uint8, unresized) instead of ``pixel_values``;
     those are stacked into ``raw_pixels`` ``[n, n_img, 3, H, W]`` with an ``image_mask`` ``[n, n_img]`` marking
     the real ones, and ``VLMDecisionModel.forward`` turns them into pixels on the GPU.
+
+    Items with a ``"value"`` (value-head target, ``laya.vlm_train.make_item``) give ``"value"`` ``[n]`` with NaN
+    for the items without one; the key is absent when no item has one.
     """
     n, L = len(items), max(len(it["ids"]) for it in items)
     kmax = max(len(it["markers"]) for it in items)
@@ -1012,6 +1015,10 @@ class VLMAgent:
         "indistinguishable": [[label, label], ...] (identical once cut), "instructions": bool,
         "instructions_tokens_dropped": n, "state_tokens_dropped": n}``; the key is absent when nothing was cut.
         ``strict=True`` raises ``ValueError`` (naming the question and what would be cut) instead.
+
+        With a value head (config ``"value_head": true``) each answer carries ``"value"``, the head's P(success
+        from this state) read under that question's rows, and the result a top-level ``"value"`` (mean over all
+        scored rows); both keys are absent without the head.
         """
         t_override = resolve_temperature(temperature, calibration)
         if calibration is not None:

@@ -9,7 +9,7 @@ import torch
 from PIL import Image
 
 from laya import search
-from laya.vlm import VLMAgent, build_vlm_inputs, collate_vlm
+from laya.vlm import VLMAgent, collate_vlm
 from laya.vlm_train import collect_logits, make_item, synthetic_examples, train, value_loss
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
