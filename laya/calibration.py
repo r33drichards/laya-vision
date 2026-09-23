@@ -321,7 +321,8 @@ def checkpoint_identity(agent) -> Dict[str, Any]:
             h.update(v.to(torch.bfloat16).view(torch.int16).cpu().numpy().tobytes())
         cached = (key, h.hexdigest())
         agent._identity_cache = cached
-    return {"model": getattr(agent, "source", None) or agent.cfg.get("backbone"),
+    source = getattr(agent, "source", None) or {}
+    return {"model": source.get("id") or agent.cfg.get("backbone"), "revision": source.get("revision"),
             "config_sha256": hashlib.sha256(json.dumps(cfg, sort_keys=True, default=str).encode()).hexdigest(),
             "weights_sha256": cached[1]}
 
