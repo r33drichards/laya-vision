@@ -421,7 +421,7 @@ def score_rows(model, processor, rows: Sequence[Dict], temperatures: Sequence[fl
         pred = {k: row[k] for k in ("id", "group_id", "cluster", "dataset", "family", "variant", "label")}
         pred.update(qtype=int(rec["qtype"]), k=len(z), logits=[round(float(v), 4) for v in z],
                     probs=[round(float(v), 5) for v in p], pred=int(p.argmax()))
-        for k in ("shown_label", "order", "donor_image"):
+        for k in ("shown_label", "order", "donor_image", "meta"):
             if k in row:
                 pred[k] = row[k]
         out.append(pred)
