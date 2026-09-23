@@ -29,7 +29,8 @@ BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
 # size and latency: 0 keeps what the checkpoint has
-KEEP_TEXT_LAYERS = 0      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+KEEP_TEXT_LAYERS = 15      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+TEXT_LAYER_PICK = "spread"  # "first": layers 0..N-1; "spread": N layers evenly across the stack (0, 2, 4, ...)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
@@ -44,19 +45,27 @@ WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.25
-CONTROL_GAMES = ("LunarLander",)  # CartPole, Acrobot, MountainCar do not take off in 5 min
+CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
 
-def keep_text_layers(agent, n: int) -> None:
-    """Drop all but the first ``n`` decoder layers of the language model, in the module and in the saved config."""
+def keep_text_layers(agent, n: int, pick: str = "first") -> None:
+    """Keep ``n`` decoder layers of the language model (the first ``n``, or ``n`` spread evenly across the stack),
+    in the module and in the saved config."""
+    import torch
+
     tm = agent.model.encoder.text_model
-    tm.layers = tm.layers[:n]
+    total = len(tm.layers)
+    idx = list(range(n)) if pick == "first" else sorted({round(i * (total - 1) / (n - 1)) for i in range(n)})
+    tm.layers = torch.nn.ModuleList([tm.layers[i] for i in idx])
+    for j, layer in enumerate(tm.layers):  # attention caches index layers by position
+        if hasattr(layer, "self_attn") and hasattr(layer.self_attn, "layer_idx"):
+            layer.self_attn.layer_idx = j
     cfg = agent.model.encoder.config.text_config
     cfg.num_hidden_layers = n
     if getattr(cfg, "layer_types", None):
-        cfg.layer_types = list(cfg.layer_types)[:n]
+        cfg.layer_types = [list(cfg.layer_types)[i] for i in idx]
 
 
 def keep_vision_layers(agent, n: int) -> None:
@@ -86,7 +95,7 @@ def build(ctx):
     else:
         agent = VLMAgent(backbone=BACKBONE, device=ctx.device, option_attention=OPTION_ATTENTION)
     if KEEP_TEXT_LAYERS:
-        keep_text_layers(agent, KEEP_TEXT_LAYERS)
+        keep_text_layers(agent, KEEP_TEXT_LAYERS, TEXT_LAYER_PICK)
     if KEEP_VISION_LAYERS:
         keep_vision_layers(agent, KEEP_VISION_LAYERS)
     if IMAGE_SIZE:
@@ -96,7 +105,7 @@ def build(ctx):
     if GAME_FRAC:
         import toolkit
 
-        games = toolkit.snake_examples(20000) + ctx.game_examples()  # no Maze: too slow to learn in 5 min
+        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
         for g in CONTROL_GAMES:
             games += toolkit.control_examples(g, 5000)
         ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
