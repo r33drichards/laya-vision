@@ -125,7 +125,7 @@ modal run modal_app.py::full_eval --model my-run/best                   # every 
 modal run modal_app.py::evaluate --run-name my-run/best                   # every prepared val set, raw and calibrated
 modal run modal_app.py::evaluate --run-name my-run/best --datasets eval   # only the held-out evaluation sets
 modal run --detach modal_app.py::split_bench                              # SmolVLM2, image splitting off / 1024 / 2048
-modal run modal_app.py::games_eval --model my-run/best --out games.json   # Atari, ViZDoom, Maze, Snake + baselines
+modal run modal_app.py::games_eval --model my-run/best --out games.json   # Atari, ViZDoom, Maze, Snake, classic control + baselines
 modal run modal_app.py::publish --repo user/name --run my-run/best --card hf_model_card_score.md
 modal run modal_app.py::publish_space                                     # push space/ to the demo Space
 ```
@@ -148,8 +148,9 @@ The screen is the image and the options are the game's buttons. `examples/atari_
 - ViZDoom `basic`, against the scripted expert, random and always-attack.
 - Maze, at 4×4, 6×6 and 8×8 cells: solve rate, and path efficiency against the BFS shortest path.
 - Snake, on a 10×10 board: food eaten and steps survived, against a greedy BFS expert and random.
+- Classic control from Gymnasium (CartPole, Acrobot, MountainCar, LunarLander), 10 episodes each: episode return and share solved, normalized between random play (0) and a scripted controller (1). A single frame hides velocity, so the screen ghosts the previous frame under the current one.
 
-Maze and Snake are small seeded games in `laya/gridgames.py`, so every checkpoint plays the same levels. `maze_eval` and `snake_eval` compare several checkpoints on one game.
+Maze and Snake are small seeded games in `laya/gridgames.py`, and the classic-control wrappers are in `laya/controlgames.py`, so every checkpoint plays the same levels. `maze_eval`, `snake_eval` and `control_eval` compare several checkpoints on one game.
 
 ## What didn't work
 

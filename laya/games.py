@@ -77,6 +77,35 @@ def snake_question() -> Dict:
     }}
 
 
+CONTROL_GOALS = {
+    "CartPole": "A pole is hinged on a cart; push the cart left or right to keep the pole upright and the cart "
+                "on screen.",
+    "Acrobot": "Two links hang from a pivot; twist the joint between them to swing the free end up above the "
+               "line.",
+    "MountainCar": "The car is too weak to drive straight up; rock back and forth to build speed and reach the "
+                   "flag on the right hill.",
+    "LunarLander": "Fire the engines to land the lander gently and upright between the two flags.",
+}
+CONTROL_ACTIONS = {
+    "CartPole": {"LEFT": "push the cart left", "RIGHT": "push the cart right"},
+    "Acrobot": {"CLOCKWISE": "twist the lower link clockwise", "NONE": "do nothing",
+                "COUNTERCLOCKWISE": "twist the lower link counter-clockwise"},
+    "MountainCar": {"LEFT": "accelerate left", "NONE": "do not accelerate", "RIGHT": "accelerate right"},
+    "LunarLander": {"NOOP": "do nothing", "LEFT_ENGINE": "fire the left orientation engine",
+                    "MAIN_ENGINE": "fire the main engine", "RIGHT_ENGINE": "fire the right orientation engine"},
+}
+
+
+def control_question(game: str) -> Dict:
+    """The question for a ``laya.controlgames`` game; the screen ghosts the previous frame to show motion."""
+    return {"action": {
+        "type": "choice",
+        "instructions": "You are playing the control task %s. %s A faint copy shows where things were one step "
+                        "earlier. Which action should you take now?" % (game, CONTROL_GOALS[game]),
+        "criteria": dict(CONTROL_ACTIONS[game]),
+    }}
+
+
 def doom_question(scenario: str, buttons: Sequence[str]) -> Dict:
     return {"action": {
         "type": "choice",

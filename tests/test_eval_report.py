@@ -30,7 +30,9 @@ def _games():
             "doom": {"expert": {"policy": "expert", "mean_reward": 75.8, "kill_rate": 1.0, "mean_steps": 20.0}},
             "maze": [{"policy": "model:m", "size": 4, "solve_rate": 0.5, "efficiency": 0.8, "mean_steps": 30.0}],
             "snake": [{"policy": "expert", "size": 10, "mean_eaten": 26.3, "max_eaten": 40, "mean_steps": 232.0,
-                       "ends": {"self": 9, "wall": 1}}]}
+                       "ends": {"self": 9, "wall": 1}}],
+            "control": [{"game": "CartPole", "episodes": 10, "model_score": 120.0, "random_score": 20.0, "expert_score": 500.0,
+                         "normalized": 100.0 / 480.0, "model_solved": 0.1, "actions": {"LEFT": 6, "RIGHT": 4}}]}
 
 
 def test_group_of():
@@ -66,6 +68,7 @@ def test_render_starts_with_the_marker_and_has_every_section():
     assert "0.80 levels off" in md and "median **41.0 ms**" in md
     assert "| Galaxian | 500.0 | 300.0 | – | – | LEFTFIRE 75%, FIRE 25% |" in md
     assert "| model:m | 4 | 50.0% | 0.80 | 30.0 |" in md and "self 9, wall 1" in md
+    assert "| CartPole | 120.0 | 20.0 | 500.0 | 0.21 | 10.0% | LEFT 60%, RIGHT 40% |" in md
 
 
 def test_render_flags_failed_and_empty_parts():
@@ -98,6 +101,7 @@ def test_html_report_is_self_contained_and_explains_the_run():
     assert any("Galaxian: scores 500.0 against 300.0 for random play" in t for _, t in fs)
     assert any(t.startswith("Against human vote spreads it beats") for _, t in fs)
     assert "Maze: solves 4&times;4: 50.0%" in page
+    assert any(t.startswith("CartPole: scores 120.0 against 20.0") for _, t in fs) and "Classic control" in page
 
 
 def test_markdown_doc_is_deterministic_with_mermaid_charts():
@@ -113,3 +117,4 @@ def test_markdown_doc_is_deterministic_with_mermaid_charts():
     assert "| cifar10h | 0.500 | 2.200 | -1.700 better |" in doc
     assert "- **weak** ·" not in doc or "- **good** ·" in doc
     assert "&times;" not in doc and "×" in doc
+    assert "### Classic control" in doc and "| CartPole | 120.0 | 20.0 | 500.0 | 0.21 | 10.0% | LEFT 60%, RIGHT 40% |" in doc

@@ -32,12 +32,14 @@
     modal run modal_app.py::doom_eval --models all3-3ep/best  # play "basic": expert / random / always-attack / models
     modal run modal_app.py::maze_eval --models <run>/best     # Maze at 4x4 / 6x6 / 8x8 cells: BFS expert, random, models
     modal run modal_app.py::snake_eval --models <run>/best    # Snake on a 10x10 board: greedy expert, random, models
+    modal run modal_app.py::control_eval --models <run>/best  # CartPole / Acrobot / MountainCar / LunarLander: expert, random, models
     modal run modal_app.py::full_eval --model <run>/best  # EVERYTHING on one checkpoint, in parallel: evaluate over
                                                      # vqa,cauldron,score,eval + games suite + latency; one JSON in
                                                      # eval-results/ and <run>/evals/ on the checkpoint volume
     modal run modal_app.py::games_eval --model <run>/best --out games.json
                                                      # the games suite on one checkpoint: Atari Freeway / Breakout /
-                                                     # Galaxian, ViZDoom basic, Maze, Snake, with baselines, in parallel
+                                                     # Galaxian, ViZDoom basic, Maze, Snake, classic control, with
+                                                     # baselines, in parallel
 
 Volumes (created out of band; never ``modal deploy`` this app):
     laya-hf-cache     -> /cache/hf   (HF_HOME, shared model weights)
@@ -2044,11 +2046,12 @@ def decision_vs_generation(output: str = "results/raw/decision-vs-generation-l4.
 
 
 # ---------------------------------------------------------------------------------------------------------
-# Maze and Snake (laya.gridgames), and the games suite: Atari, ViZDoom, Maze and Snake on one checkpoint
+# Maze and Snake (laya.gridgames), and the games suite: Atari, ViZDoom, Maze, Snake and classic control on one checkpoint
 # ---------------------------------------------------------------------------------------------------------
 
 GRID_SEED = 200_000  # eval episodes use seeds GRID_SEED + i; keep training data off this range
 SUITE_ATARI_GAMES = ("Freeway", "Breakout", "Galaxian")
+SUITE_CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
 def _load_policy_agent(model: str):
@@ -2168,6 +2171,55 @@ def play_atari_game(game: str, model: str, episodes: int = 3, max_steps: int = 4
     return out
 
 
+control_image = _with_local_code(base_image.pip_install("gymnasium[classic-control,box2d]")
+                                 .env({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}))
+
+
+@app.function(image=control_image, gpu="L4", cpu=4, timeout=90 * 60,
+              volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+def play_control(game: str, model: str, episodes: int = 10, seed: int = GRID_SEED):
+    """One classic-control game (``laya.controlgames``: CartPole, Acrobot, MountainCar, LunarLander) with a
+    checkpoint, greedy, plus the scripted expert and random play on the same seeded episodes. Each step the
+    rendered screen (previous frame ghosted in) and ``laya.games.control_question`` go to ``predict``.
+    ``normalized`` is (model - random) / (expert - random)."""
+    from laya import controlgames as cg
+
+    t0 = time.time()
+    exp = cg.play_episodes(game, cg.expert_policy, episodes, seed)
+    rnd = cg.play_episodes(game, cg.random_policy(seed), episodes, seed)
+    res = cg.play_episodes(game, cg.model_policy(_load_policy_agent(model), game), episodes, seed)
+    out = {"game": game, "model": model, "episodes": episodes, "seed": seed,
+           "model_score": res["mean_score"], "model_scores": [e["score"] for e in res["results"]],
+           "model_solved": res["solved_rate"], "model_steps": res["mean_steps"], "actions": res["actions"],
+           "random_score": rnd["mean_score"], "random_solved": rnd["solved_rate"],
+           "expert_score": exp["mean_score"], "expert_solved": exp["solved_rate"],
+           "solved_at": cg.GAMES[game]["solved"],
+           "normalized": cg.normalized(res["mean_score"], rnd["mean_score"], exp["mean_score"]),
+           "seconds": round(time.time() - t0, 1)}
+    print(json.dumps(out))
+    return out
+
+
+def _control_print(rows: list) -> None:
+    print("%-12s %9s %9s %9s %7s %8s  %s" % ("game", "model", "random", "expert", "norm", "solved", "top actions"))
+    for r in rows:
+        total = max(1, sum(r["actions"].values()))
+        top = ", ".join("%s %d%%" % (a, 100 * n / total) for a, n in sorted(r["actions"].items(), key=lambda kv: -kv[1])[:3])
+        norm = "-" if r["normalized"] is None else "%.2f" % r["normalized"]
+        print("%-12s %9.1f %9.1f %9.1f %7s %7.0f%%  %s" % (r["game"], r["model_score"], r["random_score"], r["expert_score"],
+                                                            norm, 100 * r["model_solved"], top))
+
+
+@app.local_entrypoint()
+def control_eval(models: str = "cauldron-score-2ep-bidir-full/best", games: str = ",".join(SUITE_CONTROL_GAMES),
+                 episodes: int = 10):
+    """modal run modal_app.py::control_eval --models a/best,b/best [--games CartPole,LunarLander]  -- classic control."""
+    calls = [(m, play_control.spawn(g, m, episodes)) for m in models.split(",") if m for g in games.split(",") if g]
+    for m in dict.fromkeys(m for m, _ in calls):
+        print("\n== %s" % m)
+        _control_print([r for mm, c in calls if mm == m for r in [_get(c, "control")] if r])
+
+
 def _git_state() -> dict:
     """The local checkout's commit and whether it has uncommitted changes: the code the Modal images carry."""
     def git(*args):
@@ -2180,11 +2232,12 @@ def _git_state() -> dict:
 
 
 def _games_spawn(model: str, atari_games: str, atari_episodes: int, doom_episodes: int, maze_sizes: str,
-                 maze_episodes: int, snake_sizes: str, snake_episodes: int) -> dict:
+                 maze_episodes: int, snake_sizes: str, snake_episodes: int, control_games: str = "",
+                 control_episodes: int = 10) -> dict:
     """Start every game of the suite, with its baselines, and return the call handles."""
     calls = {"atari": [play_atari_game.spawn(g, model, atari_episodes) for g in atari_games.split(",") if g],
              "doom": {p: play_doom.spawn(p, "", doom_episodes) for p in ("expert", "random", "always_attack")},
-             "grid": []}
+             "grid": [], "control": [play_control.spawn(g, model, control_episodes) for g in control_games.split(",") if g]}
     calls["doom"]["model"] = play_doom.spawn("model", model, doom_episodes)
     for game, sizes, episodes in (("maze", maze_sizes, maze_episodes), ("snake", snake_sizes, snake_episodes)):
         for size in [int(s) for s in sizes.split(",") if s]:
@@ -2208,7 +2261,7 @@ def _get(call, what: str):
 
 
 def _games_collect(calls: dict) -> dict:
-    out = {"atari": [], "doom": {}, "maze": [], "snake": []}
+    out = {"atari": [], "doom": {}, "maze": [], "snake": [], "control": []}
     for c in calls["atari"]:
         r = _get(c, "atari game")
         if r:
@@ -2221,6 +2274,10 @@ def _games_collect(calls: dict) -> dict:
         r = _get(c, "grid game")
         if r:
             out[r["game"]].append(r)
+    for c in calls.get("control", []):
+        r = _get(c, "control game")
+        if r:
+            out["control"].append(r)
     return out
 
 
@@ -2242,21 +2299,26 @@ def _games_print(results: dict) -> None:
         print(_grid_header(game))
         for r in results[game]:
             print(_grid_row(r))
+    if results.get("control"):
+        print("\n== Classic control (greedy; normalized: 0 = random, 1 = expert)")
+        _control_print(results["control"])
 
 
 @app.local_entrypoint()
 def games_eval(model: str, atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
                doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
-               snake_episodes: int = 20, out: str = ""):
+               snake_episodes: int = 20, control_games: str = ",".join(SUITE_CONTROL_GAMES), control_episodes: int = 10,
+               out: str = ""):
     """modal run modal_app.py::games_eval --model <run>/best [--out games.json]  -- the games suite on one checkpoint.
 
-    Atari (Freeway, Breakout, Galaxian by default), ViZDoom ``basic``, Maze at each size and Snake, all in parallel,
-    with each game's baselines on the same seeds: random (and the expert data's score) for Atari; the scripted
-    expert, random and always-attack for Doom; the BFS expert and random for Maze and Snake. ``out`` gets every
+    Atari (Freeway, Breakout, Galaxian by default), ViZDoom ``basic``, Maze at each size, Snake and the classic
+    control games (CartPole, Acrobot, MountainCar, LunarLander), all in parallel, with each game's baselines on the
+    same seeds: random (and the expert data's score) for Atari; the scripted expert, random and always-attack for
+    Doom; the BFS expert and random for Maze and Snake; a scripted controller and random for classic control. ``out`` gets every
     result plus the git commit the code came from. ``full_eval`` runs this together with the dataset evals.
     """
     calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes, snake_sizes,
-                         snake_episodes)
+                         snake_episodes, control_games, control_episodes)
     results = dict({"model": model, "code": _git_state()}, **_games_collect(calls))
     _games_print(results)
     if out:
@@ -2299,7 +2361,8 @@ def _datasets_print(evals: dict) -> None:
 def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str = "vqa,cauldron,score,eval",
               val_split: str = "val", atari_games: str = ",".join(SUITE_ATARI_GAMES), atari_episodes: int = 3,
               doom_episodes: int = 50, maze_sizes: str = "4,6,8", maze_episodes: int = 50, snake_sizes: str = "10",
-              snake_episodes: int = 20, out: str = "", save: bool = True):
+              snake_episodes: int = 20, control_games: str = ",".join(SUITE_CONTROL_GAMES), control_episodes: int = 10,
+              out: str = "", save: bool = True):
     """modal run modal_app.py::full_eval --model <run>/best  -- every eval on one checkpoint, in parallel, one file.
 
     ``parts`` picks from ``datasets`` (``evaluate`` over ``datasets``: accuracy, ECE, NLL, and the human-vote and
@@ -2321,7 +2384,7 @@ def full_eval(model: str, parts: str = "datasets,games,latency", datasets: str =
     ds_call = evaluate.spawn(model, ",".join(_expand_datasets(datasets)), val_split) if "datasets" in wanted else None
     lat_call = bench_latency.spawn(model) if "latency" in wanted else None
     game_calls = _games_spawn(model, atari_games, atari_episodes, doom_episodes, maze_sizes, maze_episodes,
-                              snake_sizes, snake_episodes) if "games" in wanted else None
+                              snake_sizes, snake_episodes, control_games, control_episodes) if "games" in wanted else None
     results = {"model": model, "code": code, "parts": wanted, "val_split": val_split,
                "started": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
     results["datasets"] = _get(ds_call, "evaluate") if ds_call else None
