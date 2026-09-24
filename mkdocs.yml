@@ -23,14 +23,13 @@ nav:
   - Tutorials:
       - Overview: tutorials/overview.md
       - Your first prediction: tutorials/first-prediction.md
-      - Run it in your browser (WebGPU): tutorials/browser-demo.md
+      - Try the demo (Hugging Face Space): tutorials/space-demo.md
 
   - How-to:
       - Overview: how-to/overview.md
       - Calibrate on your own data: how-to/calibrate.md
       - Run jobs on Modal: how-to/run-on-modal.md
       - Evaluate a checkpoint: how-to/evaluate.md
-      - Export for the browser: how-to/export-for-the-web.md
       - Play games with a checkpoint: how-to/play-games.md
 
   - Concepts:
@@ -40,14 +39,12 @@ nav:
       - Calibration: concepts/calibration.md
       - Training data: concepts/data.md
       - Training data for score questions: concepts/score-data.md
-      - The browser runtime: concepts/browser-runtime.md
       - Caching the fixed question in game play: concepts/game-caching.md
 
   - Reference:
       - Overview: reference/overview.md
       - predict() and the answer schema: reference/predict.md
       - Checkpoints: reference/checkpoints.md
-      - Browser demo files and checks: reference/web-demo.md
       - Atari training data format: reference/atari-data-format.md
       - Results:
           - Scorecard (thaitea/laya-vision, 201M): reference/evals/laya-vision-201m.md

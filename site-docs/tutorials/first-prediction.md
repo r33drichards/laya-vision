@@ -3,10 +3,10 @@
 In this tutorial you load the published checkpoint, ask three questions about one photo (one of each type), and
 read the answers. It takes a few minutes on a CPU, most of it downloading the weights once.
 
-You need the package [installed](../install/overview.md). The photo is the one the
-[browser demo](browser-demo.md) opens with, two turntables and a mixer:
-[`web-demo/example.jpg`](https://github.com/r33drichards/laya-vision/blob/main/web-demo/example.jpg). Save it next
-to your script, or run from the repository root.
+You need the package [installed](../install/overview.md). The photo is two turntables and a mixer:
+[`example.jpg`](example.jpg). Save it next to your script.
+
+![Two turntables and a mixer](example.jpg)
 
 ## 1. Load the checkpoint
 
@@ -24,7 +24,7 @@ The first argument is the **state**: the image plus any text context as a dictio
 
 ```python
 result = agent.predict(
-    {"image": Image.open("web-demo/example.jpg"), "note": "listing photo for a used DJ setup"},
+    {"image": Image.open("example.jpg"), "note": "listing photo for a used DJ setup"},
     {
         "category":  {"type": "choice", "instructions": "What kind of item is this?",
                       "criteria": ["electronics", "clothing", "furniture", "food", "other"]},
@@ -92,6 +92,6 @@ result["provenance"]  # prompt format version, checkpoint and backbone revisions
 You ran a vision-language model as a classifier over options you wrote yourself, for three question types at
 once, and read calibrated probabilities instead of generated text. Next:
 
-- [Run the same model in your browser](browser-demo.md).
+- [Ask your own questions in the demo Space](space-demo.md).
 - Every field and argument: [predict() and the answer schema](../reference/predict.md).
 - Why an option can be read in one pass: [How it works](../concepts/how-it-works.md).

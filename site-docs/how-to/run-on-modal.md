@@ -36,7 +36,6 @@ modal run --detach modal_app.py::split_bench                              # Smol
 modal run modal_app.py::games_eval --model my-run/best --out games.json   # Atari, ViZDoom, Maze, Snake, classic control + baselines
 modal run modal_app.py::publish --repo user/name --run my-run/best --card hf_model_card_score.md
 modal run modal_app.py::publish_space                                     # push space/ to the demo Space
-modal run modal_app.py::publish_web                                       # export to ONNX and host it for the browser demo
 ```
 
 What each dataset is: [Training data](../concepts/data.md). Evaluating a checkpoint end to end:

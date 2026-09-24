@@ -13,8 +13,6 @@ results. For learning and tasks, see the [Tutorials](../tutorials/overview.md) a
 
 ## Files and formats
 
-- [Browser demo files and checks](web-demo.md): what the web export writes, the pinned runtime, and how closely each
-  precision matches PyTorch.
 - [Atari training data format](atari-data-format.md): the layout every Atari training source is written in.
 
 ## Results

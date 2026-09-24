@@ -11,7 +11,7 @@ verbose = "info"
 exclude = [
   "^http://localhost(:[0-9]+)?(/|$)",
   "^http://127\\.0\\.0\\.1(:[0-9]+)?(/|$)",
-  # This site's own absolute URLs (the browser demo under /demo/, pages linked by full URL): they only exist once
-  # the build being checked is deployed. scripts/check_docs_browser.py checks them in the built site instead.
+  # This site's own absolute URLs (pages linked by full URL): they only exist once the build being checked is
+  # deployed. scripts/check_docs_browser.py checks the built site instead.
   "^https://r33drichards\\.github\\.io/laya-vision(/|$)",
 ]

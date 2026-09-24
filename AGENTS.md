@@ -18,7 +18,8 @@
 - Bump `laya.vlm.PROMPT_FORMAT_VERSION` in the same commit as any change that can alter the input ids built for a
   (state, question): framing text, option rendering, budgets, truncation, image-token expansion.
 - Documentation follows mcp-js's layout. Public docs live in `site-docs/` (MkDocs, `mkdocs.yml`, published to
-  https://r33drichards.github.io/laya-vision/ with the browser demo under `demo/`); `docs/` is for internal files and
+  https://r33drichards.github.io/laya-vision/; the live demo is the Hugging Face Space in `space/`); `docs/` is for
+  internal files and
   the metrics JSON that `results/claims.json` points at. The nav is explicit: add every new page to `mkdocs.yml`
   under Tutorials, How-to, Concepts or Reference. Link repository files by their GitHub URL (MkDocs cannot link
   outside `site-docs/`). Before a pull request, `nix build .#docs` (a strict build) must pass; CI also runs lychee

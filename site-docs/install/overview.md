@@ -25,10 +25,10 @@ agent = laya.load_vlm("thaitea/laya-vision")   # downloads the weights from the 
 `load_vlm` takes `revision=` (and `backbone_revision=`) to pin the Hub commit, which is what you want for anything
 you publish or compare later; see [predict()](../reference/predict.md#loading-a-checkpoint).
 
-## No install: the browser
+## No install: the demo
 
-The same checkpoint runs in a web page with ONNX Runtime Web, with nothing to install:
-[Run it in your browser](../tutorials/browser-demo.md).
+The published checkpoint runs in a Hugging Face Space, with nothing to install:
+[Try the demo](../tutorials/space-demo.md).
 
 ## Tests
 

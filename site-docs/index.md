@@ -5,9 +5,8 @@ no text generation. You give it a picture, some context and a set of questions; 
 choice (`choice`), a yes/no probability (`noul`) or a graded level on a rubric you write (`score`), with
 probabilities you can act on at face value.
 
-**[Try it in your browser](https://r33drichards.github.io/laya-vision/demo/)**: the model runs on your own GPU
-with WebGPU (or on the CPU with WASM). No server, and the image never leaves the page. There is also a
-[Hugging Face Space](https://huggingface.co/spaces/thaitea/laya-vision-demo) on a free CPU, about 3 s per image.
+**[Try the demo](https://huggingface.co/spaces/thaitea/laya-vision-demo)**: a Hugging Face Space that runs the published checkpoint on a free CPU, a few seconds per
+image. [How to use it](tutorials/space-demo.md).
 
 ```python
 import laya
@@ -36,8 +35,8 @@ affiliated with Convai Innovations, the authors of Laya.
 ## Start here
 
 - [Install](install/overview.md): the Python package and what it needs.
-- [Tutorials](tutorials/overview.md): a first prediction in Python, and the model in your browser.
-- [How-to guides](how-to/overview.md): calibrate on your data, run jobs on Modal, evaluate, export for the web, play games.
+- [Tutorials](tutorials/overview.md): the demo Space, and a first prediction in Python.
+- [How-to guides](how-to/overview.md): calibrate on your data, run jobs on Modal, evaluate, play games.
 - [Concepts](concepts/overview.md): how the model reads an answer, its architecture, calibration and training data.
 - [Reference](reference/overview.md): the `predict` API and answer schema, checkpoints, file formats and every published result.
 
@@ -49,7 +48,7 @@ affiliated with Convai Innovations, the authors of Laya.
 | [How it works](concepts/how-it-works.md) | One forward pass per image; a logit per option read from a marker token; nothing generated |
 | [Calibration](concepts/calibration.md) | Per-type temperatures fitted after training, and [refitting them on your data](how-to/calibrate.md) |
 | [Checkpoints](reference/checkpoints.md) | The recommended `thaitea/laya-vision` and what its numbers are backed by |
-| [In the browser](tutorials/browser-demo.md) | The same model on ONNX Runtime Web, WebGPU or WASM |
+| [Demo](tutorials/space-demo.md) | The published checkpoint in a Hugging Face Space, no install |
 | [Results](reference/evals/laya-vision.md) | The scorecard over 34 validation sets, games and latency, plus every experiment report |
 
 ## License and credits
