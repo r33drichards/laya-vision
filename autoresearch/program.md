@@ -180,6 +180,10 @@ globally, and the benchmark fixes what the model sees.
 - **Game data**: mix `toolkit` game examples (soft BFS targets for Maze and Snake, expert frames for classic
   control) into the training stream, and the pool's Atari and ViZDoom expert frames via `ctx.game_examples()`.
 - **Value head**: `"value_head": true` with `value` targets, as an auxiliary loss.
+- **Next-move head** (KataGo's auxiliary opponent-move target, arXiv 1902.10565 section 3.4, which learned ~1.3x
+  faster): `"next_head": true` adds a small per-option scorer predicting the expert's move at the next step of the
+  same trajectory, trained on the `next_target` that `toolkit` maze / snake / control examples carry
+  (`train(..., w_next=0.15)`, KataGo's weight). It is never used for play and changes nothing when off.
 - **Train on the model's own states (DAgger)**: expert data never shows the states the model's mistakes lead to.
   Mid-training, roll the current model out on training seeds, label the frames it visits with the BFS / expert move
   (or a short `laya.search` where there is no expert), add them to the mix, keep training. autogo's version is
