@@ -40,7 +40,7 @@ FREEZE = "full"           # "head", "last_n" or "full" (everything but the visio
 TRAIN_VISION = True       # with "full": train the vision tower too (at LR_BACKBONE)
 LR_HEAD = 5e-5
 LR_BACKBONE = 1e-5
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
