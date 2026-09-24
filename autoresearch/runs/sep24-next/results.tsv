@@ -10,3 +10,4 @@ ae8ec00	0.6382	0.6598	0.0216	0.2916	201.1613	0.8372	discard	rerun 7283cc7 (train
 cf7514b	0.6582	0.6909	0.0327	0.2995	201.3105	0.8298	discard	exp: next-move head (w 0.15) on the vision-half-LR point 09704d2
 1e5ad68	0.6806	0.7064	0.0259	0.2333	201.3105	0.8394	discard	exp: next-move head at w 0.5 on the batch-64 point
 56328f0	0.6812	0.7055	0.0243	0.2519	201.3105	0.8372	keep	repeat: next head w 0.5 on batch 64
+f40043f	0.6792	0.7056	0.0264	0.2031	201.3105	0.8437	discard	exp: next-move head at w 1.0 on the batch-64 point
