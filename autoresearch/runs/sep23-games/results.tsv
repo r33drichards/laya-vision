@@ -1,0 +1,20 @@
+commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
+7b6c14f	0.6704	0.7136	0.0432	-0.0344	236.5623	1.0101	keep	baseline
+4022e33	0.6713	0.7135	0.0423	-0.0344	236.5623	1.0055	discard	baseline repeat
+a82ec1d	0.6757	0.7160	0.0403	0.1439	236.5623	1.0008	keep	exp: mix game data (toolkit maze/snake/control + pool atari/doom) at 25% of draws
+596dab2	0.6633	0.7105	0.0472	0.1530	236.5623	1.0048	discard	exp: game data at 50% of draws
+a430602	0.6750	0.7140	0.0390	0.1099	236.7113	0.9991	discard	exp: value head trained 1:1 on game value targets
+3aed5cd	0.6522	0.6807	0.0284	0.1632	236.5623	1.0228	discard	exp: train the vision tower too (on the 25% game mix)
+88f111b	0.6739	0.7168	0.0428	0.1656	236.5623	0.9958	discard	exp: double both learning rates (head 1e-4, backbone 2e-5)
+02e7aa8	0.6655	0.7131	0.0475	0.0142	236.5623	1.0065	discard	exp: 2x LR + per-game weights inside the 25% game share (favour unlearned games)
+90f9087	0.6066	0.6405	0.0339	0.0967	236.5623	0.9656	keep	exp: 384px images (36 image tokens) on the 25% game mix
+ced98b7	0.6694	0.7075	0.0381	0.0821	201.1613	0.8322	keep	exp: keep 20 of 30 text layers on the 25% game mix
+3322bd6	0.6340	0.6573	0.0233	0.1477	183.4609	0.7684	keep	exp: keep 15 of 30 text layers on the 25% game mix
+7405aef	0.6317	0.6551	0.0234	0.1346	183.4609	0.7492	discard	repeat: 15 text layers (games noise)
+f03734b	0.5276	0.5449	0.0173	0.1204	165.7604	0.6576	keep	exp: keep 10 of 30 text layers on the 25% game mix
+c44f30c	0.4406	0.4584	0.0178	0.0986	155.1094	0.7256	keep	exp: keep 8 of 12 vision layers on the 15-layer recipe
+23b7087	0.6631	0.7105	0.0474	-0.0349	236.5623	0.9999	discard	exp (ACH test of H1-exposure): the whole 25% game share to Maze
+9e330f0	0.6690	0.7143	0.0453	0.1466	236.5623	1.0057	discard	exp: game share only to games that learn in 5 min (drop Maze, CartPole, Acrobot, MountainCar)
+6fd560b	0.4485	0.4702	0.0217	0.0155	183.4609	0.7517	discard	exp: 15 text layers spread across the stack (0,2,..,29) instead of the first 15
+9a06403	0.6349	0.6607	0.0258	0.1432	183.4609	0.7326	keep	exp: 2x LR on the 15-layer recipe (cut models have more to recover)
+32144a6	0.6208	0.6481	0.0272	0.1435	183.4609	0.7609	discard	exp: distil the full-size frontier point (a82ec1d) into the 15-layer recipe, inside the budget

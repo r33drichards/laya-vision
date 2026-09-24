@@ -1,0 +1,22 @@
+commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
+c37ae78	0.6699	0.7119	0.0420	-0.0344	236.5623	1.0029	keep	baseline
+0f23827	0.6744	0.7120	0.0377	0.1545	236.5623	0.9920	keep	exp: game data at 25% of draws on the 15-minute harness with pool v2
+0728d7a	0.6806	0.7058	0.0252	0.1498	201.1613	0.8333	keep	exp: keep 20 of 30 text layers (15-minute harness, pool v2)
+d8a7aa6	0.6635	0.6793	0.0157	0.1695	183.4609	0.7594	keep	exp: keep 15 of 30 text layers (15-minute harness, pool v2)
+37ebc61	0.5580	0.5663	0.0083	0.1777	165.7604	0.6619	keep	exp: keep 10 of 30 text layers (15-minute harness, pool v2)
+2a5c13d	0.6744	0.7092	0.0348	0.1615	218.8618	0.9157	discard	exp: keep 25 of 30 text layers (15-minute harness, pool v2)
+0e9a973	0.6525	0.6653	0.0128	0.1626	172.8406	0.6951	keep	exp: keep 12 of 30 text layers (15-minute harness, pool v2)
+0124a9d	0.0000	0.0000	0.0000	0.0000	0.0000	0.0000	crash	exp: 2x LR on the 20-layer point (15-minute harness, pool v2)
+4e5af50	0.6776	0.7104	0.0328	0.1678	201.1613	0.8316	discard	exp: 2x LR on the 20-layer point, rerun of 0124a9d (pruned by a concurrent run)
+3ab9e08	0.6819	0.7074	0.0255	0.1759	201.1613	0.8299	discard	exp: game data at 35% on the 20-layer point (15-minute harness, pool v2)
+4d8c1bf	0.6537	0.6768	0.0231	0.1776	183.4609	0.7498	discard	exp: game data at 35% on the 15-layer point (15-minute harness, pool v2)
+5e9ef40	0.6753	0.7052	0.0299	0.2375	201.1613	0.8326	keep	exp: game data at 45% on the 20-layer point (15-minute harness, pool v2)
+ce6a71f	0.6642	0.7093	0.0452	0.1918	236.5623	1.0016	discard	exp: game data at 35% on the full-size point (15-minute harness, pool v2)
+3e8f9a5	0.6802	0.7113	0.0311	0.2401	201.1613	0.8353	discard	exp: game data at 55% on the 20-layer point (15-minute harness, pool v2)
+0825f91	0.6783	0.7076	0.0293	0.2409	201.1613	0.8429	discard	repeat: 20 layers, games 45% (games noise)
+66a1469	0.6537	0.6744	0.0207	0.1839	183.4609	0.7493	discard	exp: game data at 45% on the 15-layer point (15-minute harness, pool v2)
+0bc9c9b	0.6763	0.7067	0.0304	0.2351	201.3103	0.8340	discard	exp: value head 1:1 on the 20-layer, games-45% point (15-minute harness, pool v2)
+7283cc7	0.6527	0.6719	0.0192	0.3433	201.1613	0.8317	keep	exp: train the vision tower on the 20-layer, games-45% point (15-minute harness, pool v2)
+dba11d5	0.6837	0.7080	0.0244	0.1884	201.1613	0.8288	keep	exp: batch 64 on the 20-layer, games-45% point (15-minute harness, pool v2)
+09704d2	0.6634	0.6899	0.0266	0.3316	201.1613	0.8460	keep	exp: train vision tower with half the backbone LR (5e-6) on 20 layers, games 45%
+0211837	0.6571	0.6813	0.0241	0.2829	201.1613	0.8388	discard	exp: batch 64 + train vision tower (20 layers, games 45%)

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""The keep / discard rule for autoresearch: a Pareto frontier over (quality up, params down, latency down).
+"""The keep / discard rule for autoresearch: a Pareto frontier over four objectives.
 
-Latency is ``latency_x``: the experiment's median ``predict`` time divided by the base checkpoint's, both timed in
-the same L4 container (1.0 = as fast as the released model). Raw milliseconds swing by 50% between L4 hosts, so
-only the ratio is comparable across runs.
+| objective   | better | margin        | what                                                                  |
+|-------------|--------|---------------|-----------------------------------------------------------------------|
+| `quality`   | higher | 0.005 (abs)   | macro dataset accuracy minus ECE on single-answer questions            |
+| `games`     | higher | 0.04 (abs)    | mean normalized game score, 0 = random play, 1 = the scripted expert   |
+| `params_m`  | lower  | 1% (rel)      | parameters of the saved model, millions                                |
+| `latency_x` | lower  | 5% (rel)      | median predict time / the base checkpoint's, timed in the same L4 run  |
 
-Upstream autoresearch keeps an experiment when its single metric (val_bpb) improves. Here there are three
-objectives, so an experiment is kept when it extends the frontier: no already-kept result is at least as good on
-all three within the noise margins below. Kept results that the new one strictly beats on all three drop off the
-frontier. Progress is tracked as the frontier's hypervolume (the volume of objective space it dominates, in
-normalized units against a fixed reference point), which only grows when the frontier moves outward.
+Upstream autoresearch keeps an experiment when its single metric (val_bpb) improves. Here an experiment is kept when
+it extends the frontier: no already-kept result is at least as good on every objective within the noise margins.
+Kept results that the new one strictly beats on every objective drop off the frontier. Progress is tracked as the
+frontier's hypervolume (the volume of normalized objective space it dominates against a fixed reference point),
+which only grows when the frontier moves outward.
 
     python autoresearch/pareto.py add runs/<tag>/<commit>.json --tsv runs/<tag>/results.tsv --desc "..."
     python autoresearch/pareto.py show --tsv runs/<tag>/results.tsv
@@ -23,28 +26,50 @@ import os
 import sys
 from typing import Dict, List, Optional, Sequence, Tuple
 
-# Noise margins: a result must beat every kept result by more than these in at least one objective to count as
-# new. Measured on the unchanged baseline experiment (4 runs, harness with the data pool): quality 0.6691-0.6739
-# (spread 0.0048), latency_x 0.998 and 1.007 on two L4 hosts whose raw times were 52 and 77 ms. Re-measure when the
-# harness changes (program.md asks for this at setup).
-EPS_QUALITY = 0.005   # absolute, on the quality score
-EPS_PARAMS = 0.01     # relative
-EPS_LATENCY = 0.03    # relative
+# (name, direction, margin, margin is relative). A result must beat every kept result by more than the margin in at
+# least one objective to count as new. quality and latency_x margins were measured on the unchanged baseline (4 runs
+# on the pooled harness: quality 0.6691-0.6739, latency_x 0.998 / 1.007 on L4 hosts timing 52 / 77 ms raw). games is
+# deterministic for a given checkpoint (fixed seeds, greedy play) and the baseline repeated exactly (-0.0344 twice,
+# every game identical), but that baseline plays degenerately (0 on the mazes, Acrobot, MountainCar), so retraining
+# noise did not move it; 0.03 is one game moving 0.3 in the 10-game mean. Retraining a stronger recipe (15 text
+# layers + game data) moved games by 0.013 (0.148 / 0.135: DoomBasic 0.78 / 0.66, every other game within 0.02).
+# On a real player (sep23-v2, 20 layers, games 45%) a repeat moved games by 0.003 (0.2375 / 0.2409) while single
+# games moved up to 0.12 (Acrobot 0.24 / 0.16, MountainCar 0.31 / 0.43), which the 10-game mean averages out.
+# A third run of that recipe (sep24-next) gave 0.2007 (MountainCar 0.20, LunarLander 0.01): spread 0.040 over three
+# runs, so the games margin is 0.04. Quality repeats within 0.004 for most recipes, but a recipe that trains the
+# vision tower gave 0.6634 / 0.6759 across two runs: repeat such a recipe before trusting a quality keep from it.
+# latency_x was 3% from the full model timed twice; the 15-layer architecture timed three times gave 0.768 / 0.749 /
+# 0.733 (4.6% spread, host noise alone: 9a06403 changed only the LR and was kept on latency), so the margin is 5%.
+OBJECTIVES = (
+    ("quality", "max", 0.005, False),
+    ("games", "max", 0.04, False),
+    ("params_m", "min", 0.01, True),
+    ("latency_x", "min", 0.05, True),
+)
+NAMES = tuple(o[0] for o in OBJECTIVES)
 
-# Hypervolume reference point, in units of the first (baseline) result: quality 0, 1.5x its params, 1.5x its latency.
+# Hypervolume reference point: quality from 0, games from -0.5 (the clip floor of a game's normalized score), params
+# and latency up to 1.5x the baseline's.
 REF_SCALE = 1.5
+GAMES_FLOOR = -0.5
 
-COLUMNS = ["commit", "quality", "macro_acc", "ece_hard", "params_m", "latency_x", "status", "description"]
+COLUMNS = ["commit", "quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x", "status", "description"]
+FLOATS = ("quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x")
+
+
+def _better_eq(a: float, b: float, direction: str, margin: float = 0.0, relative: bool = False) -> bool:
+    """``a`` is at least as good as ``b``, giving ``b`` the benefit of ``margin``."""
+    slack = abs(b) * margin if relative else margin
+    return a >= b - slack if direction == "max" else a <= b + slack
 
 
 def dominates(a: Dict, b: Dict, eps: bool = True) -> bool:
     """``a`` is at least as good as ``b`` on every objective (with the noise margins in ``b``'s favour when
-    ``eps``): ``b`` then adds nothing ``a`` does not already offer."""
+    ``eps``): ``b`` then adds nothing ``a`` does not already offer. Without ``eps``, ``a`` must also be strictly
+    better somewhere (plain Pareto dominance)."""
     if eps:
-        return (a["quality"] >= b["quality"] - EPS_QUALITY and a["params_m"] <= b["params_m"] * (1 + EPS_PARAMS)
-                and a["latency_x"] <= b["latency_x"] * (1 + EPS_LATENCY))
-    return (a["quality"] >= b["quality"] and a["params_m"] <= b["params_m"] and a["latency_x"] <= b["latency_x"]
-            and (a["quality"] > b["quality"] or a["params_m"] < b["params_m"] or a["latency_x"] < b["latency_x"]))
+        return all(_better_eq(a[n], b[n], d, m, rel) for n, d, m, rel in OBJECTIVES)
+    return all(_better_eq(a[n], b[n], d) for n, d, _, _ in OBJECTIVES) and any(a[n] != b[n] for n in NAMES)
 
 
 def frontier(rows: Sequence[Dict]) -> List[Dict]:
@@ -61,31 +86,47 @@ def decide(front: Sequence[Dict], cand: Dict) -> Tuple[str, List[Dict]]:
     return "keep", [p for p in front if dominates(cand, p, eps=False)]
 
 
-def _normalized(points: Sequence[Dict], base: Dict) -> List[Tuple[float, float, float]]:
-    """(quality, params / base params, latency / base latency) per point."""
-    return [(p["quality"], p["params_m"] / base["params_m"], p["latency_x"] / base["latency_x"]) for p in points]
+FINISHED = ("keep", "discard", "crash")
 
 
-def _hv2d(pts: Sequence[Tuple[float, float]], ref: Tuple[float, float]) -> float:
-    """Area dominated by 2-D points (both minimized) inside the reference box."""
-    area, best_y = 0.0, ref[1]
-    for x, y in sorted(p for p in pts if p[0] < ref[0] and p[1] < ref[1]):
-        if y < best_y:
-            area += (ref[0] - x) * (best_y - y)
-            best_y = y
-    return area
+def prunable(rows: Sequence[Dict]) -> List[str]:
+    """Commits whose saved checkpoints may be deleted: recorded in the TSV with a finished status and not on the
+    frontier. A commit that is not in the TSV at all (a run still going, e.g. a concurrent experiment whose fresh
+    checkpoint is saved but not yet decided) is never among them, and neither is one that has any frontier row."""
+    front = {r["commit"] for r in frontier(rows)}
+    return sorted({r["commit"] for r in rows if r["status"] in FINISHED and r["commit"] not in front})
+
+
+def _normalized(p: Dict, base: Dict) -> Tuple[float, ...]:
+    """A point with every objective turned into one to minimize against ``_ref()``:
+    (-quality, -(games - floor), params / base params, latency / base latency)."""
+    return (-p["quality"], -(p["games"] - GAMES_FLOOR), p["params_m"] / base["params_m"],
+            p["latency_x"] / base["latency_x"])
+
+
+def _ref() -> Tuple[float, ...]:
+    return (0.0, 0.0, REF_SCALE, REF_SCALE)
+
+
+def _hv(points: List[Tuple[float, ...]], ref: Tuple[float, ...]) -> float:
+    """Exact hypervolume of minimized points against ``ref``, by slicing along the first coordinate."""
+    pts = [p for p in points if all(x < r for x, r in zip(p, ref))]
+    if not pts:
+        return 0.0
+    if len(ref) == 1:
+        return ref[0] - min(p[0] for p in pts)
+    xs = sorted({p[0] for p in pts})
+    vol = 0.0
+    for i, x in enumerate(xs):
+        nxt = xs[i + 1] if i + 1 < len(xs) else ref[0]
+        vol += (nxt - x) * _hv([p[1:] for p in pts if p[0] <= x], ref[1:])
+    return vol
 
 
 def hypervolume(points: Sequence[Dict], base: Dict) -> float:
-    """Volume of normalized objective space the points dominate: quality from 0 up to the point, params and
-    latency from the point up to ``REF_SCALE`` times the baseline's. Exact, by slicing along quality."""
-    pts = [p for p in _normalized(points, base) if p[0] > 0 and p[1] < REF_SCALE and p[2] < REF_SCALE]
-    levels = sorted({p[0] for p in pts}, reverse=True)
-    vol = 0.0
-    for i, q in enumerate(levels):
-        below = levels[i + 1] if i + 1 < len(levels) else 0.0
-        vol += (q - below) * _hv2d([(p[1], p[2]) for p in pts if p[0] >= q], (REF_SCALE, REF_SCALE))
-    return vol
+    """Volume of normalized objective space the points dominate (quality from 0, games from ``GAMES_FLOOR``,
+    params and latency up to ``REF_SCALE`` times the baseline's)."""
+    return _hv([_normalized(p, base) for p in points], _ref())
 
 
 def read_tsv(path: str) -> List[Dict]:
@@ -94,7 +135,7 @@ def read_tsv(path: str) -> List[Dict]:
     with open(path) as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
     for r in rows:
-        for k in ("quality", "macro_acc", "ece_hard", "params_m", "latency_x"):
+        for k in FLOATS:
             r[k] = float(r[k])
     return rows
 
@@ -116,13 +157,15 @@ def _cell(v) -> str:
 
 def row_from_result(res: Dict, commit: str, description: str) -> Dict:
     s = res["summary"]
-    return {"commit": commit, "quality": s["quality"], "macro_acc": s["macro_acc"], "ece_hard": s["ece_hard"],
-            "params_m": s["params_m"], "latency_x": s["latency_x"], "status": "", "description": description}
+    row = {k: float(s[k]) for k in FLOATS}
+    row.update(commit=commit, status="", description=description)
+    return row
 
 
 def crash_row(commit: str, description: str) -> Dict:
-    return {"commit": commit, "quality": 0.0, "macro_acc": 0.0, "ece_hard": 0.0, "params_m": 0.0, "latency_x": 0.0,
-            "status": "crash", "description": description}
+    row = {k: 0.0 for k in FLOATS}
+    row.update(commit=commit, status="crash", description=description)
+    return row
 
 
 def show(rows: Sequence[Dict]) -> str:
@@ -135,8 +178,8 @@ def show(rows: Sequence[Dict]) -> str:
         lines.append("hypervolume %.4f (baseline alone %.4f)" % (hypervolume(front, base), hypervolume([base], base)))
         lines.append("frontier (%d):" % len(front))
         for r in sorted(front, key=lambda r: r["params_m"]):
-            lines.append("  %s  quality %.4f  acc %.4f  ece %.4f  %7.1fM params  %5.3fx latency  %s" % (
-                r["commit"], r["quality"], r["macro_acc"], r["ece_hard"], r["params_m"], r["latency_x"], r["description"]))
+            lines.append("  %s  quality %.4f  games %+.3f  %7.1fM params  %5.3fx latency  %s" % (
+                r["commit"], r["quality"], r["games"], r["params_m"], r["latency_x"], r["description"]))
     return "\n".join(lines)
 
 

@@ -1,15 +1,25 @@
 """The autoresearch experiment: the one file the agent edits (upstream's ``train.py``).
 
 ``harness.py`` calls ``build(ctx)`` (model + data loading; not timed), then ``train(agent, ctx)``, which must return
-within ``ctx.time_budget_s`` seconds (5 minutes). The harness then fits temperatures, saves the model, reloads it and
+within ``ctx.time_budget_s`` seconds (15 minutes). The harness then fits temperatures, saves the model, reloads it and
 measures quality, parameter count and L4 latency the same way for every experiment. Anything is fair game here:
 where to start from, what to cut, what to train on, the objective and the optimizer. The only rules are the
 harness's: train only on ``ctx.train_examples()``, stay inside the time budget, and make whatever you change survive
 ``agent.save`` / reload (an architecture change has to be written into the backbone config, as the helpers below do).
 
 ``ctx`` has ``time_budget_s``, ``device``, ``ckpt_path(run)`` (a run on the laya-checkpoints volume) and
-``train_examples(names=...)`` (the data pool's 2,000 examples per Cauldron and score train split, never the
-calibration tail; images are in memory as encoded bytes).
+``train_examples(names=...)`` (the data pool's up to 6,000 examples per Cauldron and score train split, never the
+calibration tail; images are in memory as encoded bytes) and ``game_examples(names=...)`` (the pool's Atari
+Freeway / Breakout and ViZDoom basic expert frames).
+
+Game play is the ``games`` objective (``games_eval.py``). ``import toolkit`` generates more game training data on the
+fly: ``toolkit.maze_examples(n)`` and ``toolkit.snake_examples(n)`` (soft targets over every shortest-path move, a
+``value`` target, the board's 8 symmetries), ``toolkit.control_examples(game, n)`` for CartPole, Acrobot,
+MountainCar and LunarLander, and ``toolkit.game_mix(ctx.train_examples(), games, frac, base_weights=MIX)`` to give
+games ``frac`` of the draws. A model built with ``"value_head": True`` in its config learns the ``value`` targets
+(``train(..., w_value=...)``); ``"next_head": True`` adds an auxiliary head trained on the examples' ``next_target``
+(the expert's move at the next step; ``train(..., w_next=...)``), never used for play. The games are played greedy:
+no test-time search.
 """
 from typing import Dict, Optional
 
@@ -20,7 +30,7 @@ BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
 # size and latency: 0 keeps what the checkpoint has
-KEEP_TEXT_LAYERS = 0      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+KEEP_TEXT_LAYERS = 20      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
@@ -28,10 +38,18 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
+TRAIN_VISION = True       # with "full": train the vision tower too (at LR_BACKBONE)
 LR_HEAD = 5e-5
-LR_BACKBONE = 1e-5
+LR_BACKBONE = 5e-6
 BATCH_SIZE = 32
 WARMUP_STEPS = 20
+
+# games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
+GAME_FRAC = 0.45
+# auxiliary next-move head (KataGo 1902.10565 sec. 3.4): predicts the expert's move at t+1, training only
+NEXT_HEAD = True
+W_NEXT = 0.5
+CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
 # -- helpers ------------------------------------------------------------------------------------------------------
@@ -69,7 +87,7 @@ def build(ctx):
     from laya.vlm import VLMAgent
 
     if INIT:
-        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device)
+        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device, **({"next_head": True} if NEXT_HEAD else {}))
     else:
         agent = VLMAgent(backbone=BACKBONE, device=ctx.device, option_attention=OPTION_ATTENTION)
     if KEEP_TEXT_LAYERS:
@@ -79,12 +97,25 @@ def build(ctx):
     if IMAGE_SIZE:
         set_image_size(agent, IMAGE_SIZE)
     ctx.data = ctx.train_examples(TRAIN_SETS) if TRAIN_SETS else ctx.train_examples()
+    ctx.mix = MIX
+    if GAME_FRAC:
+        import toolkit
+
+        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
+        for g in CONTROL_GAMES:
+            games += toolkit.control_examples(g, 5000)
+        ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
     return agent
 
 
 def train(agent, ctx):
+    import laya.vlm_train as vt
     from laya.vlm_train import train as train_loop
 
+    if TRAIN_VISION:
+        base = vt.set_trainable
+        vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
+
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
-               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=MIX,
-               max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
+               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
+               w_next=W_NEXT if NEXT_HEAD else 0.0, max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)

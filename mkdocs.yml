@@ -50,7 +50,8 @@ nav:
       - Browser demo files and checks: reference/web-demo.md
       - Atari training data format: reference/atari-data-format.md
       - Results:
-          - Scorecard (thaitea/laya-vision): reference/evals/laya-vision.md
+          - Scorecard (thaitea/laya-vision, 201M): reference/evals/laya-vision-201m.md
+          - Scorecard (previous checkpoint): reference/evals/laya-vision.md
           - Score head results: reference/results/score-results.md
           - ModernVBERT on The Cauldron: reference/results/modernvbert-cauldron.md
           - Image splitting on SmolVLM2: reference/results/split-bench.md

@@ -1,0 +1,29 @@
+{
+  "model": "autoresearch/full/long-sep24-vision-halflr/best",
+  "code": {
+    "commit": "547fcb1afb2191fbffced4c90c4e9c6a81d369a5",
+    "branch": "claude/eager-thompson-mui6to",
+    "dirty": false
+  },
+  "parts": [
+    "latency"
+  ],
+  "val_split": "val",
+  "started": "2026-09-24T04:46:20+00:00",
+  "datasets": null,
+  "latency": {
+    "run": "autoresearch/full/long-sep24-vision-halflr/best",
+    "gpu": "NVIDIA L4",
+    "dtype": "bf16",
+    "n": 165,
+    "split_edge": 0,
+    "max_len": 1024,
+    "median_ms": 63.36824599999602,
+    "p90_ms": 68.69372139999967,
+    "mean_input_tokens": 130.84848484848484,
+    "mean_views_per_image": 1.0
+  },
+  "games": null,
+  "minutes": 1.0,
+  "errors": []
+}

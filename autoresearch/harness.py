@@ -1,4 +1,4 @@
-"""The fixed autoresearch harness for Laya Vision: train an experiment for 5 minutes, then measure it.
+"""The fixed autoresearch harness for Laya Vision: train an experiment for 15 minutes, then measure it.
 
     modal run autoresearch/harness.py --tag <tag> [--desc "what this experiment tries"]
 
@@ -16,10 +16,15 @@ then, identically for every experiment:
 4. counts its parameters and times ``predict`` on an L4 in bf16 on ``LATENCY_N`` fixed images, alternating with the
    ``REFERENCE`` checkpoint in the same container.
 
-The three objectives (see ``pareto.py``):
+5. plays the games benchmark (``games_eval.py``: Maze, Snake, classic control, Atari Freeway and Breakout, ViZDoom
+   basic, fixed seeds) with the reloaded checkpoint, one L4 container per game family, alongside the latency job.
+
+The four objectives (see ``pareto.py``):
 
 * **quality** = macro accuracy over the eval sets minus the ECE pooled over the questions that have a single right
   answer (not the ones scored against human vote spreads, where ECE is not meaningful). Higher is better.
+* **games** = mean normalized game score, per game (model - random) / (expert - random) clipped to [-0.5, 1.5]
+  against the fixed baselines in ``game_baselines.json``. Higher is better.
 * **params_m**: parameters of the saved model, in millions. Lower is better.
 * **latency_x**: median ``predict`` time on the L4 (preprocessing included) divided by the ``REFERENCE``
   checkpoint's, timed alternately in the same container: raw milliseconds swing by ~50% between L4 hosts (52 vs
@@ -28,19 +33,32 @@ The three objectives (see ``pareto.py``):
 The result lands in ``autoresearch/runs/<tag>/<commit>.json`` and ``pareto.py`` appends it to
 ``autoresearch/runs/<tag>/results.tsv`` as keep / discard.
 
-The data pool. Every image the harness touches comes from a fixed, versioned pool (``POOL_DIR`` on the
+The data pool. Every image the harness touches comes from a fixed, versioned pool (``pool_dir(kind)`` on the
 ``laya-datasets`` volume), not from the prepared datasets' image folders: reading those small files from the volume
 costs about 0.4 s each (measured: 2.4 files/s serially, ~28 files/s with 32 threads), which starved training of
 data. ``modal run autoresearch/harness.py --prepare-pool`` builds the pool once, one container per dataset, as
 pickles of examples with the encoded image bytes inline:
 
 * ``train``: ``TRAIN_POOL_PER_SET`` seeded examples of each ``TRAINABLE_DATASETS`` train split, calibration tail
-  excluded. A 5-minute experiment sees ~30k samples, so a 46k pool is enough, and every experiment trains from
+  excluded. A 15-minute experiment sees ~90k samples, under one pass over the pool (up to 6,000 per set), and every experiment trains from
   the same one;
 * ``calib``: the last ``N_CALIB`` train records of each ``CALIB_DATASETS`` set;
-* ``eval``: ``EVAL_PER_SET`` seeded val examples of each ``EVAL_DATASETS`` set.
+* ``eval``: ``EVAL_PER_SET`` seeded val examples of each ``EVAL_DATASETS`` set;
+* ``games``: ``TRAIN_POOL_PER_SET`` seeded frames of each ``GAME_DATASETS`` train split, each with the
+  ``next_target`` of its recorded successor where there is one (``laya.vlm_train.with_next_targets``: the target of
+  step s + 1 of the same episode, computed over the whole split before sampling, so a sampled frame gets it even
+  when its successor is not sampled).
 
-The pool is immutable: changing what goes in means a new ``POOL_VERSION``.
+The pool is immutable: changing what goes in means a new ``POOL_VERSION``. A new version need not rebuild every part:
+``POOL_KIND_VERSIONS`` names, per part kind, the version whose directory (``pool_dir``) holds that kind's parts, and
+a kind whose selection is unchanged keeps reading the older version's files. ``POOL_VERSION`` is the newest version;
+``--prepare-pool`` builds only kinds at ``POOL_VERSION`` (create-only: an existing part file is never rewritten) and
+refuses to rebuild a missing part of an older version. History:
+
+* ``v1``: 2,000 per set, which 15 minutes cycled through twice (quality fell 0.02);
+* ``v2``: 6,000 per set, every kind;
+* ``v3``: ``games`` rebuilt with ``next_target`` (the next-move head's auxiliary target), otherwise the same seeded
+  frames as v2; ``train``, ``calib`` and ``eval`` are read unchanged from ``pool-v2``.
 
 Memory snapshots. Both GPU jobs are ``@app.cls(enable_memory_snapshot=True, single_use_containers=True)`` classes
 whose ``@modal.enter(snap=True)`` method does the experiment-independent CPU work, which Modal then restores from a
@@ -70,15 +88,18 @@ for _p in (REPO, os.path.join(REPO, "autoresearch")):  # the laya package to shi
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-TIME_BUDGET = 300          # seconds of training, as upstream
+TIME_BUDGET = 900          # seconds of training (upstream: 300; 5 minutes starved the games, see program.md)
 EVAL_PER_SET = 300         # seeded questions per eval set
 LATENCY_N = 100            # images timed on the L4 (after 10 warm-up calls)
 N_CALIB = 100              # last train records per calibration set, held out from training
-TRAIN_POOL_PER_SET = 2000  # seeded train examples per trainable set in the pool
+TRAIN_POOL_PER_SET = 6000  # seeded train examples per trainable set in the pool (fewer where a set is smaller)
 SEED = 0
 REFERENCE = "cauldron-score-2ep-bidir-full/best"   # latency is reported relative to this checkpoint (= thaitea/laya-vision)
-POOL_VERSION = "v1"
-POOL_DIR = "/data/autoresearch/pool-" + POOL_VERSION
+POOL_VERSION = "v3"         # the newest pool version (history in the module docstring)
+# The version whose directory holds each kind's parts: v3 rebuilt only ``games`` (adding next_target).
+POOL_KIND_VERSIONS = {"train": "v2", "calib": "v2", "eval": "v2", "games": "v3"}
+POOL_ROOT = "/data/autoresearch"
+POOL_DIR = os.path.join(POOL_ROOT, "pool-" + POOL_VERSION)   # where this version's own parts go
 
 VQA = ("aokvqa", "scienceqa", "vqav2_yesno")
 CAULDRON = tuple("cauldron_" + s for s in (
@@ -92,18 +113,39 @@ CALIB_DATASETS = CAULDRON + SCORE          # their last N_CALIB train records ca
 # What experiments may train on. The eval_* sets stay held out entirely (even where they have a train split): they
 # measure how the model does on data it was never tuned toward. The vqa sets' train splits are not prepared.
 TRAINABLE_DATASETS = CAULDRON + SCORE
+# Expert game frames experiments may train on (``ctx.game_examples()``): name -> (root, prepared name). The games
+# eval plays on seeds these were never recorded on.
+GAME_DATASETS = {
+    "game_atari_freeway": ("/data/atari/expert", "Freeway"),
+    "game_atari_breakout": ("/data/atari/expert", "Breakout"),
+    "game_doom_basic": ("/data/vqa", "doom_basic"),
+}
 
 app = modal.App("laya-autoresearch")
 hf_vol = modal.Volume.from_name("laya-hf-cache")
 data_vol = modal.Volume.from_name("laya-datasets")
 ckpt_vol = modal.Volume.from_name("laya-checkpoints")
-image = (
+# The harness's own modules next to the laya package in every container: the games benchmark (and its fixed
+# baselines) and the toolkit experiments import to generate game training data.
+HARNESS_FILES = ("games_eval.py", "game_baselines.json", "toolkit.py")
+
+
+def _with_code(img):
+    img = img.add_local_python_source("laya")
+    for f in HARNESS_FILES:
+        img = img.add_local_file(os.path.join(REPO, "autoresearch", f), "/root/" + f)
+    return img
+
+
+_base = (
     modal.Image.debian_slim(python_version="3.12")
     .pip_install("torch==2.14.0", "torchvision==0.29.0", "transformers==5.17.0", "safetensors", "huggingface_hub",
-                 "numpy", "pillow", "datasets", "num2words")
-    .env({"HF_HOME": "/cache/hf", "TOKENIZERS_PARALLELISM": "false"})
-    .add_local_python_source("laya")
+                 "numpy", "pillow", "datasets", "num2words", "gymnasium[classic-control,box2d]==1.3.0")
+    .env({"HF_HOME": "/cache/hf", "TOKENIZERS_PARALLELISM": "false", "SDL_VIDEODRIVER": "dummy",
+          "SDL_AUDIODRIVER": "dummy"})
 )
+image = _with_code(_base)
+games_image = _with_code(_base.pip_install("ale-py==0.12.1", "vizdoom"))
 VOLUMES = {"/cache/hf": hf_vol, "/data": data_vol, "/ckpt": ckpt_vol}
 ROOT = "/ckpt/autoresearch"
 
@@ -151,7 +193,14 @@ def pool_selection(kind: str, name: str) -> List[Dict]:
     """The examples (with image paths) that go into pool part ``kind`` for dataset ``name``, deterministically."""
     import random
 
+    from laya.vlm_train import load_jsonl_examples
+
     rng = random.Random("%d:%s:%s" % (SEED, kind, name))
+    if kind == "games":
+        root, prepared = GAME_DATASETS[name]
+        # next_target from the whole split, before sampling; the list, and so the seeded sample, is v2's
+        exs = [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train", next_targets=True)]
+        return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
     if kind == "eval":
         exs = load_split(name, "val")
         return rng.sample(exs, min(EVAL_PER_SET, len(exs)))
@@ -162,15 +211,20 @@ def pool_selection(kind: str, name: str) -> List[Dict]:
     return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
 
 
+def pool_dir(kind: str) -> str:
+    """The pool directory that holds part kind ``kind`` (``POOL_KIND_VERSIONS``)."""
+    return os.path.join(POOL_ROOT, "pool-" + POOL_KIND_VERSIONS[kind])
+
+
 def _pool_file(kind: str, name: str) -> str:
-    return os.path.join(POOL_DIR, kind, name + ".pkl")
+    return os.path.join(pool_dir(kind), kind, name + ".pkl")
 
 
 POOL_PARTS = ([("train", n) for n in TRAINABLE_DATASETS] + [("calib", n) for n in CALIB_DATASETS]
-              + [("eval", n) for n in EVAL_DATASETS])
+              + [("eval", n) for n in EVAL_DATASETS] + [("games", n) for n in GAME_DATASETS])
 
 
-def load_pool(kinds=("train", "calib", "eval")) -> Dict[str, Dict[str, List[Dict]]]:
+def load_pool(kinds=("train", "calib", "eval", "games")) -> Dict[str, Dict[str, List[Dict]]]:
     """``{kind: {dataset: examples}}`` from the pool; fails with the command to build it when it is missing."""
     import pickle
     from concurrent.futures import ThreadPoolExecutor
@@ -179,7 +233,7 @@ def load_pool(kinds=("train", "calib", "eval")) -> Dict[str, Dict[str, List[Dict
     missing = [_pool_file(k, n) for k, n in parts if not os.path.exists(_pool_file(k, n))]
     if missing:
         raise FileNotFoundError("the autoresearch data pool %s is incomplete (%d parts missing, e.g. %s); build it "
-                                "with: modal run autoresearch/harness.py --prepare-pool" % (POOL_DIR, len(missing), missing[0]))
+                                "with: modal run autoresearch/harness.py --prepare-pool" % (POOL_VERSION, len(missing), missing[0]))
 
     def read(part):
         with open(_pool_file(*part), "rb") as f:
@@ -196,11 +250,24 @@ class Context:
     """What an experiment gets: the budget, the device, checkpoint lookup and training data. Training data never
     includes the val splits or the calibration tail the harness fits temperatures on."""
 
-    def __init__(self, time_budget_s: float, train: Dict[str, List[Dict]]):
+    def __init__(self, time_budget_s: float, train: Dict[str, List[Dict]], games: Dict[str, List[Dict]]):
         self.time_budget_s = time_budget_s
         self.device = "cuda"
         self.ckpt_path = ckpt_path
         self._train = train  # name -> train records minus the calibration tail
+        self._games = games  # name -> expert game frames
+
+    def game_examples(self, names=tuple(GAME_DATASETS)) -> List[Dict]:
+        """Expert frames from the data pool: Atari Freeway and Breakout (the expert agents' action distributions as
+        soft targets where recorded) and ViZDoom basic (the scripted labeller). Each frame whose next step of the same
+        episode was recorded carries that step's target as ``next_target`` (for a ``"next_head"`` model).
+        ``toolkit.py`` generates Maze, Snake and classic-control examples on the fly."""
+        out = []
+        for name in names:
+            if name not in GAME_DATASETS:
+                raise ValueError("%s is not a game dataset here (one of %s)" % (name, tuple(GAME_DATASETS)))
+            out += self._games[name]
+        return out
 
     def train_examples(self, names=TRAINABLE_DATASETS) -> List[Dict]:
         out = []
@@ -233,7 +300,7 @@ def _log(t_start: float, msg: str) -> None:
     print("[harness %6.1f s] %s" % (time.time() - t_start, msg), flush=True)
 
 
-@app.cls(image=image, gpu="H100", cpu=16, memory=65536, timeout=45 * 60, volumes=VOLUMES,
+@app.cls(image=image, gpu="H100", cpu=16, memory=65536, timeout=60 * 60, volumes=VOLUMES,
          enable_memory_snapshot=True, single_use_containers=True)
 class TrainEval:
     @modal.enter(snap=True)
@@ -279,7 +346,7 @@ class TrainEval:
         torch.manual_seed(SEED)
         random.seed(SEED)
         exp = _import_experiment(source)
-        ctx = Context(TIME_BUDGET, self._train_lists())
+        ctx = Context(TIME_BUDGET, self._train_lists(), self.pool["games"])
         t_setup = time.time()
         agent = exp.build(ctx)
         setup_s = time.time() - t_setup
@@ -390,6 +457,31 @@ class Latency:
                 "n": len(ms), "gpu": torch.cuda.get_device_name(0)}
 
 
+@app.cls(image=games_image, gpu="L4", cpu=16, memory=32768, timeout=30 * 60, volumes=VOLUMES,
+         enable_memory_snapshot=True, single_use_containers=True)
+class Games:
+    @modal.enter(snap=True)
+    def load(self):
+        import torch  # noqa: F401
+
+        import games_eval  # noqa: F401
+        import laya.vlm  # noqa: F401
+
+    @modal.method()
+    def run(self, tag: str, commit: str, family: str) -> Dict:
+        """``games_eval.run_family`` on the experiment's saved checkpoint: ``{game: result}`` for ``family``."""
+        import games_eval
+
+        from laya.vlm import VLMAgent
+
+        ckpt_vol.reload()
+        t = time.time()
+        agent = VLMAgent(os.path.join(ROOT, tag, commit), device="cuda", dtype="bf16")
+        out = games_eval.run_family(agent, family)
+        _log(t, "games %s: %s" % (family, ", ".join("%s %.3f" % (g, r["normalized"]) for g, r in out.items())))
+        return out
+
+
 @app.function(image=image, cpu=4, memory=8192, timeout=60 * 60, volumes={"/data": data_vol})
 def build_pool_part(kind: str, name: str) -> Dict:
     """One pool part: the selected examples with their image bytes inline, pickled to the pool directory."""
@@ -400,6 +492,9 @@ def build_pool_part(kind: str, name: str) -> Dict:
     path = _pool_file(kind, name)
     if os.path.exists(path):
         return {"kind": kind, "name": name, "examples": -1, "mb": round(os.path.getsize(path) / 1e6, 1), "seconds": 0.0}
+    if POOL_KIND_VERSIONS[kind] != POOL_VERSION:  # an older version's part: immutable, never rebuilt by newer code
+        raise FileNotFoundError("%s is missing; %s parts belong to pool-%s, which this harness (pool-%s) does not "
+                                "rebuild" % (path, kind, POOL_KIND_VERSIONS[kind], POOL_VERSION))
     exs = pool_selection(kind, name)
     with ThreadPoolExecutor(64) as pool:  # each small-file read is ~0.4 s of latency; overlap many
         exs = list(pool.map(_with_bytes, exs))
@@ -421,18 +516,22 @@ def build_pool():
             continue
         total += r["mb"]
         print("%-6s %-28s %6d examples %8.1f MB %6.1f s" % (r["kind"], r["name"], r["examples"], r["mb"], r["seconds"]))
-    print("pool %s: %.1f GB" % (POOL_DIR, total / 1e3))
+    print("pool %s: %.1f GB (%s)" % (POOL_VERSION, total / 1e3, ", ".join(
+        "%s from pool-%s" % kv for kv in POOL_KIND_VERSIONS.items())))
 
 
 @app.function(image=image, timeout=10 * 60, volumes={"/ckpt": ckpt_vol})
-def prune_checkpoints(tag: str, keep: List[str]) -> List[str]:
-    """Delete this tag's saved checkpoints that are not in ``keep`` (the frontier); returns what was removed."""
+def prune_checkpoints(tag: str, prunable: List[str]) -> List[str]:
+    """Delete this tag's saved checkpoints whose commit is in ``prunable`` (``pareto.prunable``: finished in
+    results.tsv and off the frontier); returns what was removed. Any other directory, such as a concurrent run's
+    fresh checkpoint that is not in the TSV yet, is left alone."""
     import shutil
 
+    ckpt_vol.reload()
     base = os.path.join(ROOT, tag)
     removed = []
     for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
-        if name not in keep and os.path.exists(os.path.join(base, name, "vlm_agent_config.json")):
+        if name in prunable and os.path.exists(os.path.join(base, name, "vlm_agent_config.json")):
             shutil.rmtree(os.path.join(base, name))
             removed.append(name)
     ckpt_vol.commit()
@@ -440,11 +539,11 @@ def prune_checkpoints(tag: str, keep: List[str]) -> List[str]:
 
 
 def _code_hash() -> str:
-    """What the containers run: this file and the shipped ``laya`` package."""
+    """What the containers run: this file, the games benchmark and toolkit, and the shipped ``laya`` package."""
     import hashlib
 
     h = hashlib.sha256()
-    files = [os.path.abspath(__file__)]
+    files = [os.path.abspath(__file__)] + [os.path.join(REPO, "autoresearch", f) for f in HARNESS_FILES]
     for d, _, names in sorted(os.walk(os.path.join(REPO, "laya"))):
         files += [os.path.join(d, n) for n in sorted(names) if n.endswith(".py")]
     for path in files:
@@ -465,7 +564,7 @@ def follow_logs(name: str):
 
 
 def deployed_classes():
-    """``(TrainEval, Latency)`` from a deployment of exactly this code, deploying it first if needed.
+    """``(TrainEval, Latency, Games)`` from a deployment of exactly this code, deploying it first if needed.
 
     Modal only snapshots deployed apps, so ``modal run`` alone would rebuild everything every time. Each version of
     the code gets its own app, ``laya-autoresearch-<hash>``: redeploying unchanged code is quick and keeps its
@@ -481,7 +580,7 @@ def deployed_classes():
         if p.returncode:
             raise RuntimeError("modal deploy failed:\n" + p.stdout + p.stderr)
         te = modal.Cls.from_name(name, "TrainEval")
-    return te, modal.Cls.from_name(name, "Latency")
+    return te, modal.Cls.from_name(name, "Latency"), modal.Cls.from_name(name, "Games")
 
 
 def _git(*args) -> str:
@@ -516,11 +615,24 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
     with open(exp_path) as f:
         source = f.read()
     t0 = time.time()
-    train_eval, latency = deployed_classes()  # a failed deploy is not the experiment's crash
+    train_eval, latency, games = deployed_classes()  # a failed deploy is not the experiment's crash
     logs = follow_logs(deployment_name())
     try:
+        import games_eval
+
         res = train_eval().run.remote(source, tag, commit)
-        res["summary"].update({k: v for k, v in latency().run.remote(tag, commit).items() if k.startswith("latency")})
+        # the latency job and one games job per family, all on the saved checkpoint, at once
+        lat = latency().run.spawn(tag, commit)
+        fams = {f: games().run.spawn(tag, commit, f) for f in games_eval.FAMILIES}
+        res["summary"].update({k: v for k, v in lat.get().items() if k.startswith("latency")})
+        played = {}
+        for f, call in fams.items():
+            played.update(call.get())
+        g = games_eval.summarize(played)
+        if not g["complete"]:
+            raise RuntimeError("games benchmark incomplete, missing %s" % g["missing"])
+        res["summary"]["games"] = g["games"]
+        res["games"] = {"per_game": g["per_game"], "results": played}
     except Exception as e:
         print("crash: %r" % (e,))
         pareto.append_tsv(tsv, pareto.crash_row(commit, desc))
@@ -536,7 +648,7 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         json.dump(res, f, indent=2)
     s = res["summary"]
     print("---")
-    for k in ("quality", "macro_acc", "ece_hard", "params_m", "latency_x", "latency_ms", "latency_ref_ms"):
+    for k in ("quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x", "latency_ms", "latency_ref_ms"):
         print("%-17s %.4f" % (k + ":", s[k]))
     print("%-17s %.1f" % ("train_seconds:", res["train_s"]))
     print("%-17s %.1f" % ("total_seconds:", res["total_s"]))
@@ -550,7 +662,8 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         print("now dominates:    %s" % ", ".join(p["commit"] for p in beaten))
     print(pareto.show(pareto.read_tsv(tsv)))
     if prune:
-        keep = [r["commit"] for r in pareto.frontier(pareto.read_tsv(tsv))]
-        removed = prune_checkpoints.remote(tag, keep)
+        # only commits the TSV has finished with and that are off the frontier: a concurrent run's checkpoint is
+        # not in the TSV until that run decides, so it is never touched
+        removed = prune_checkpoints.remote(tag, pareto.prunable(pareto.read_tsv(tsv)))
         if removed:
             print("pruned checkpoints off the frontier: %s" % ", ".join(removed))

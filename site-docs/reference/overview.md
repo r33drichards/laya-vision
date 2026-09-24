@@ -21,8 +21,10 @@ results. For learning and tasks, see the [Tutorials](../tutorials/overview.md) a
 
 Generated from result files by `scripts/eval_report.py`, and not edited by hand:
 
-- [Scorecard: thaitea/laya-vision](evals/laya-vision.md): 34 validation sets, human-vote calibration, the games suite
-  and latency.
+- [Scorecard: thaitea/laya-vision (201M)](evals/laya-vision-201m.md): the recommended checkpoint on 34 validation
+  sets, human-vote calibration, the games suite and latency.
+- [Scorecard: the previous checkpoint](evals/laya-vision.md): the same suite on `thaitea/laya-vision` before
+  2026-09-24 (now `laya-vision-smolvlm-256m-score`).
 
 Experiment reports:
 

@@ -1,0 +1,163 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 660" font-family="Helvetica, Arial, sans-serif" font-size="13" role="img" aria-label="Before and after for the next autoresearch tag. Top: training adds an optional next-move head fed by the same features as the policy head, trained on the expert's move at step t+1 with weight 0.15 and never used for play. Bottom: pruning after a run finishes used to delete every checkpoint not on the frontier, including a concurrent run's fresh checkpoint; now it deletes only checkpoints of finished runs in results.tsv that are off the frontier.">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f2328"/>
+    </marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0969da"/>
+    </marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#cf222e"/>
+    </marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1a7f37"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="660" fill="#ffffff"/>
+
+  <!-- ============ 1. Next-move head ============ -->
+  <text x="20" y="30" font-size="17" font-weight="bold" fill="#1f2328">1. Next-move head (KataGo-style auxiliary target, training only)</text>
+
+  <!-- BEFORE -->
+  <text x="20" y="62" font-size="14" font-weight="bold" fill="#57606a">BEFORE</text>
+  <g fill="none" stroke="#1f2328" stroke-width="1.5">
+    <rect x="20" y="74" width="170" height="52" rx="6"/>
+    <rect x="230" y="74" width="140" height="52" rx="6"/>
+    <rect x="410" y="74" width="100" height="52" rx="6"/>
+    <rect x="570" y="74" width="150" height="40" rx="6"/>
+    <rect x="570" y="130" width="150" height="40" rx="6" stroke-dasharray="5 4"/>
+    <rect x="770" y="74" width="210" height="40" rx="6"/>
+    <rect x="770" y="130" width="210" height="40" rx="6" stroke-dasharray="5 4"/>
+  </g>
+  <g fill="#1f2328" text-anchor="middle">
+    <text x="105" y="96">frame t + question</text>
+    <text x="105" y="114" font-size="11" fill="#57606a">target: expert move t</text>
+    <text x="300" y="96">encoder</text>
+    <text x="300" y="114" font-size="11" fill="#57606a">(20 text layers)</text>
+    <text x="460" y="105">features z</text>
+    <text x="645" y="92">policy head</text>
+    <text x="645" y="107" font-size="11" fill="#57606a">used by predict → play</text>
+    <text x="645" y="148">value head</text>
+    <text x="645" y="163" font-size="11" fill="#57606a">optional</text>
+    <text x="875" y="99">CE vs expert move at t</text>
+    <text x="875" y="155">BCE vs value target</text>
+  </g>
+  <g stroke="#1f2328" stroke-width="1.5" fill="none">
+    <line x1="190" y1="100" x2="228" y2="100" marker-end="url(#a)"/>
+    <line x1="370" y1="100" x2="408" y2="100" marker-end="url(#a)"/>
+    <polyline points="510,100 540,100 540,94 568,94" marker-end="url(#a)"/>
+    <polyline points="540,100 540,150 568,150" marker-end="url(#a)"/>
+    <line x1="720" y1="94" x2="768" y2="94" marker-end="url(#a)"/>
+    <line x1="720" y1="150" x2="768" y2="150" marker-end="url(#a)"/>
+  </g>
+
+  <!-- AFTER -->
+  <text x="20" y="222" font-size="14" font-weight="bold" fill="#57606a">AFTER</text>
+  <g fill="none" stroke="#1f2328" stroke-width="1.5">
+    <rect x="20" y="234" width="170" height="70" rx="6"/>
+    <rect x="230" y="234" width="140" height="52" rx="6"/>
+    <rect x="410" y="234" width="100" height="52" rx="6"/>
+    <rect x="570" y="234" width="150" height="40" rx="6"/>
+    <rect x="570" y="290" width="150" height="40" rx="6" stroke-dasharray="5 4"/>
+    <rect x="770" y="234" width="210" height="40" rx="6"/>
+    <rect x="770" y="290" width="210" height="40" rx="6" stroke-dasharray="5 4"/>
+  </g>
+  <g fill="none" stroke="#0969da" stroke-width="2">
+    <rect x="570" y="346" width="150" height="40" rx="6" stroke-dasharray="5 4"/>
+    <rect x="770" y="346" width="210" height="40" rx="6"/>
+  </g>
+  <g fill="#1f2328" text-anchor="middle">
+    <text x="105" y="256">frame t + question</text>
+    <text x="105" y="274" font-size="11" fill="#57606a">target: expert move t</text>
+    <text x="105" y="292" font-size="11" fill="#0969da">+ next_target: expert move t+1</text>
+    <text x="300" y="256">encoder</text>
+    <text x="300" y="274" font-size="11" fill="#57606a">(unchanged)</text>
+    <text x="460" y="265">features z</text>
+    <text x="645" y="252">policy head</text>
+    <text x="645" y="267" font-size="11" fill="#57606a">used by predict → play</text>
+    <text x="645" y="308">value head</text>
+    <text x="645" y="323" font-size="11" fill="#57606a">optional</text>
+    <text x="645" y="364" fill="#0969da">next head</text>
+    <text x="645" y="379" font-size="11" fill="#0969da">off by default · not in predict</text>
+    <text x="875" y="259">CE vs expert move at t</text>
+    <text x="875" y="315">BCE vs value target</text>
+    <text x="875" y="364" fill="#0969da">CE vs expert move at t+1</text>
+    <text x="875" y="379" font-size="11" fill="#0969da">loss weight 0.15</text>
+  </g>
+  <g stroke="#1f2328" stroke-width="1.5" fill="none">
+    <line x1="190" y1="260" x2="228" y2="260" marker-end="url(#a)"/>
+    <line x1="370" y1="260" x2="408" y2="260" marker-end="url(#a)"/>
+    <polyline points="510,260 540,260 540,254 568,254" marker-end="url(#a)"/>
+    <polyline points="540,260 540,310 568,310" marker-end="url(#a)"/>
+    <line x1="720" y1="254" x2="768" y2="254" marker-end="url(#a)"/>
+    <line x1="720" y1="310" x2="768" y2="310" marker-end="url(#a)"/>
+  </g>
+  <g stroke="#0969da" stroke-width="2" fill="none">
+    <polyline points="540,310 540,366 568,366" marker-end="url(#ab)"/>
+    <line x1="720" y1="366" x2="768" y2="366" marker-end="url(#ab)"/>
+  </g>
+  <text x="20" y="416" font-size="12" fill="#57606a">With the head off: no new weights, and outputs bit-identical to BEFORE (tested). Toolkit Maze, Snake and control examples gain next_target.</text>
+
+  <line x1="20" y1="440" x2="980" y2="440" stroke="#d0d7de" stroke-width="1"/>
+
+  <!-- ============ 2. Pruning ============ -->
+  <text x="20" y="472" font-size="17" font-weight="bold" fill="#1f2328">2. Checkpoint pruning when two runs overlap (run A finishes while run B is still measuring)</text>
+
+  <!-- BEFORE (left) -->
+  <text x="20" y="504" font-size="14" font-weight="bold" fill="#57606a">BEFORE</text>
+  <rect x="20" y="518" width="170" height="52" rx="6" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+  <text x="105" y="540" text-anchor="middle" fill="#1f2328">run A finishes → prune</text>
+  <text x="105" y="558" text-anchor="middle" font-size="11" fill="#57606a">delete if not on frontier</text>
+  <g fill="none" stroke="#1f2328" stroke-width="1.5">
+    <rect x="260" y="518" width="200" height="40" rx="6"/>
+    <rect x="260" y="572" width="200" height="40" rx="6"/>
+    <rect x="260" y="626" width="200" height="40" rx="6" stroke="#cf222e" stroke-width="2"/>
+  </g>
+  <g text-anchor="middle" fill="#1f2328">
+    <text x="360" y="542">A · on frontier</text>
+    <text x="360" y="596">C · in TSV, off frontier</text>
+    <text x="360" y="645">B · just saved</text>
+    <text x="360" y="659" font-size="11" fill="#57606a">not in results.tsv yet</text>
+  </g>
+  <g stroke="#1f2328" stroke-width="1.5" fill="none">
+    <polyline points="190,544 225,544 225,538 258,538" marker-end="url(#a)"/>
+    <polyline points="225,544 225,592 258,592" marker-end="url(#a)"/>
+  </g>
+  <polyline points="225,592 225,646 258,646" fill="none" stroke="#cf222e" stroke-width="2" marker-end="url(#ar)"/>
+  <g font-size="12">
+    <text x="468" y="542" fill="#57606a">kept</text>
+    <text x="468" y="596" fill="#57606a">deleted</text>
+    <text x="468" y="650" fill="#cf222e" font-weight="bold">deleted</text>
+  </g>
+  <text x="20" y="700" fill="#cf222e">✗ run B's latency / games jobs load the deleted checkpoint → crash</text>
+  <text x="20" y="720" font-size="11" fill="#57606a">(happened to 0124a9d in sep23-v2; workaround until the next tag: --no-prune)</text>
+
+  <!-- AFTER (right) -->
+  <text x="520" y="504" font-size="14" font-weight="bold" fill="#57606a">AFTER</text>
+  <rect x="520" y="518" width="170" height="52" rx="6" fill="none" stroke="#1f2328" stroke-width="1.5"/>
+  <text x="605" y="540" text-anchor="middle" fill="#1f2328">run A finishes → prune</text>
+  <text x="605" y="558" text-anchor="middle" font-size="11" fill="#1a7f37">delete if in TSV and off frontier</text>
+  <g fill="none" stroke="#1f2328" stroke-width="1.5">
+    <rect x="740" y="518" width="200" height="40" rx="6"/>
+    <rect x="740" y="572" width="200" height="40" rx="6"/>
+    <rect x="740" y="626" width="200" height="40" rx="6" stroke="#1a7f37" stroke-width="2"/>
+  </g>
+  <g text-anchor="middle" fill="#1f2328">
+    <text x="840" y="542">A · on frontier</text>
+    <text x="840" y="596">C · in TSV, off frontier</text>
+    <text x="840" y="645">B · just saved</text>
+    <text x="840" y="659" font-size="11" fill="#57606a">not in results.tsv yet</text>
+  </g>
+  <g stroke="#1f2328" stroke-width="1.5" fill="none">
+    <polyline points="690,544 710,544 710,538 738,538" marker-end="url(#a)"/>
+    <polyline points="710,544 710,592 738,592" marker-end="url(#a)"/>
+  </g>
+  <polyline points="710,592 710,646 738,646" fill="none" stroke="#1a7f37" stroke-width="2" marker-end="url(#ag)"/>
+  <g font-size="12">
+    <text x="948" y="542" fill="#57606a">kept</text>
+    <text x="948" y="596" fill="#57606a">deleted</text>
+    <text x="948" y="650" fill="#1a7f37" font-weight="bold">kept</text>
+  </g>
+  <text x="520" y="700" fill="#1a7f37">✓ run B finishes normally; it is pruned later, once it has a row</text>
+  <text x="520" y="720" font-size="11" fill="#57606a">(concurrent runs no longer need --no-prune)</text>
+</svg>

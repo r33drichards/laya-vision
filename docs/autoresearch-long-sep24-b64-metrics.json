@@ -1,0 +1,56 @@
+{
+  "run": "autoresearch/full/long-sep24-b64/best",
+  "source": {
+    "note": "Written for the published-number claim (results/claims.json): the three official VQA val sets from this checkpoint's full_eval run, and its temperatures. Training: autoresearch/full_run.py, recipe dba11d5, 120 minutes on one H100.",
+    "full_eval": "eval-results/autoresearch-full-long-sep24-b64.json",
+    "full_run": "autoresearch/runs/full/long-sep24-b64.json",
+    "gpu": "NVIDIA A10"
+  },
+  "temperature": [
+    3.8573756217956543,
+    2.099752902984619,
+    3.0531070232391357
+  ],
+  "final": {
+    "val_raw": {
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.6001757469244289,
+        "ece": 0.3387705773534171,
+        "nll": 2.3572114293950865
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8216499761564139,
+        "ece": 0.14205503773564207,
+        "nll": 1.0280363568923347
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7148,
+        "ece": 0.22405587465763088,
+        "nll": 0.9954408737474856
+      }
+    },
+    "val_calibrated": {
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.6001757469244289,
+        "ece": 0.08917259620027929,
+        "nll": 1.0025540587896569
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8216499761564139,
+        "ece": 0.031302838920694236,
+        "nll": 0.4569086546938143
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7148,
+        "ece": 0.06450434554815294,
+        "nll": 0.5657450938984752
+      }
+    }
+  }
+}
