@@ -66,9 +66,9 @@ Calibrated answers, as `predict` returns them. These three numbers are backed by
 
 | Dataset | Question type | n | Accuracy | Previous checkpoint |
 |---|---|---:|---:|---:|
-| A-OKVQA | 4-way `choice` | 1,138 | {AOK} | 60.0% |
-| ScienceQA, image subset | 2–5-way `choice` | 2,097 | {SQA} | 82.8% |
-| VQAv2 yes/no\* | `noul` | 5,000 | {VQA} | 72.4% |
+| A-OKVQA | 4-way `choice` | 1,138 | 59.8% | 60.0% |
+| ScienceQA, image subset | 2–5-way `choice` | 2,097 | 82.4% | 82.8% |
+| VQAv2 yes/no\* | `noul` | 5,000 | 71.4% | 72.4% |
 
 \* A re-split of the official VQAv2 validation set by image, the only official split with answers, so not comparable to published VQAv2 numbers.
 

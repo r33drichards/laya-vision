@@ -1,38 +1,68 @@
 {
-  "tolerance": {
-    "acc": 0.005,
-    "ece": 0.01
-  },
-  "claims": [
-    {
-      "about": "README checkpoint table, thaitea/laya-vision (run cauldron-score-2ep-bidir-full/best): accuracy on the three official VQA val splits; calibrated ECE from its metrics JSON",
-      "weights_sha256": "b5eb3ca675cfc010cee381e4be528dafba73fe00745548d5acfc89c933b9122f",
-      "published_as": {
-        "repo": "thaitea/laya-vision",
-        "revision": "d1fbdc0612fbe3b3d8ec6f54d328b195d35bb338",
-        "note": "model.safetensors LFS sha256 on the Hub equals weights_sha256 (also thaitea/laya-vision-smolvlm-256m-score at 0d69aa37786bf409f467d2550a7d2dababfe8bc0)"
-      },
-      "evidence": "results/raw/smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.predictions.jsonl.gz",
-      "meta": "results/raw/smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.meta.json",
-      "metrics_json": "docs/smolvlm-cauldron-score-bidir-full-metrics.json",
-      "metrics_path": [
-        "final",
-        "val_calibrated"
-      ],
-      "datasets": [
-        "aokvqa",
-        "scienceqa",
-        "vqav2_yesno"
-      ],
-      "readme": {
-        "file": "README.md",
-        "row_contains": "[thaitea/laya-vision](",
-        "columns": {
-          "aokvqa": "A-OKVQA",
-          "scienceqa": "ScienceQA",
-          "vqav2_yesno": "VQAv2 yes/no"
-        }
-      }
+ "tolerance": {
+  "acc": 0.005,
+  "ece": 0.01
+ },
+ "claims": [
+  {
+   "about": "README checkpoint table and HF model card, thaitea/laya-vision from 2026-09-24 = thaitea/laya-vision-201m (run autoresearch/full/long-sep24-b64/best, 201M params): accuracy on the three official VQA val splits; calibrated ECE from its metrics JSON",
+   "weights_sha256": "31220803f38b44b8b1649b207c632612c9a35dee0da2ef1ea35d21e4b424be68",
+   "published_as": {
+    "repo": "thaitea/laya-vision-201m",
+    "revision": "PENDING",
+    "note": "also thaitea/laya-vision"
+   },
+   "evidence": "results/raw/smolvlm-autoresearch-full-long-sep24-b64-best.vqa-val.predictions.jsonl.gz",
+   "meta": "results/raw/smolvlm-autoresearch-full-long-sep24-b64-best.vqa-val.meta.json",
+   "metrics_json": "docs/autoresearch-long-sep24-b64-metrics.json",
+   "metrics_path": [
+    "final",
+    "val_calibrated"
+   ],
+   "datasets": [
+    "aokvqa",
+    "scienceqa",
+    "vqav2_yesno"
+   ],
+   "readme": {
+    "file": "README.md",
+    "row_contains": "[thaitea/laya-vision](",
+    "columns": {
+     "aokvqa": "A-OKVQA",
+     "scienceqa": "ScienceQA",
+     "vqav2_yesno": "VQAv2 yes/no"
     }
-  ]
+   }
+  },
+  {
+   "about": "README checkpoint table, thaitea/laya-vision-smolvlm-256m-score, which was thaitea/laya-vision until 2026-09-24 (run cauldron-score-2ep-bidir-full/best): accuracy on the three official VQA val splits; calibrated ECE from its metrics JSON",
+   "weights_sha256": "b5eb3ca675cfc010cee381e4be528dafba73fe00745548d5acfc89c933b9122f",
+   "published_as": {
+    "repo": "thaitea/laya-vision",
+    "revision": "d1fbdc0612fbe3b3d8ec6f54d328b195d35bb338",
+    "note": "model.safetensors LFS sha256 on the Hub equals weights_sha256 (also thaitea/laya-vision-smolvlm-256m-score at 0d69aa37786bf409f467d2550a7d2dababfe8bc0)"
+   },
+   "evidence": "results/raw/smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.predictions.jsonl.gz",
+   "meta": "results/raw/smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.meta.json",
+   "metrics_json": "docs/smolvlm-cauldron-score-bidir-full-metrics.json",
+   "metrics_path": [
+    "final",
+    "val_calibrated"
+   ],
+   "datasets": [
+    "aokvqa",
+    "scienceqa",
+    "vqav2_yesno"
+   ],
+   "readme": {
+    "file": "README.md",
+    "row_contains": "[thaitea/laya-vision-smolvlm-256m-score](",
+    "columns": {
+     "aokvqa": "A-OKVQA",
+     "scienceqa": "ScienceQA",
+     "vqav2_yesno": "VQAv2 yes/no"
+    }
+   }
+  }
+ ]
 }

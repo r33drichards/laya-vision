@@ -31,7 +31,7 @@ Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/la
 
 | Checkpoint | Backbone | Trained on | A-OKVQA | ScienceQA | VQAv2 yes/no | `score` head | Params | Latency, L4 bf16 |
 |---|---|---|---|---|---|---|---|---|
-| [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision), **recommended** (same weights as [laya-vision-201m](https://huggingface.co/thaitea/laya-vision-201m)) | SmolVLM-256M cut to 20 of 30 language layers, options attend to each other | 19 Cauldron subsets + 4 rubric-scored sets + game frames | {AOK} | {SQA} | {VQA} | trained | 201M | 41 ms |
+| [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision), **recommended** (same weights as [laya-vision-201m](https://huggingface.co/thaitea/laya-vision-201m)) | SmolVLM-256M cut to 20 of 30 language layers, options attend to each other | 19 Cauldron subsets + 4 rubric-scored sets + game frames | 59.8% | 82.4% | 71.4% | trained | 201M | 41 ms |
 | [thaitea/laya-vision-smolvlm-256m-score](https://huggingface.co/thaitea/laya-vision-smolvlm-256m-score) (`thaitea/laya-vision` until 2026-09-24, revision `d1fbdc0`) | SmolVLM-256M, options attend to each other | 19 Cauldron subsets + 4 rubric-scored sets | 60.0% | 82.8% | 72.4% | trained | 237M | ~41 ms |
 | [thaitea/laya-vision-modernvbert-250m](https://huggingface.co/thaitea/laya-vision-modernvbert-250m) | ModernVBERT-250M, bidirectional | 19 Cauldron subsets | 65.2% | 79.0% | 71.8% | untrained | 250M | 32 ms |
 | [thaitea/laya-vision-smolvlm-256m](https://huggingface.co/thaitea/laya-vision-smolvlm-256m), the original | SmolVLM-256M | A-OKVQA, ScienceQA, VQAv2 yes/no | 61.8% | 86.6% | 73.4% | untrained | 237M | 41 ms |
