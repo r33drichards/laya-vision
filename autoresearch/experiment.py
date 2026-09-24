@@ -17,9 +17,8 @@ fly: ``toolkit.maze_examples(n)`` and ``toolkit.snake_examples(n)`` (soft target
 ``value`` target, the board's 8 symmetries), ``toolkit.control_examples(game, n)`` for CartPole, Acrobot,
 MountainCar and LunarLander, and ``toolkit.game_mix(ctx.train_examples(), games, frac, base_weights=MIX)`` to give
 games ``frac`` of the draws. A model built with ``"value_head": True`` in its config learns the ``value`` targets
-(``train(..., w_value=...)``); ``"next_head": True`` adds an auxiliary head trained on the examples' ``next_target``
-(the expert's move at the next step; ``train(..., w_next=...)``), never used for play. The games are played greedy:
-no test-time search.
+(``train(..., w_value=...)``); setting ``agent.cfg["search"]`` makes the games benchmark plan with ``laya.search``
+on the deterministic games.
 """
 from typing import Dict, Optional
 
@@ -46,9 +45,6 @@ WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.45
-# auxiliary next-move head (KataGo 1902.10565 sec. 3.4): predicts the expert's move at t+1, training only
-NEXT_HEAD = False
-W_NEXT = 0.15
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
@@ -87,7 +83,7 @@ def build(ctx):
     from laya.vlm import VLMAgent
 
     if INIT:
-        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device, **({"next_head": True} if NEXT_HEAD else {}))
+        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device)
     else:
         agent = VLMAgent(backbone=BACKBONE, device=ctx.device, option_attention=OPTION_ATTENTION)
     if KEEP_TEXT_LAYERS:
@@ -118,4 +114,4 @@ def train(agent, ctx):
 
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
-               w_next=W_NEXT if NEXT_HEAD else 0.0, max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
+               max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
