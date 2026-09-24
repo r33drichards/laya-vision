@@ -18,3 +18,4 @@ ce6a71f	0.6642	0.7093	0.0452	0.1918	236.5623	1.0016	discard	exp: game data at 35
 0bc9c9b	0.6763	0.7067	0.0304	0.2351	201.3103	0.8340	discard	exp: value head 1:1 on the 20-layer, games-45% point (15-minute harness, pool v2)
 7283cc7	0.6527	0.6719	0.0192	0.3433	201.1613	0.8317	keep	exp: train the vision tower on the 20-layer, games-45% point (15-minute harness, pool v2)
 dba11d5	0.6837	0.7080	0.0244	0.1884	201.1613	0.8288	keep	exp: batch 64 on the 20-layer, games-45% point (15-minute harness, pool v2)
+09704d2	0.6634	0.6899	0.0266	0.3316	201.1613	0.8460	keep	exp: train vision tower with half the backbone LR (5e-6) on 20 layers, games 45%
