@@ -29,7 +29,7 @@ BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
 # size and latency: 0 keeps what the checkpoint has
-KEEP_TEXT_LAYERS = 10      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
+KEEP_TEXT_LAYERS = 20      # keep the first N language-model decoder layers (SmolVLM-256M has 30)
 KEEP_VISION_LAYERS = 0    # keep the first N vision-tower layers (SmolVLM-256M has 12)
 IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 64 (the checkpoint uses 512)
 
@@ -39,11 +39,14 @@ MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset samp
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
 LR_HEAD = 5e-5
 LR_BACKBONE = 1e-5
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
-GAME_FRAC = 0.25
+GAME_FRAC = 0.45
+# auxiliary next-move head (KataGo 1902.10565 sec. 3.4): predicts the expert's move at t+1, training only
+NEXT_HEAD = True
+W_NEXT = 0.15
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
@@ -82,7 +85,7 @@ def build(ctx):
     from laya.vlm import VLMAgent
 
     if INIT:
-        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device)
+        agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device, **({"next_head": True} if NEXT_HEAD else {}))
     else:
         agent = VLMAgent(backbone=BACKBONE, device=ctx.device, option_attention=OPTION_ATTENTION)
     if KEEP_TEXT_LAYERS:
@@ -108,4 +111,4 @@ def train(agent, ctx):
 
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
-               max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
+               w_next=W_NEXT if NEXT_HEAD else 0.0, max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
