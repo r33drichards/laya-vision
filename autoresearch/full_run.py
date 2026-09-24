@@ -292,6 +292,14 @@ def claim(name: str, token: str, meta: Dict) -> str:
     return d
 
 
+@app.function(image=image, cpu=1, memory=1024, timeout=5 * 60, volumes={"/ckpt": H.ckpt_vol})
+def claim_record(name: str) -> Optional[Dict]:
+    """The claim a launch wrote for ``name`` (its token and metadata), for ``--attach``; None if unclaimed."""
+    H.ckpt_vol.reload()
+    path = os.path.join(_run_dir(name), "launch.json")
+    return json.load(open(path)) if os.path.exists(path) else None
+
+
 def _check_owner(name: str, token: str) -> None:
     path = os.path.join(_run_dir(name), "launch.json")
     if not os.path.exists(path) or json.load(open(path))["token"] != token:
@@ -485,8 +493,9 @@ def pipeline(source: str, name: str, commit: str, token: str, minutes: float, da
     run_dir = _run_dir(name)
     call_path = os.path.join(run_dir, "train_call.txt")
     if os.path.exists(call_path):
-        call = modal.FunctionCall.from_id(open(call_path).read().strip())
-        _log(t0, "waiting on the existing training call %s" % call.object_id)
+        call_id = open(call_path).read().strip()
+        call = modal.FunctionCall.from_id(call_id)  # not hydrated: use the id string, not call.object_id
+        _log(t0, "waiting on the existing training call %s" % call_id)
     else:
         call = train_eval.spawn(source, name, commit, token, minutes, data, state_every_min, crash_at_step)
         with open(call_path, "w") as f:
@@ -569,7 +578,7 @@ def _full_eval_cmd(name: str) -> List[str]:
 @app.local_entrypoint()
 def main(commit: str = "", name: str = "", minutes: float = 120.0, data: str = "full", desc: str = "",
          state_every_min: float = 10.0, crash_at_step: int = 0, full_eval: bool = False, fetch: bool = False,
-         prepare_pool: bool = False):
+         prepare_pool: bool = False, attach: bool = False):
     if prepare_pool:
         build_full_pool()
         return
@@ -582,6 +591,29 @@ def main(commit: str = "", name: str = "", minutes: float = 120.0, data: str = "
                              "laya-autoresearch-full)" % name)
         print("wrote", _write_local(name, res))
         _print(res)
+        return
+    if attach:
+        # Take over orchestration of a launched run whose pipeline died (e.g. its container was preempted and the
+        # retries ran out): wait on its training call, then measure and write result.json, as the pipeline does.
+        rec = claim_record.remote(name)
+        if rec is None:
+            raise SystemExit("%s was never claimed; launch it with --commit" % name)
+        token = rec.pop("token")
+        sha = rec["recipe_commit"]
+        source = subprocess.run(["git", "show", "%s:autoresearch/experiment.py" % sha], cwd=H.REPO,
+                                capture_output=True, text=True, check=True).stdout
+        meta = {k: rec[k] for k in ("harness", "description", "recipe_commit", "full_run_code",
+                                    "harness_changed_since_recipe", "harness_deployment", "full_eval_command")}
+        t0 = time.time()
+        res = pipeline.remote(source, name, sha[:7], token, rec["minutes"], rec["data"], state_every_min, 0,
+                              rec["harness_deployment"], meta)
+        res["total_s"] = round(time.time() - t0, 1)
+        print("wrote", _write_local(name, res))
+        _print(res)
+        if full_eval:
+            p = subprocess.run(_full_eval_cmd(name), cwd=H.REPO)
+            if p.returncode:
+                raise SystemExit("full_eval failed (exit %d)" % p.returncode)
         return
     if data not in ("full", "pool"):
         raise SystemExit("--data is full or pool")
