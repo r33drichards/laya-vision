@@ -1,0 +1,13 @@
+commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
+0417741	0.6759	0.6993	0.0234	0.3122	201.1613	0.8472	keep	rerun 09704d2 (vision half LR)
+65d8c32	0.6788	0.7089	0.0301	0.2007	201.1613	0.8287	discard	rerun 5e9ef40 (20 layers, games 45%)
+c99d785	0.6834	0.7075	0.0240	0.1869	201.1613	0.8344	keep	rerun dba11d5 (batch 64)
+ae8ec00	0.6382	0.6598	0.0216	0.2916	201.1613	0.8372	discard	rerun 7283cc7 (train vision)
+9f2433d	0.6500	0.6642	0.0142	0.1643	172.8406	0.7044	keep	rerun 0e9a973 (12 layers)
+62623ee	0.6636	0.6788	0.0152	0.1700	183.4609	0.7515	keep	rerun d8a7aa6 (15 layers)
+0ce2732	0.5564	0.5671	0.0107	0.1771	165.7604	0.6719	keep	rerun 37ebc61 (10 layers)
+6838889	0.6798	0.7054	0.0256	0.1921	201.3105	0.8331	discard	results: sep24-next 62623ee (rerun d8a7aa6, 15 layers); exp: next-move head (w 0.15) on the batch-64 point dba11d5
+cf7514b	0.6582	0.6909	0.0327	0.2995	201.3105	0.8298	discard	exp: next-move head (w 0.15) on the vision-half-LR point 09704d2
+1e5ad68	0.6806	0.7064	0.0259	0.2333	201.3105	0.8394	discard	exp: next-move head at w 0.5 on the batch-64 point
+56328f0	0.6812	0.7055	0.0243	0.2519	201.3105	0.8372	keep	repeat: next head w 0.5 on batch 64
+f40043f	0.6792	0.7056	0.0264	0.2031	201.3105	0.8437	discard	exp: next-move head at w 1.0 on the batch-64 point

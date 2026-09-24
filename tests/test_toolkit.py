@@ -301,3 +301,115 @@ def test_examples_go_through_make_item(processor, mazes, snakes):
         it = make_item(processor, ex, random.Random(0))
         assert sorted(it["target"]) == sorted(ex["target"]) and it["n_images"] == 1
         assert len(it["markers"]) == len(ex["target"])
+
+
+# -- next-move targets ------------------------------------------------------------------------------------------------
+
+
+def _unsym(target, sym):
+    """The inverse of ``toolkit.sym_target``: the target before symmetry ``sym`` was applied."""
+    return [target[ACTIONS.index(toolkit.sym_action(a, sym))] for a in ACTIONS]
+
+
+def _by_step(exs, parse):
+    """``{episode: {t: (example, sym)}}`` from ids; ``parse(id) -> (episode, t, sym)``."""
+    out = {}
+    for ex in exs:
+        ep, t, sym = parse(ex["id"])
+        out.setdefault(ep, {})[t] = (ex, sym)
+    return out
+
+
+def _maze_id(i):
+    _, seed, _, _, _, t, sym = i.split("-")
+    return int(seed), int(t[1:]), int(sym[1:])
+
+
+def _snake_id(i):
+    _, seed, t, sym = i.split("-")
+    return int(seed), int(t[1:]), int(sym[1:])
+
+
+def _check_next(eps, n_opts, unsym, sym_fn):
+    """Every example t whose step t + 1 is in the data has next_target == step t + 1's target (mapped from its
+    symmetry to this example's); the last step of every complete episode (all but the last one) has none."""
+    pairs = 0
+    last_ep = max(eps)
+    for ep, steps in eps.items():
+        assert sorted(steps) == list(range(len(steps)))  # every recorded step kept
+        for t, (ex, sym) in steps.items():
+            if t + 1 in steps:
+                nxt, nsym = steps[t + 1]
+                want = sym_fn(unsym(nxt["target"], nsym), sym)
+                assert ex["next_target"] == want, ex["id"]
+                assert len(ex["next_target"]) == n_opts and abs(sum(ex["next_target"]) - 1) < 1e-9
+                pairs += 1
+            elif ep != last_ep:  # the episode's last recorded step (the last episode may be cut by n)
+                assert "next_target" not in ex, ex["id"]
+    assert pairs > 20
+    return pairs
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_maze_next_target_is_the_next_steps_target(flip):
+    exs = toolkit.maze_examples(150, seed=21, per_episode=10_000, flip=flip, smooth=0.1, workers=1)
+    eps = _by_step(exs, _maze_id)
+    assert len(eps) > 2
+    if not flip:  # unflipped: literally the next recorded step's target
+        for steps in eps.values():
+            for t, (ex, _) in steps.items():
+                if t + 1 in steps:
+                    assert ex["next_target"] == steps[t + 1][0]["target"]
+    else:
+        assert len({s for steps in eps.values() for _, s in steps.values()}) == 8
+    _check_next(eps, 4, _unsym, toolkit.sym_target)
+
+
+@pytest.mark.parametrize("flip", [False, True])
+def test_snake_next_target_is_the_next_steps_target(flip):
+    exs = toolkit.snake_examples(200, seed=21, per_episode=10_000, episode_cap=40, flip=flip, workers=1)
+    eps = _by_step(exs, _snake_id)
+    if not flip:
+        for steps in eps.values():
+            for t, (ex, _) in steps.items():
+                if t + 1 in steps:
+                    assert ex["next_target"] == steps[t + 1][0]["target"]
+    _check_next(eps, 4, _unsym, toolkit.sym_target)
+
+
+def test_next_target_can_be_left_out():
+    assert not any("next_target" in e for e in toolkit.maze_examples(30, seed=1, next_target=False, workers=1))
+    assert not any("next_target" in e for e in toolkit.snake_examples(30, seed=1, next_target=False, workers=1))
+
+
+@pytest.mark.parametrize("game,n,flip", [("CartPole", 80, True), ("Acrobot", 260, False), ("Acrobot", 260, True)])
+def test_control_next_target_is_the_next_steps_expert(game, n, flip):
+    actions = list(CONTROL_ACTIONS[game])
+    swap = {**toolkit.CONTROL_FLIPS[game], **{v: k for k, v in toolkit.CONTROL_FLIPS[game].items()}}
+
+    def mirror(vec, flipped):
+        return [vec[actions.index(swap.get(a, a))] for a in actions] if flipped else list(vec)
+
+    def parse(i):
+        _, seed, t = i.split("-")[:3]
+        return int(seed), int(t[1:]), i.endswith("-f")
+
+    exs = toolkit.control_examples(game, n, seed=13, keep=1.0, flip=flip, workers=1)
+    eps = _by_step(exs, parse)
+    if flip:
+        assert any(f for steps in eps.values() for _, f in steps.values())
+    for steps in eps.values():  # the expert's action at t + 1, mirrored with this example
+        for t, (ex, f) in steps.items():
+            if t + 1 in steps:
+                nxt, nf = steps[t + 1]
+                assert ex["next_target"] == mirror(nxt["target"], nf != f) == mirror(mirror(nxt["target"], nf), f)
+    _check_next(eps, len(actions), mirror, lambda v, f: mirror(v, f))
+
+
+def test_next_target_goes_through_make_item(processor, mazes):
+    from laya.vlm_train import make_item
+
+    ex = next(e for e in mazes if "next_target" in e)
+    for seed in range(4):
+        it = make_item(processor, ex, random.Random(seed))
+        assert it["next_target"] == pytest.approx([ex["next_target"][i] for i in it["order"]])

@@ -31,7 +31,8 @@ keep / discard call, not you.
      for ideas; change behaviour by writing it in `experiment.py`, not by editing them.
 4. **Modal**: `modal volume ls laya-checkpoints` must work. In a Claude Code cloud sandbox, set it up as
    `.claude/skills/evals/SKILL.md` section 1 describes (the proxy extra and CA bundle, in a scratch venv).
-5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v2`). If it is missing, build
+5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v3`, which holds only the
+   `games` parts, and `pool-v2`, whose `train` / `calib` / `eval` parts v3 reuses). If a part is missing, build
    it once with `modal run autoresearch/harness.py --prepare-pool` (it reads the prepared `cauldron_*`, `score_*` and
    `eval_*` sets). Every image the harness uses comes from this pool: reading the datasets' small image files
    straight from the volume is too slow to keep an H100 fed.
@@ -49,9 +50,12 @@ modal run autoresearch/harness.py --tag <tag> > autoresearch/runs/<tag>/run.log 
 grep -A12 "^---" autoresearch/runs/<tag>/run.log        # the summary and the keep/discard status
 ```
 
-Running two experiments at once (each from its own commit): pass `--no-prune` to both. A finishing run prunes every
-checkpoint not on the frontier, including the other run's fresh one that is not in `results.tsv` yet (it crashed
-`0124a9d` in `sep23-v2`); prune later with a single run, or leave it.
+Running two experiments at once (each from its own commit) is safe: a finishing run prunes only the checkpoints of
+commits that `results.tsv` already records as keep / discard / crash and that are off the frontier
+(`pareto.prunable`), so the other run's fresh checkpoint, not in the TSV until that run decides, is never touched.
+(Before this, a finishing run pruned every directory off the frontier and crashed `0124a9d` in `sep23-v2`.) The one
+case to avoid is re-running a commit that is already in the TSV while another run finishes: its directory counts as
+finished. `--no-prune` still turns pruning off.
 
 Never pass `--detach`: the local entrypoint collects the result, decides and writes the files. The first run of a
 new harness version deploys it and snapshots the loaded data (slower); later runs restore that snapshot. A run is
@@ -66,7 +70,8 @@ The harness writes `autoresearch/runs/<tag>/<commit>.json` (every metric, per da
 commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 ```
 
-It also prunes saved checkpoints that are no longer on the frontier from `/ckpt/autoresearch/<tag>/`.
+It also prunes, from `/ckpt/autoresearch/<tag>/`, the saved checkpoints of finished commits that are no longer on the
+frontier (never a directory whose commit is not in `results.tsv`).
 
 ## The loop
 
@@ -180,6 +185,10 @@ globally, and the benchmark fixes what the model sees.
 - **Game data**: mix `toolkit` game examples (soft BFS targets for Maze and Snake, expert frames for classic
   control) into the training stream, and the pool's Atari and ViZDoom expert frames via `ctx.game_examples()`.
 - **Value head**: `"value_head": true` with `value` targets, as an auxiliary loss.
+- **Next-move head** (KataGo's auxiliary opponent-move target, arXiv 1902.10565 section 3.4, which learned ~1.3x
+  faster): `"next_head": true` adds a small per-option scorer predicting the expert's move at the next step of the
+  same trajectory, trained on the `next_target` that `toolkit` maze / snake / control examples and the pool's
+  Atari / ViZDoom frames (`ctx.game_examples()`, pool v3) carry (`train(..., w_next=0.15)`, KataGo's weight). It is never used for play and changes nothing when off.
 - **Train on the model's own states (DAgger)**: expert data never shows the states the model's mistakes lead to.
   Mid-training, roll the current model out on training seeds, label the frames it visits with the BFS / expert move
   (or a short `laya.search` where there is no expert), add them to the mix, keep training. autogo's version is

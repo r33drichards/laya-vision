@@ -25,6 +25,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
@@ -138,6 +139,13 @@ def make_item(
         if not 0.0 <= v <= 1.0:
             raise ValueError("example value must be in [0, 1], got %r" % ex["value"])
         it["value"] = v
+    if ex.get("next_target") is not None:  # optional next-move target: a distribution over the same options
+        nt = [float(p) for p in ex["next_target"]]
+        if len(nt) != k or not all(math.isfinite(p) and p >= 0 for p in nt) or sum(nt) <= 0:
+            raise ValueError("example next_target must be %d non-negative floats with a positive sum, got %r"
+                             % (k, ex["next_target"]))
+        total = sum(nt)
+        it["next_target"] = [nt[i] / total for i in order]  # permuted to marker order, like the target
     return it
 
 
@@ -198,6 +206,21 @@ def value_loss(value_logits: Optional[torch.Tensor], value: Optional[torch.Tenso
     if not bool(has.any()):
         return 0.0
     return w_value * torch.nn.functional.binary_cross_entropy_with_logits(value_logits.float()[has], value[has])
+
+
+def next_loss(next_logits: Optional[torch.Tensor], next_target: Optional[torch.Tensor], w_next: float = 0.15):
+    """``w_next * soft cross-entropy(next_logits, next_target)`` over the rows whose ``next_target`` is not NaN
+    (``collate_vlm`` marks rows without one that way; padded options carry target 0 and logit -1e4). A plain
+    ``0.0`` when the model has no next-move head, the batch no targets, or ``w_next`` is 0, so nothing about such a
+    step changes."""
+    if next_logits is None or next_target is None or not w_next:
+        return 0.0
+    next_target = next_target.to(next_logits.device).float()
+    has = ~torch.isnan(next_target).any(-1)
+    if not bool(has.any()):
+        return 0.0
+    logp = torch.log_softmax(next_logits.float()[has], -1)
+    return w_next * -(next_target[has] * logp).sum(-1).mean()
 
 
 def _to(b: Dict, device, dtype) -> Dict:
@@ -331,6 +354,7 @@ def train(
     mix_weights: Optional[Dict[str, float]] = None,
     mix_alpha: float = 0.0,
     w_value: float = 1.0,
+    w_next: float = 0.15,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -347,6 +371,12 @@ def train(
     ``"value"`` (a float in [0, 1], e.g. whether the episode this game state came from was won), the loss adds
     ``w_value * BCE(value_logit, value)`` averaged over those examples only (``value_loss``); examples without one
     contribute nothing to it, and a batch with none (or a model without the head) trains exactly as before.
+
+    Next-move head (auxiliary, never used for play; KataGo's opponent-move target, arXiv 1902.10565 section 3.4):
+    when the model has one (config ``"next_head": true``) and a batch carries examples with a ``"next_target"``
+    (a distribution over the same options: the expert's move at the next step of the same trajectory), the loss
+    adds ``w_next * soft cross-entropy(next_logits, next_target)`` over those examples only (``next_loss``); as for
+    the value head, examples without one contribute nothing and a batch with none trains exactly as before.
 
     Sampling mix: dataset ``k`` is drawn with probability proportional to
     ``mix_weights.get(k, 1.0) * n_k ** mix_alpha`` (``ItemStream``); the defaults draw every dataset equally.
@@ -457,6 +487,7 @@ def train(
         if not train_act:
             loss = loss + 0.0 * act.float().sum()
         loss = loss + value_loss(model.last_value, b.get("value"), w_value)
+        loss = loss + next_loss(model.last_next, b.get("next_target"), w_next)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_([p for g in groups for p in g["params"]], 1.0)
@@ -503,7 +534,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     ``label`` indexes the rendered options (choice: criteria order; score: level; noul: 0=false, 1=true).
     An optional ``"target"`` (a probability per option, same order) replaces the one-hot target, e.g. an expert
     policy's action distribution; ``label`` is still used for accuracy. An optional ``"value"`` (in [0, 1]) is the
-    value-head target for the state (``train``).
+    value-head target for the state, an optional ``"next_target"`` (a probability per option, same order) the
+    next-move head's (``train``).
     """
     qdef = rec["question"]
     q = VLMAgent._to_internal(qdef)
@@ -527,14 +559,75 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     ex = {"state": state or "", "q": q, "target": target, "label": label, "dataset": dataset, "id": rec.get("id")}
     if rec.get("value") is not None:  # optional value-head target in [0, 1]
         ex["value"] = float(rec["value"])
+    if rec.get("next_target") is not None:  # optional next-move-head target, checked by make_item
+        ex["next_target"] = [float(p) for p in rec["next_target"]]
     return ex
 
 
-def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] = None) -> List[Dict]:
-    """Load ``<root>/<name>/<split>.jsonl``; ``limit`` keeps the first records in file order."""
+_ID_EPISODE_STEP = re.compile(r"^(?P<episode>.+)-(?P<step>\d+)$")
+
+
+def episode_step(rec: Dict) -> Optional[tuple]:
+    """``(episode, step)`` of a recorded game frame, or None when the record does not say.
+
+    Records with ``"episode"`` and ``"step"`` fields (the Atari expert sets, ``laya.atari_data``) use them. Otherwise
+    the id is ``<episode>-<step>`` with a decimal step, e.g. ViZDoom basic's ``"train-000000-001"`` (``modal_app.py``
+    ``prepare_doom_basic`` writes ``"%s-%06d-%03d" % (split, episode, t)``): episode ``"train-000000"``, step 1.
+    """
+    if rec.get("episode") is not None and rec.get("step") is not None:
+        return (rec["episode"], int(rec["step"]))
+    m = _ID_EPISODE_STEP.match(str(rec.get("id") or ""))
+    return (m.group("episode"), int(m.group("step"))) if m else None
+
+
+def with_next_targets(recs: List[Dict]) -> List[Dict]:
+    """The records, each copied with ``"next_target"`` = the training target of the next step of the same recorded
+    episode (the frame at ``(episode, step + 1)``, see ``episode_step``): its ``"target"`` (e.g. the expert's action
+    distribution) normalised, or the one-hot of its ``"label"``, exactly the target ``jsonl_example`` builds for it.
+
+    A record keeps no ``next_target`` (and is returned unchanged) when its successor was not recorded (an episode's
+    last frame, or a step the recording skipped), when its successor's options differ from its own (a different
+    question type or option list / order: the target is only meaningful over the same options), when either record
+    is not a valid example, or when ``episode_step`` cannot place it. Duplicate ``(episode, step)`` keys raise.
+    """
+    keys = [episode_step(r) for r in recs]
+    at: Dict = {}
+    for i, key in enumerate(keys):
+        if key is None:
+            continue
+        if key in at:
+            raise ValueError("duplicate game frame %r (records %d and %d)" % (key, at[key], i))
+        at[key] = i
+    parsed: Dict[int, Optional[Dict]] = {}
+
+    def example(i):
+        if i not in parsed:
+            parsed[i] = jsonl_example(recs[i], "")
+        return parsed[i]
+
+    out = []
+    for i, (rec, key) in enumerate(zip(recs, keys)):
+        j = at.get((key[0], key[1] + 1)) if key is not None else None
+        ex, nxt = (example(i), example(j)) if j is not None else (None, None)
+        same = ex is not None and nxt is not None and (
+            (ex["q"]["t"], render_options(ex["q"])) == (nxt["q"]["t"], render_options(nxt["q"])))
+        if not same:
+            out.append(rec)
+            continue
+        out.append(dict(rec, next_target=list(nxt["target"])))
+    return out
+
+
+def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] = None,
+                        next_targets: bool = False) -> List[Dict]:
+    """Load ``<root>/<name>/<split>.jsonl``; ``limit`` keeps the first records in file order. ``next_targets`` adds
+    each recorded game frame's ``next_target`` from the whole file (``with_next_targets``) before ``limit`` applies;
+    off, the examples are exactly as before."""
     base = os.path.join(root, name)
     with open(os.path.join(base, split + ".jsonl")) as f:
         recs = [json.loads(line) for line in f if line.strip()]
+    if next_targets:
+        recs = with_next_targets(recs)
     if limit:
         recs = recs[:limit]
     out = [jsonl_example(r, base, name) for r in recs]
