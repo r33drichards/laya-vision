@@ -1,0 +1,3549 @@
+{
+  "model": "autoresearch/full/long-sep24-b64-stack2/best",
+  "code": {
+    "commit": "c38f6ebe58678bc7dda80a085dbf6832f78a453a",
+    "branch": "claude/games-suite-frames",
+    "dirty": false
+  },
+  "parts": [
+    "games"
+  ],
+  "val_split": "val",
+  "started": "2026-09-24T17:59:21+00:00",
+  "datasets": null,
+  "latency": null,
+  "games": {
+    "atari": [
+      {
+        "game": "Freeway",
+        "model": "autoresearch/full/long-sep24-b64-stack2/best",
+        "frames": "stack-2",
+        "model_score": 25.666666666666668,
+        "model_scores": [
+          27.0,
+          26.0,
+          24.0
+        ],
+        "model_steps": [
+          2048,
+          2048,
+          2048
+        ],
+        "model_capped": 0,
+        "actions": {
+          "UP": 5408,
+          "NOOP": 424,
+          "DOWN": 312
+        },
+        "random_score": 0.0,
+        "expert_score": 34.0,
+        "baseline_random": 0.0,
+        "baseline_capped": true,
+        "normalized": 0.7549019607843137,
+        "seconds": 581.6
+      },
+      {
+        "game": "Breakout",
+        "model": "autoresearch/full/long-sep24-b64-stack2/best",
+        "frames": "stack-2",
+        "model_score": 14.333333333333334,
+        "model_scores": [
+          24.0,
+          11.0,
+          8.0
+        ],
+        "model_steps": [
+          788,
+          575,
+          404
+        ],
+        "model_capped": 0,
+        "actions": {
+          "FIRE": 1008,
+          "NOOP": 325,
+          "LEFT": 247,
+          "RIGHT": 187
+        },
+        "random_score": 0.8,
+        "expert_score": 218.0,
+        "baseline_random": 1.2,
+        "baseline_capped": true,
+        "normalized": 0.060578105781057816,
+        "seconds": 137.3
+      },
+      {
+        "game": "Galaxian",
+        "model": "autoresearch/full/long-sep24-b64-stack2/best",
+        "frames": "stack-2",
+        "model_score": 1280.0,
+        "model_scores": [
+          820.0,
+          1570.0,
+          1450.0
+        ],
+        "model_steps": [
+          915,
+          1107,
+          1027
+        ],
+        "model_capped": 0,
+        "actions": {
+          "FIRE": 2386,
+          "LEFT": 72,
+          "RIGHT": 355,
+          "LEFTFIRE": 188,
+          "RIGHTFIRE": 28,
+          "NOOP": 20
+        },
+        "random_score": 673.0,
+        "expert_score": null,
+        "baseline_random": null,
+        "baseline_capped": false,
+        "normalized": null,
+        "seconds": 304.2
+      }
+    ],
+    "doom": {
+      "expert": {
+        "policy": "expert",
+        "episodes": 50,
+        "mean_reward": 75.8,
+        "std_reward": 8.690224392960172,
+        "kill_rate": 1.0,
+        "mean_steps": 6.8,
+        "actions": {
+          "MOVE_RIGHT": 106,
+          "ATTACK": 100,
+          "MOVE_LEFT": 134
+        },
+        "seconds": 0.7
+      },
+      "random": {
+        "policy": "random",
+        "episodes": 50,
+        "mean_reward": -121.86,
+        "std_reward": 186.01430160071024,
+        "kill_rate": 0.68,
+        "mean_steps": 39.38,
+        "actions": {
+          "MOVE_RIGHT": 687,
+          "MOVE_LEFT": 616,
+          "ATTACK": 666
+        },
+        "seconds": 1.9
+      },
+      "always_attack": {
+        "policy": "always_attack",
+        "episodes": 50,
+        "mean_reward": -325.56,
+        "std_reward": 181.7999075907356,
+        "kill_rate": 0.18,
+        "mean_steps": 63.02,
+        "actions": {
+          "ATTACK": 3151
+        },
+        "seconds": 3.0
+      },
+      "model": {
+        "policy": "model:autoresearch/full/long-sep24-b64-stack2/best",
+        "episodes": 50,
+        "mean_reward": 76.36,
+        "std_reward": 8.337289727483387,
+        "kill_rate": 1.0,
+        "mean_steps": 6.66,
+        "actions": {
+          "MOVE_RIGHT": 106,
+          "ATTACK": 100,
+          "MOVE_LEFT": 127
+        },
+        "seconds": 41.2,
+        "frames": "stack-2"
+      }
+    },
+    "maze": [
+      {
+        "game": "maze",
+        "size": 4,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 334,
+          "RIGHT": 368,
+          "UP": 34,
+          "LEFT": 68
+        },
+        "results": [
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 1.0,
+        "efficiency": 1.0,
+        "mean_steps": 16.08,
+        "policy": "expert",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 4,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 811,
+          "UP": 792,
+          "LEFT": 814,
+          "RIGHT": 785
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 40
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 26
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 28
+          },
+          {
+            "solved": true,
+            "steps": 50,
+            "optimal": 16,
+            "bumps": 20
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 25
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 33
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 21
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 57
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 39
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 46
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 50
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 53
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 29
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 26
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 40
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 26
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 31
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 39
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 45
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 35
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 48
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 36
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 37
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 45
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 40
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 37
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 56
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 22
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 25
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 29
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 29
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 59
+          }
+        ],
+        "solve_rate": 0.02,
+        "efficiency": 0.32,
+        "mean_steps": 64.04,
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 4,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 312,
+          "RIGHT": 1262,
+          "UP": 81,
+          "LEFT": 302
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 43
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 13,
+            "optimal": 12,
+            "bumps": 1
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 42
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 48
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 106
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 72
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 41
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 68
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 42
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 74
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 76
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 0.58,
+        "efficiency": 0.9973474801061009,
+        "mean_steps": 39.14,
+        "policy": "model:autoresearch/full/long-sep24-b64-stack2/best",
+        "seconds": 245.9,
+        "frames": "stack-2"
+      },
+      {
+        "game": "maze",
+        "size": 6,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 706,
+          "RIGHT": 724,
+          "UP": 206,
+          "LEFT": 224
+        },
+        "results": [
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 64,
+            "optimal": 64,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 1.0,
+        "efficiency": 1.0,
+        "mean_steps": 37.2,
+        "policy": "expert",
+        "seconds": 0.1
+      },
+      {
+        "game": "maze",
+        "size": 6,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 1866,
+          "UP": 1862,
+          "LEFT": 1882,
+          "RIGHT": 1830
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 73
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 99
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 45
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 95
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 77
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 51
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 49
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 72
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 91
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 80
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 81
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 51
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 84
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 69
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 108
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 64
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 84
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 70
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 97
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 81
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 48
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 80
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 98
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 71
+          },
+          {
+            "solved": false,
+            "steps": 256,
+            "optimal": 64,
+            "bumps": 141
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 99
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 66
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 109
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 100
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 63
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 81
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 86
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 51
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 107
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 102
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 95
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 126
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 132
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 68
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 84
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 62
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 59
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 95
+          }
+        ],
+        "solve_rate": 0.0,
+        "efficiency": 0.0,
+        "mean_steps": 148.8,
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 6,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "RIGHT": 3604,
+          "DOWN": 1291,
+          "UP": 1045,
+          "LEFT": 1311
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 112
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 192
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 188
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 138
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 158
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 28
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 94
+          },
+          {
+            "solved": true,
+            "steps": 25,
+            "optimal": 24,
+            "bumps": 1
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 136
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 146
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 144
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 172
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 132
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 124
+          },
+          {
+            "solved": false,
+            "steps": 256,
+            "optimal": 64,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 148
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 106
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 181
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 138
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 22,
+            "optimal": 20,
+            "bumps": 2
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 160
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 208
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 236
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 154
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 110
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 170
+          }
+        ],
+        "solve_rate": 0.06,
+        "efficiency": 0.9563636363636364,
+        "mean_steps": 145.02,
+        "policy": "model:autoresearch/full/long-sep24-b64-stack2/best",
+        "seconds": 879.2,
+        "frames": "stack-2"
+      },
+      {
+        "game": "maze",
+        "size": 8,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 1086,
+          "RIGHT": 1088,
+          "UP": 386,
+          "LEFT": 388
+        },
+        "results": [
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 68,
+            "optimal": 68,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 88,
+            "optimal": 88,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 84,
+            "optimal": 84,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 68,
+            "optimal": 68,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 88,
+            "optimal": 88,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 80,
+            "optimal": 80,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 100,
+            "optimal": 100,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 92,
+            "optimal": 92,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 88,
+            "optimal": 88,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 1.0,
+        "efficiency": 1.0,
+        "mean_steps": 58.96,
+        "policy": "expert",
+        "seconds": 0.3
+      },
+      {
+        "game": "maze",
+        "size": 8,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 2957,
+          "UP": 2927,
+          "LEFT": 2970,
+          "RIGHT": 2938
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 124
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 149
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 151
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 164
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 132
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 106
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 98
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 164
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 115
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 143
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 109
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 90
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 221
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 87
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 105
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 160
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 336,
+            "optimal": 84,
+            "bumps": 168
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 111
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 103
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 179
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 110
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 112
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 158
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 132
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 89
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 154
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 108
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 97
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 155
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 93
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 131
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 91
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 169
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 116
+          },
+          {
+            "solved": false,
+            "steps": 320,
+            "optimal": 80,
+            "bumps": 203
+          },
+          {
+            "solved": false,
+            "steps": 400,
+            "optimal": 100,
+            "bumps": 204
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 181
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 90
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 140
+          },
+          {
+            "solved": false,
+            "steps": 368,
+            "optimal": 92,
+            "bumps": 193
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 206
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 117
+          }
+        ],
+        "solve_rate": 0.0,
+        "efficiency": 0.0,
+        "mean_steps": 235.84,
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 8,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 7133,
+          "RIGHT": 2702,
+          "LEFT": 259,
+          "UP": 1698
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 203
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 303
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 239
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 223
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 52
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 174
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 279
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 223
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 302
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 176
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 350
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 126
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 176
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 170
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 173
+          },
+          {
+            "solved": false,
+            "steps": 336,
+            "optimal": 84,
+            "bumps": 328
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 68
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 157
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 189
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 135
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 300
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 188
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 68
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 280
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 239
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 159
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 302
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 190
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 176
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 1
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 1
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 266
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 158
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 350
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 320,
+            "optimal": 80,
+            "bumps": 316
+          },
+          {
+            "solved": false,
+            "steps": 400,
+            "optimal": 100,
+            "bumps": 398
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 300
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 170
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 159
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 238
+          },
+          {
+            "solved": false,
+            "steps": 368,
+            "optimal": 92,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 351
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 202
+          }
+        ],
+        "solve_rate": 0.0,
+        "efficiency": 0.0,
+        "mean_steps": 235.84,
+        "policy": "model:autoresearch/full/long-sep24-b64-stack2/best",
+        "seconds": 1454.9,
+        "frames": "stack-2"
+      }
+    ],
+    "snake": [
+      {
+        "game": "snake",
+        "size": 10,
+        "episodes": 20,
+        "seed": 200000,
+        "actions": {
+          "UP": 1108,
+          "LEFT": 1061,
+          "RIGHT": 1023,
+          "DOWN": 1097
+        },
+        "results": [
+          {
+            "eaten": 24,
+            "steps": 207,
+            "end": "self"
+          },
+          {
+            "eaten": 24,
+            "steps": 228,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 269,
+            "end": "self"
+          },
+          {
+            "eaten": 40,
+            "steps": 385,
+            "end": "self"
+          },
+          {
+            "eaten": 22,
+            "steps": 209,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 220,
+            "end": "self"
+          },
+          {
+            "eaten": 31,
+            "steps": 271,
+            "end": "self"
+          },
+          {
+            "eaten": 24,
+            "steps": 194,
+            "end": "wall"
+          },
+          {
+            "eaten": 21,
+            "steps": 198,
+            "end": "self"
+          },
+          {
+            "eaten": 23,
+            "steps": 139,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 283,
+            "end": "self"
+          },
+          {
+            "eaten": 26,
+            "steps": 222,
+            "end": "self"
+          },
+          {
+            "eaten": 4,
+            "steps": 21,
+            "end": "wall"
+          },
+          {
+            "eaten": 27,
+            "steps": 208,
+            "end": "self"
+          },
+          {
+            "eaten": 32,
+            "steps": 237,
+            "end": "self"
+          },
+          {
+            "eaten": 29,
+            "steps": 252,
+            "end": "wall"
+          },
+          {
+            "eaten": 30,
+            "steps": 272,
+            "end": "self"
+          },
+          {
+            "eaten": 15,
+            "steps": 100,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 210,
+            "end": "wall"
+          },
+          {
+            "eaten": 22,
+            "steps": 164,
+            "end": "self"
+          }
+        ],
+        "mean_eaten": 25.1,
+        "max_eaten": 40,
+        "mean_steps": 214.45,
+        "ends": {
+          "self": 16,
+          "wall": 4
+        },
+        "policy": "expert",
+        "seconds": 0.2
+      },
+      {
+        "game": "snake",
+        "size": 10,
+        "episodes": 20,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 79,
+          "UP": 74,
+          "LEFT": 79,
+          "RIGHT": 64
+        },
+        "results": [
+          {
+            "eaten": 0,
+            "steps": 10,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 12,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 28,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 15,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 18,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 16,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 5,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 7,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 9,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 16,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 20,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 17,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 18,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 38,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 9,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 5,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 19,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 9,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 17,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 8,
+            "end": "wall"
+          }
+        ],
+        "mean_eaten": 0.1,
+        "max_eaten": 1,
+        "mean_steps": 14.8,
+        "ends": {
+          "wall": 20
+        },
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "snake",
+        "size": 10,
+        "episodes": 20,
+        "seed": 200000,
+        "actions": {
+          "UP": 168,
+          "LEFT": 165,
+          "DOWN": 160,
+          "RIGHT": 133
+        },
+        "results": [
+          {
+            "eaten": 1,
+            "steps": 11,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 21,
+            "end": "wall"
+          },
+          {
+            "eaten": 7,
+            "steps": 52,
+            "end": "wall"
+          },
+          {
+            "eaten": 7,
+            "steps": 75,
+            "end": "self"
+          },
+          {
+            "eaten": 2,
+            "steps": 38,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 8,
+            "end": "wall"
+          },
+          {
+            "eaten": 3,
+            "steps": 38,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 14,
+            "end": "wall"
+          },
+          {
+            "eaten": 3,
+            "steps": 33,
+            "end": "wall"
+          },
+          {
+            "eaten": 3,
+            "steps": 30,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 24,
+            "end": "wall"
+          },
+          {
+            "eaten": 7,
+            "steps": 53,
+            "end": "self"
+          },
+          {
+            "eaten": 7,
+            "steps": 59,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 7,
+            "end": "wall"
+          },
+          {
+            "eaten": 6,
+            "steps": 50,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 7,
+            "end": "self"
+          },
+          {
+            "eaten": 1,
+            "steps": 8,
+            "end": "wall"
+          },
+          {
+            "eaten": 3,
+            "steps": 23,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 10,
+            "end": "wall"
+          },
+          {
+            "eaten": 7,
+            "steps": 65,
+            "end": "self"
+          }
+        ],
+        "mean_eaten": 3.4,
+        "max_eaten": 7,
+        "mean_steps": 31.3,
+        "ends": {
+          "wall": 16,
+          "self": 4
+        },
+        "policy": "model:autoresearch/full/long-sep24-b64-stack2/best",
+        "seconds": 92.7,
+        "frames": "stack-2"
+      }
+    ],
+    "control": [
+      {
+        "game": "CartPole",
+        "model": "autoresearch/full/long-sep24-b64-stack2/best",
+        "frames": "stack-2",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": 23.5,
+        "model_scores": [
+          16.0,
+          34.0,
+          12.0,
+          41.0,
+          11.0,
+          49.0,
+          13.0,
+          35.0,
+          14.0,
+          10.0
+        ],
+        "model_solved": 0.0,
+        "model_steps": 23.5,
+        "actions": {
+          "LEFT": 103,
+          "RIGHT": 132
+        },
+        "random_score": 20.9,
+        "random_solved": 0.0,
+        "expert_score": 500.0,
+        "expert_solved": 1.0,
+        "solved_at": 475.0,
+        "normalized": 0.00542684199540806,
+        "seconds": 36.5
+      },
+      {
+        "game": "Acrobot",
+        "model": "autoresearch/full/long-sep24-b64-stack2/best",
+        "frames": "stack-2",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": -107.5,
+        "model_scores": [
+          -133.0,
+          -142.0,
+          -165.0,
+          -96.0,
+          -73.0,
+          -108.0,
+          -89.0,
+          -85.0,
+          -97.0,
+          -87.0
+        ],
+        "model_solved": 0.6,
+        "model_steps": 108.5,
+        "actions": {
+          "CLOCKWISE": 571,
+          "COUNTERCLOCKWISE": 514
+        },
+        "random_score": -500.0,
+        "random_solved": 0.0,
+        "expert_score": -84.6,
+        "expert_solved": 0.7,
+        "solved_at": -100.0,
+        "normalized": 0.944872412132884,
+        "seconds": 141.6
+      },
+      {
+        "game": "MountainCar",
+        "model": "autoresearch/full/long-sep24-b64-stack2/best",
+        "frames": "stack-2",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": -119.4,
+        "model_scores": [
+          -128.0,
+          -122.0,
+          -124.0,
+          -91.0,
+          -135.0,
+          -98.0,
+          -122.0,
+          -129.0,
+          -119.0,
+          -126.0
+        ],
+        "model_solved": 0.2,
+        "model_steps": 119.4,
+        "actions": {
+          "RIGHT": 772,
+          "LEFT": 422
+        },
+        "random_score": -200.0,
+        "random_solved": 0.0,
+        "expert_score": -121.7,
+        "expert_solved": 0.0,
+        "solved_at": -110.0,
+        "normalized": 1.0293742017879948,
+        "seconds": 112.5
+      },
+      {
+        "game": "LunarLander",
+        "model": "autoresearch/full/long-sep24-b64-stack2/best",
+        "frames": "stack-2",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": -202.6633,
+        "model_scores": [
+          -303.323,
+          -134.8,
+          -60.566,
+          -46.731,
+          -95.723,
+          -478.365,
+          -110.839,
+          -136.719,
+          -318.864,
+          -340.703
+        ],
+        "model_solved": 0.0,
+        "model_steps": 87.8,
+        "actions": {
+          "RIGHT_ENGINE": 46,
+          "NOOP": 423,
+          "MAIN_ENGINE": 390,
+          "LEFT_ENGINE": 19
+        },
+        "random_score": -177.11169999999998,
+        "random_solved": 0.0,
+        "expert_score": 273.15250000000003,
+        "expert_solved": 1.0,
+        "solved_at": 200.0,
+        "normalized": -0.056748015942639916,
+        "seconds": 86.2
+      }
+    ]
+  },
+  "minutes": 24.4,
+  "errors": []
+}

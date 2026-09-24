@@ -167,5 +167,25 @@ class History:
         return len(self.frames)
 
 
+def episode_policy(decide: Callable[[Any, Dict], Any], frame: Callable[[Any], Any], mode: str, family: str):
+    """``policy(env)`` for play loops that ask once per decision of one live episode at a time
+    (``laya.gridgames.play_episodes``, ``laya.controlgames.play_episodes``): it keeps the episode's frame history
+    (``frame(env)`` at each decision point; a new env object starts a new episode) and returns
+    ``decide(env, state)`` with ``state`` this mode's state of that history."""
+    hist, cur = History(frames_needed(mode, family)), {"env": None, "steps": None}
+
+    def policy(env):
+        if env is not cur["env"]:
+            hist.reset()
+            cur.update(env=env, steps=None)
+        if env.steps != cur["steps"]:
+            hist.push(frame(env))
+            cur["steps"] = env.steps
+        return decide(env, hist.state(mode, family))
+
+    return policy
+
+
 __all__ = ["GHOST", "MAX_FRAMES", "FAMILIES", "parse", "resolve", "frames_needed", "images_per_state", "mode_for",
-           "trail_weights", "window", "as_array", "blend", "state", "state_images", "History"]
+           "trail_weights", "window", "as_array", "blend", "state", "state_images", "History",
+           "episode_policy"]
