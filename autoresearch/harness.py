@@ -494,14 +494,17 @@ def build_pool():
 
 
 @app.function(image=image, timeout=10 * 60, volumes={"/ckpt": ckpt_vol})
-def prune_checkpoints(tag: str, keep: List[str]) -> List[str]:
-    """Delete this tag's saved checkpoints that are not in ``keep`` (the frontier); returns what was removed."""
+def prune_checkpoints(tag: str, prunable: List[str]) -> List[str]:
+    """Delete this tag's saved checkpoints whose commit is in ``prunable`` (``pareto.prunable``: finished in
+    results.tsv and off the frontier); returns what was removed. Any other directory, such as a concurrent run's
+    fresh checkpoint that is not in the TSV yet, is left alone."""
     import shutil
 
+    ckpt_vol.reload()
     base = os.path.join(ROOT, tag)
     removed = []
     for name in sorted(os.listdir(base)) if os.path.isdir(base) else []:
-        if name not in keep and os.path.exists(os.path.join(base, name, "vlm_agent_config.json")):
+        if name in prunable and os.path.exists(os.path.join(base, name, "vlm_agent_config.json")):
             shutil.rmtree(os.path.join(base, name))
             removed.append(name)
     ckpt_vol.commit()
@@ -632,7 +635,8 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         print("now dominates:    %s" % ", ".join(p["commit"] for p in beaten))
     print(pareto.show(pareto.read_tsv(tsv)))
     if prune:
-        keep = [r["commit"] for r in pareto.frontier(pareto.read_tsv(tsv))]
-        removed = prune_checkpoints.remote(tag, keep)
+        # only commits the TSV has finished with and that are off the frontier: a concurrent run's checkpoint is
+        # not in the TSV until that run decides, so it is never touched
+        removed = prune_checkpoints.remote(tag, pareto.prunable(pareto.read_tsv(tsv)))
         if removed:
             print("pruned checkpoints off the frontier: %s" % ", ".join(removed))

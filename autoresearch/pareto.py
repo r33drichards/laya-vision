@@ -83,6 +83,17 @@ def decide(front: Sequence[Dict], cand: Dict) -> Tuple[str, List[Dict]]:
     return "keep", [p for p in front if dominates(cand, p, eps=False)]
 
 
+FINISHED = ("keep", "discard", "crash")
+
+
+def prunable(rows: Sequence[Dict]) -> List[str]:
+    """Commits whose saved checkpoints may be deleted: recorded in the TSV with a finished status and not on the
+    frontier. A commit that is not in the TSV at all (a run still going, e.g. a concurrent experiment whose fresh
+    checkpoint is saved but not yet decided) is never among them, and neither is one that has any frontier row."""
+    front = {r["commit"] for r in frontier(rows)}
+    return sorted({r["commit"] for r in rows if r["status"] in FINISHED and r["commit"] not in front})
+
+
 def _normalized(p: Dict, base: Dict) -> Tuple[float, ...]:
     """A point with every objective turned into one to minimize against ``_ref()``:
     (-quality, -(games - floor), params / base params, latency / base latency)."""

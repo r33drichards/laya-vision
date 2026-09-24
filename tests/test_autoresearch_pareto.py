@@ -96,3 +96,29 @@ def test_cli_appends_rows_and_decides(tmp_path, capsys):
     P.main(["show", "--tsv", tsv])
     shown = capsys.readouterr().out
     assert "frontier (2)" in shown and "aaa" in shown and "ddd" in shown and "games" in shown
+
+
+def test_prunable_only_finished_commits_off_the_frontier():
+    base = pt(0.70, 256.0, 1.0, 0.1, "base")
+    small = pt(0.66, 160.0, 0.7, 0.1, "small")
+    beaten = pt(0.69, 256.0, 1.0, 0.1, "beaten")          # kept once, then strictly dominated by base
+    lost = pt(0.60, 300.0, 1.2, 0.0, "lost", "discard")
+    broke = pt(0.0, 0.0, 0.0, 0.0, "broke", "crash")
+    running = pt(0.0, 0.0, 0.0, 0.0, "running", "")       # a row without a finished status is never pruned
+    rows = [beaten, base, small, lost, broke, running]
+    assert {r["commit"] for r in P.frontier(rows)} == {"base", "small"}
+    got = P.prunable(rows)
+    assert got == ["beaten", "broke", "lost"]
+    # a commit not in the TSV (a concurrent run's fresh checkpoint) can never be selected
+    assert not set(got) & {"base", "small", "running", "concurrent"}
+    # a commit run twice, once on the frontier, stays
+    assert "small" not in P.prunable(rows + [pt(0.5, 400.0, 2.0, 0.0, "small", "discard")])
+    assert P.prunable([]) == []
+
+
+def test_prunable_round_trips_through_the_tsv(tmp_path):
+    tsv = str(tmp_path / "results.tsv")
+    P.append_tsv(tsv, pt(0.70, 256.0, 1.0, 0.1, "aaaaaaa"))
+    P.append_tsv(tsv, P.crash_row("bbbbbbb", "boom"))
+    P.append_tsv(tsv, pt(0.60, 256.0, 1.0, 0.1, "ccccccc", "discard"))
+    assert P.prunable(P.read_tsv(tsv)) == ["bbbbbbb", "ccccccc"]

@@ -49,9 +49,12 @@ modal run autoresearch/harness.py --tag <tag> > autoresearch/runs/<tag>/run.log 
 grep -A12 "^---" autoresearch/runs/<tag>/run.log        # the summary and the keep/discard status
 ```
 
-Running two experiments at once (each from its own commit): pass `--no-prune` to both. A finishing run prunes every
-checkpoint not on the frontier, including the other run's fresh one that is not in `results.tsv` yet (it crashed
-`0124a9d` in `sep23-v2`); prune later with a single run, or leave it.
+Running two experiments at once (each from its own commit) is safe: a finishing run prunes only the checkpoints of
+commits that `results.tsv` already records as keep / discard / crash and that are off the frontier
+(`pareto.prunable`), so the other run's fresh checkpoint, not in the TSV until that run decides, is never touched.
+(Before this, a finishing run pruned every directory off the frontier and crashed `0124a9d` in `sep23-v2`.) The one
+case to avoid is re-running a commit that is already in the TSV while another run finishes: its directory counts as
+finished. `--no-prune` still turns pruning off.
 
 Never pass `--detach`: the local entrypoint collects the result, decides and writes the files. The first run of a
 new harness version deploys it and snapshots the loaded data (slower); later runs restore that snapshot. A run is
@@ -66,7 +69,8 @@ The harness writes `autoresearch/runs/<tag>/<commit>.json` (every metric, per da
 commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 ```
 
-It also prunes saved checkpoints that are no longer on the frontier from `/ckpt/autoresearch/<tag>/`.
+It also prunes, from `/ckpt/autoresearch/<tag>/`, the saved checkpoints of finished commits that are no longer on the
+frontier (never a directory whose commit is not in `results.tsv`).
 
 ## The loop
 
