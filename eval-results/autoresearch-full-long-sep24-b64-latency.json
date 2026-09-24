@@ -1,0 +1,29 @@
+{
+  "model": "autoresearch/full/long-sep24-b64/best",
+  "code": {
+    "commit": "e405ed2dc09b8625c861d42fa390545121581f3a",
+    "branch": "claude/eager-thompson-mui6to",
+    "dirty": false
+  },
+  "parts": [
+    "latency"
+  ],
+  "val_split": "val",
+  "started": "2026-09-24T04:38:49+00:00",
+  "datasets": null,
+  "latency": {
+    "run": "autoresearch/full/long-sep24-b64/best",
+    "gpu": "NVIDIA L4",
+    "dtype": "bf16",
+    "n": 165,
+    "split_edge": 0,
+    "max_len": 1024,
+    "median_ms": 40.793622999999,
+    "p90_ms": 46.277964799996596,
+    "mean_input_tokens": 130.84848484848484,
+    "mean_views_per_image": 1.0
+  },
+  "games": null,
+  "minutes": 0.8,
+  "errors": []
+}
