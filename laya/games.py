@@ -85,6 +85,10 @@ CONTROL_GOALS = {
     "MountainCar": "The car is too weak to drive straight up; rock back and forth to build speed and reach the "
                    "flag on the right hill.",
     "LunarLander": "Fire the engines to land the lander gently and upright between the two flags.",
+    "InvertedPendulum": "A pole is hinged on a cart that slides along a rail; push the cart left or right to keep "
+                        "the pole upright.",
+    "InvertedDoublePendulum": "Two poles are hinged end to end on a cart that slides along a rail; push the cart "
+                              "left or right to keep both poles upright.",
 }
 CONTROL_ACTIONS = {
     "CartPole": {"LEFT": "push the cart left", "RIGHT": "push the cart right"},
@@ -93,11 +97,16 @@ CONTROL_ACTIONS = {
     "MountainCar": {"LEFT": "accelerate left", "NONE": "do not accelerate", "RIGHT": "accelerate right"},
     "LunarLander": {"NOOP": "do nothing", "LEFT_ENGINE": "fire the left orientation engine",
                     "MAIN_ENGINE": "fire the main engine", "RIGHT_ENGINE": "fire the right orientation engine"},
+    "InvertedPendulum": {"LEFT": "push the cart left", "NONE": "do not push", "RIGHT": "push the cart right"},
+    "InvertedDoublePendulum": {"HARD_LEFT": "push the cart left hard", "LEFT": "push the cart left gently",
+                               "NONE": "do not push", "RIGHT": "push the cart right gently",
+                               "HARD_RIGHT": "push the cart right hard"},
 }
 
 
 def control_question(game: str) -> Dict:
-    """The question for a ``laya.controlgames`` game; the screen ghosts the previous frame to show motion."""
+    """The question for a ``laya.controlgames`` or ``laya.mujocogames`` game; the screen ghosts the previous frame
+    to show motion."""
     return {"action": {
         "type": "choice",
         "instructions": "You are playing the control task %s. %s A faint copy shows where things were one step "

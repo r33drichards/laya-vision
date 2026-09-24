@@ -19,6 +19,27 @@ no extra flag (`--frames 1|2` overrides); `--sample` draws from the probabilitie
 Trained for 7 minutes on 20,000 auto-labelled frames, a checkpoint plays ViZDoom `basic` at expert level (mean
 reward +75.4 against the expert's +75.8 over 50 unseen episodes).
 
+## Record a MuJoCo pendulum
+
+[`laya/mujocogames.py`](https://github.com/r33drichards/laya-vision/blob/main/laya/mujocogames.py) wraps Gymnasium's
+MuJoCo `InvertedPendulum-v5` and `InvertedDoublePendulum-v5` the way `laya/controlgames.py` wraps classic control:
+the image is the ghosted screen, from a fixed side view, and the question is `laya.games.control_question`. MuJoCo
+actions are continuous, so the model picks among named pushes: `LEFT`, `NONE`, `RIGHT` for the single pole, and
+gentle and hard pushes each way for the double pole. A scripted expert (a linear controller, and an LQR rounded to the
+nearest push) keeps each pole up for the full 1000 steps; random play falls within about 5.
+[`examples/mujoco_video.py`](https://github.com/r33drichards/laya-vision/blob/main/examples/mujoco_video.py) records
+an episode, with the chosen push and the model's probabilities beside the screen:
+
+```bash
+pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]"
+python examples/mujoco_video.py --policy expert --out expert.webm
+python examples/mujoco_video.py --game InvertedDoublePendulum --policy model \
+    --model thaitea/laya-vision --revision 8b318c99d7ad3ce19c24369263463882eada9d1e --out model.webm
+```
+
+On a machine with no display it renders through EGL (`apt-get install libegl1`), or set `MUJOCO_GL=osmesa`
+(`libosmesa6`). The pendulums are not in the games suite yet, and no checkpoint has been trained on them.
+
 ## Score a checkpoint on the games suite
 
 ```bash
