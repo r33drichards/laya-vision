@@ -23,6 +23,8 @@
     modal run --detach modal_app.py::split_bench      # SmolVLM2, image splitting off vs 1024 vs 2048 on a 6-set subset:
                                                      # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
     modal run modal_app.py::bench_prefix_cache       # predict latency, prefix cache off vs on, L4 bf16
+    modal run modal_app.py::serving_throughput       # requests/s and $ per 1M requests, predict one at a time vs
+                                                     # batched across callers, L4 -> results/raw/ (--gpu H100 ...)
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
@@ -2111,6 +2113,71 @@ def decision_vs_generation(output: str = "results/raw/decision-vs-generation-l4.
     if dirty:
         print("warning: uncommitted changes; the report records git_sha=%s with dirty=true" % sha)
     report = json.loads(decision_vs_generation_run.remote(sha, dirty, repeats, warmup, max_new_tokens, dtype, run))
+    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+    with open(output, "w") as f:
+        f.write(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+    print(json.dumps(summary(report), indent=2))
+    print("wrote", output)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Serving throughput: requests/second per GPU container, sequential versus batched (benchmarks/serving_throughput.py)
+# ---------------------------------------------------------------------------------------------------------
+
+SERVING_CPU, SERVING_MEMORY_GIB = 8, 16
+
+
+@app.function(image=bench_image, gpu="L4", cpu=SERVING_CPU, memory=SERVING_MEMORY_GIB * 1024, timeout=45 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only()},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])  # the token only lifts the Hub's download rate limit
+def serving_throughput_run(git_sha: str, git_dirty: bool, gpu_name: str = "L4", n: int = 512,
+                           datasets: str = "vqa", dtype: str = "bf16", seed: int = 0) -> str:
+    """Time the pinned thaitea/laya-vision revision on ``n`` real val requests (one image, one question each, drawn
+    evenly from ``datasets``) and return the report as JSON text."""
+    import random
+
+    from PIL import Image
+
+    os.environ["LAYA_GIT_SHA"], os.environ["LAYA_GIT_DIRTY"] = git_sha, str(git_dirty)
+    sys.path.insert(0, "/root")
+    from benchmarks.serving_throughput import run
+
+    names = _ready(datasets)
+    rng = random.Random(seed)
+    per = max(1, n // max(1, len(names)))
+    cases = []
+    for name in names:
+        exs = [ex for ex in _load_split(name, "val", 0) if isinstance(ex["state"], dict) and ex["state"].get("image")]
+        for ex in rng.sample(exs, min(per, len(exs))):
+            state = dict(ex["state"])
+            with Image.open(state["image"]) as im:  # decoded before any clock starts, as bench_latency does
+                state["image"] = im.convert("RGB")
+            cases.append((state, _public_question(ex["q"])))
+    rng.shuffle(cases)  # mix the sets inside every batch
+    report = run(cases, gpu_name=gpu_name, cpu_cores=SERVING_CPU, memory_gib=SERVING_MEMORY_GIB, dtype=dtype,
+                 dataset_note="%s val, seed %d, %d per set" % (",".join(names), seed, per))
+    hf_vol.commit()
+    return json.dumps(report, ensure_ascii=False, allow_nan=False)
+
+
+@app.local_entrypoint()
+def serving_throughput(output: str = "results/raw/serving-throughput-l4.json", gpu: str = "L4", n: int = 512,
+                       datasets: str = "vqa", dtype: str = "bf16"):
+    """modal run modal_app.py::serving_throughput [--output results/raw/<new>.json] [--gpu A10G|H100]
+
+    Requests/second and $ per million requests for one container, ``predict`` one at a time versus requests
+    batched across callers, and the raw report to ``--output``, which must not exist yet."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from benchmarks.serving_throughput import summary
+
+    if os.path.exists(output):
+        raise SystemExit("%s exists; pass a new --output" % output)
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
+    if dirty:
+        print("warning: uncommitted changes; the report records git_sha=%s with dirty=true" % sha)
+    fn = serving_throughput_run.with_options(gpu=gpu) if gpu != "L4" else serving_throughput_run
+    report = json.loads(fn.remote(sha, dirty, gpu, n, datasets, dtype))
     os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
     with open(output, "w") as f:
         f.write(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
