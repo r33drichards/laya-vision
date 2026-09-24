@@ -5,8 +5,11 @@ Data layout (``site-docs/reference/atari-data-format.md``): ``<root>/<source>/<G
 ``meta.json`` + ``_READY``. Each record becomes a ``choice`` example tagged ``dataset = "<source>/<Game>"`` and
 ``game``. A record's optional soft ``target`` is the training target; otherwise it is one-hot from ``label``.
 Training balances games, not sources: every game gets an equal share of samples and, within a game, the frames
-of all its sources are pooled. With ``frames=2`` the state is ``{"images": [prev_image, image]}`` (oldest first;
-records without ``prev_image`` repeat ``image``), and play keeps the previous observation by the same rule.
+of all its sources are pooled. ``frames`` is a ``laya.frames`` game frame mode (or an int N, meaning ``stack-N``):
+with ``stack-2`` the state is ``{"images": [prev_image, image]}`` (oldest first; records without ``prev_image``
+repeat ``image``). A record's ``history`` (``experthist``: up to 4 previous decision screens, oldest first) serves
+any ``stack-N`` / ``trail-N``, padded at an episode's start by repeating its first frame, and play keeps the same
+history of observations by the same rule.
 
 Local smoke test (a tiny synthetic dataset from real ALE frames, 2 CPU training steps, a few play steps):
     python -m laya.atari_train --smoke /tmp/atari_synth [--frames 2]
@@ -21,6 +24,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import torch
 
+from . import frames as F
 from .common import QTYPES, render_options, temp_bucket
 from .games import atari_question
 from .preprocess import FrameFeatureCache
@@ -64,9 +68,30 @@ def even_subsample(items: List, n: Optional[int]) -> List:
     return [items[int(i * len(items) / n)] for i in range(n)]
 
 
-def load_split(ds: Dict, split: str, limit: Optional[int] = None, frames: int = 1) -> List[Dict]:
-    """Examples from one ready dataset's ``<split>.jsonl``; ``limit`` subsamples evenly. ``frames=2`` makes the
-    state ``{"images": [prev_image, image]}``."""
+def frame_mode(frames) -> str:
+    """A ``laya.frames`` mode from the old ``frames`` count (1 -> ``single``, N -> ``stack-N``) or a mode string."""
+    if isinstance(frames, str) and not frames.isdigit():
+        F.parse(frames)
+        return frames
+    n = int(frames)
+    return "single" if n == 1 else "stack-%d" % n
+
+
+def record_history(r: Dict, root: str) -> List[str]:
+    """A record's previous decision screens as paths, oldest first: ``history`` (``experthist``), else
+    ``[prev_image]`` (``expert2f``; a copy of ``image`` at an episode's start, which ``window`` makes anyway),
+    else none."""
+    if r.get("history") is not None:
+        return [os.path.join(root, p) for p in r["history"]]
+    if r.get("prev_image"):
+        return [os.path.join(root, r["prev_image"])]
+    return []
+
+
+def load_split(ds: Dict, split: str, limit: Optional[int] = None, frames=1) -> List[Dict]:
+    """Examples from one ready dataset's ``<split>.jsonl``; ``limit`` subsamples evenly. ``frames`` is the game
+    frame mode (``frame_mode``): ``2`` (``stack-2``) makes the state ``{"images": [prev_image, image]}``."""
+    mode = frame_mode(frames)
     path = os.path.join(ds["dir"], split + ".jsonl")
     if not os.path.exists(path):
         return []
@@ -79,9 +104,10 @@ def load_split(ds: Dict, split: str, limit: Optional[int] = None, frames: int = 
             ex.update(game=ds["game"], source=ds["source"], episode=r.get("episode"),
                       taken=r.get("taken", ex["label"]), rtg=r.get("return_to_go"),
                       episode_score=r.get("episode_score"))
-            if frames == 2:
-                cur = ex["state"]["image"]
-                ex["state"] = {"images": [os.path.join(ds["dir"], r["prev_image"]) if r.get("prev_image") else cur, cur]}
+            if mode != "single":
+                rest = {k: v for k, v in ex["state"].items() if k != "image"}
+                ex["state"] = dict(rest, **F.state(record_history(r, ds["dir"]) + [ex["state"]["image"]], mode,
+                                                   "atari"))
             out.append(ex)
     return out
 
@@ -114,7 +140,7 @@ def hold_out_episodes(examples: List[Dict], n: int, seed: int = 0, max_frac: flo
 
 def load_atari(root: str = ATARI_ROOT, sources: Optional[Sequence[str]] = None, games: Optional[Sequence[str]] = None,
                n_calib: int = 60, val_limit: Optional[int] = None, train_limit: Optional[int] = None,
-               seed: int = 0, frames: int = 1) -> Dict:
+               seed: int = 0, frames=1) -> Dict:
     """``{"datasets", "train", "calib", "val"}`` over every ready (source, game); prints what was found."""
     found = ready_datasets(root, sources, games)
     train, calib, val = [], [], []
@@ -245,30 +271,32 @@ def encode_frames(agent: VLMAgent, frames: Sequence[np.ndarray]) -> torch.Tensor
 @torch.no_grad()
 def action_probs(agent: VLMAgent, frames: Sequence[np.ndarray], question: Dict,
                  prev_frames: Optional[Sequence[np.ndarray]] = None, return_act: bool = False,
-                 cache: Optional["FrameFeatureCache"] = None):
+                 cache: Optional["FrameFeatureCache"] = None, stacks: Optional[Sequence[Sequence[np.ndarray]]] = None):
     """Calibrated action probabilities (actions order) for several RGB frames in one forward pass.
 
     Same sequence, option order and temperature as ``agent.predict({"image": frame}, ...)`` with one permutation,
-    or ``{"images": [prev, frame]}`` when ``prev_frames`` is given. ``return_act`` also returns the act head's
-    P(act) per frame (the decide-or-escalate gate).
+    or ``{"images": [prev, frame]}`` when ``prev_frames`` is given, or ``{"images": stack}`` for each row of
+    ``stacks`` (N frames each, oldest first; ``frames`` is then only counted). ``return_act`` also returns the act
+    head's P(act) per frame (the decide-or-escalate gate).
 
-    With a ``cache`` the vision tower runs only on frames it has not seen: in two-frame play this step's current
-    frame is next step's previous frame, so the image encoder does half the work. The language model still sees
-    the same features, so the answer is unchanged (``tests/test_vlm.py`` checks that).
+    With a ``cache`` the vision tower runs only on frames it has not seen: in N-frame play this step's frames are
+    the next steps' older frames, so the image encoder encodes each frame once instead of N times. The language
+    model still sees the same features, so the answer is unchanged (``tests/test_vlm.py`` checks that).
     """
     q = VLMAgent._to_internal(question)
     k = len(render_options(q))
+    if stacks is None:
+        stacks = [(fr,) if prev_frames is None else (prev_frames[j], fr) for j, fr in enumerate(frames)]
     items = []
-    for j, fr in enumerate(frames):
-        state = {"image": fr} if prev_frames is None else {"images": [prev_frames[j], fr]}
+    for st in stacks:
+        state = {"image": st[0]} if len(st) == 1 else {"images": list(st)}
         it = build_vlm_inputs(agent.processor, state, q, agent.cfg.get("max_len", 1024), agent.cfg.get("head_max_len", 256))
         it["qtype"] = QTYPES["choice"]
         items.append(it)
     b = collate_vlm(items, agent.processor.tokenizer.pad_token_id)
     dev, dtype = agent.device, agent.model.encoder.dtype
     if cache is not None:
-        flat = [f for j in range(len(frames)) for f in ((frames[j],) if prev_frames is None
-                                                        else (prev_frames[j], frames[j]))]
+        flat = [f for st in stacks for f in st]
         pix = dict(image_hidden_states=torch.stack(cache.features(lambda fs: encode_frames(agent, fs), flat)))
     elif b["pixel_values"] is not None:
         pix = dict(pixel_values=b["pixel_values"].to(dev, dtype), pixel_attention_mask=b["pixel_attention_mask"].to(dev))
@@ -292,6 +320,11 @@ def play(game: str, policy: Callable[[List[np.ndarray], List[np.ndarray], List[i
     ``examples/atari_live.py``, FIRE is pressed on reset and after each lost life (not counted as agent steps).
     The previous frame is a copy of the current one on an episode's first step and on the first step after an
     auto-FIRE (the ``expert2f`` data rule). Episodes stop at game over or after ``max_steps`` agent steps.
+
+    A policy with a true ``wants_history`` attribute is also passed ``hists=``: per live episode, its observations
+    at the decision points since the last reset or auto-FIRE, oldest first, ending with the current one (at most
+    ``laya.frames.MAX_FRAMES``). That is the ``experthist`` recording rule, and ``laya.frames.state`` builds any
+    frame mode from it.
     """
     import ale_py
     import gymnasium as gym
@@ -309,10 +342,14 @@ def play(game: str, policy: Callable[[List[np.ndarray], List[np.ndarray], List[i
         obs.append(o)
         lives.append(info.get("lives", 0))
     prev = list(obs)
+    hist = [[o] for o in obs]
     counts = Counter()
+    with_hist = bool(getattr(policy, "wants_history", False))
     while not all(done):
         live = [i for i in range(episodes) if not done[i]]
-        for i, a in zip(live, policy([obs[i] for i in live], [prev[i] for i in live], live)):
+        args = ([obs[i] for i in live], [prev[i] for i in live], live)
+        acts = policy(*args, hists=[list(hist[i]) for i in live]) if with_hist else policy(*args)
+        for i, a in zip(live, acts):
             prev[i] = obs[i]
             o, r, term, trunc, info = envs[i].step(int(a))
             counts[actions[int(a)]] += 1
@@ -322,8 +359,10 @@ def play(game: str, policy: Callable[[List[np.ndarray], List[np.ndarray], List[i
                 o, r, term, trunc, info = envs[i].step(fire)
                 score[i] += r
                 prev[i] = o
+                hist[i] = []
             lives[i] = info.get("lives", lives[i])
             obs[i] = o
+            hist[i] = (hist[i] + [o])[-F.MAX_FRAMES:]
             if term or trunc or steps[i] >= max_steps:
                 done[i], capped[i] = True, not (term or trunc)
     for env in envs:
@@ -333,16 +372,18 @@ def play(game: str, policy: Callable[[List[np.ndarray], List[np.ndarray], List[i
 
 
 def model_policy(agent: VLMAgent, game: str, actions: Sequence[str], sample: bool = False, seed: int = 0,
-                 frames: int = 1, gate: bool = False, stats: Optional[Dict] = None,
+                 frames=1, gate: bool = False, stats: Optional[Dict] = None,
                  cache_features: Optional[bool] = None, cuda_graph: bool = False) -> Callable:
     """Greedy (the most likely action, as ``predict``'s ``choice``) or sampled from the calibrated probabilities.
 
+    ``frames`` is the game frame mode (``frame_mode``: 1, 2 = ``stack-2``, or any ``laya.frames`` mode string).
     ``frames=2`` gives the model ``[previous, current]``, and reuses the encoder output each frame already earned
-    as the step before's current frame (see ``FrameFeatureCache``). With ``gate``, the act head decides: when it
+    as the step before's current frame (see ``FrameFeatureCache``); ``stack-N`` does the same over N frames (the
+    policy then asks ``play`` for the history), and ``trail-N`` blends the last N observations into one image. With ``gate``, the act head decides: when it
     says escalate rather than act, the previous action is repeated instead of taking the model's choice
     (``stats``, if given, counts the gated steps).
 
-    ``cache_features`` defaults to on for two frames on the device-side path and off otherwise. It is a loss on the
+    ``cache_features`` defaults to on for stacked frames on the device-side path and off otherwise. It is a loss on the
     Hugging Face processor path: caching means preprocessing frames one at a time, and the processor costs ~33 ms
     of CPU per frame either way, so the lost batching outweighs the halved encoder work (measured on an L4:
     11.2 decisions/s uncached against 8.7 cached, versus 38.4 against 53.1 on the device-side path).
@@ -356,22 +397,31 @@ def model_policy(agent: VLMAgent, game: str, actions: Sequence[str], sample: boo
     last: Dict[int, int] = {}
     if cache_features is None:
         cache_features = agent.prep.on_gpu
-    cache = FrameFeatureCache() if frames == 2 and cache_features and not cuda_graph else None
+    kind, n = F.resolve(frame_mode(frames), "atari")
+    stacked = kind == "stack" and n > 1
+    if cuda_graph and (n > 2 or (kind == "trail" and n > 1)):
+        raise ValueError("cuda_graph plays one frame or stack-2 only")
+    cache = FrameFeatureCache(keep=n) if stacked and cache_features and not cuda_graph else None
     steps: Dict[int, "StaticStep"] = {}
 
     def pick(row):
         return int(row.argmax()) if not sample else int(rng.choice(len(row), p=row / row.sum()))
 
-    def policy(obs, prevs, ids=None):
+    def policy(obs, prevs, ids=None, hists=None):
         ids = list(range(len(obs))) if ids is None else ids
+        if hists is None:  # a caller that keeps only the previous frame: enough for stack-2 / trail-2
+            hists = [[p, o] for p, o in zip(prevs, obs)]
+        wins = [F.window(h, n) for h in hists]
         if cuda_graph:
             if len(obs) not in steps:
                 from .static_step import StaticStep
 
-                steps[len(obs)] = StaticStep(agent, q, frames=frames, batch=len(obs))
-            out = steps[len(obs)].probs(obs, prevs if frames == 2 else None, return_act=gate)
+                steps[len(obs)] = StaticStep(agent, q, frames=n, batch=len(obs))
+            out = steps[len(obs)].probs(obs, [w[0] for w in wins] if n == 2 else None, return_act=gate)
+        elif kind == "trail" and n > 1:
+            out = action_probs(agent, [F.blend(w) for w in wins], q, return_act=gate)
         else:
-            out = action_probs(agent, obs, q, prevs if frames == 2 else None, return_act=gate, cache=cache)
+            out = action_probs(agent, obs, q, return_act=gate, cache=cache, stacks=wins if stacked else None)
         p, act = out if gate else (out, None)
         acts = []
         for j, (row, i) in enumerate(zip(p, ids)):
@@ -388,6 +438,7 @@ def model_policy(agent: VLMAgent, game: str, actions: Sequence[str], sample: boo
                 stats["act_p_sum"] = stats.get("act_p_sum", 0.0) + float(act.sum())
         return acts
 
+    policy.wants_history = n > 2  # play() then passes each episode's observation history
     return policy
 
 
@@ -408,7 +459,7 @@ def game_actions(game: str) -> List[str]:
 
 
 def play_check(agent: VLMAgent, games: Sequence[str], baselines: Dict[str, Dict], episodes: int = 3,
-               max_steps: int = 400, frames: int = 1, seed: int = 500_000) -> Dict:
+               max_steps: int = 400, frames=1, seed: int = 500_000) -> Dict:
     """Short play check for in-run checkpoint selection: mean normalised score over a few games.
 
     Frame accuracy has not predicted play strength, so training can select on this instead. ``baselines`` maps a
