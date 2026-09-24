@@ -2,10 +2,18 @@
 
 The harness puts ``autoresearch/`` on ``sys.path``, so an experiment writes ``import toolkit`` and calls these in
 ``build(ctx)`` (not timed). Every example has the ``laya.vlm_train.jsonl_example`` shape, with the image as PNG bytes
-in the state, the question exactly ``laya.games``' (converted with ``VLMAgent._to_internal``), and a ``"value"``:
+in the state, the question exactly ``laya.games``' (converted with ``VLMAgent._to_internal``), a ``"value"`` and,
+except at an episode's last recorded step, a ``"next_target"``:
 
     {"state": {"image": <png bytes>}, "q": {"t", "ins", "crit"}, "target": [p per option], "label": int,
-     "value": float in [0, 1], "dataset": "game_<name>", "id": str}
+     "value": float in [0, 1], "next_target": [p per option], "dataset": "game_<name>", "id": str}
+
+``next_target`` is the auxiliary next-move target (KataGo's opponent-move head, arXiv 1902.10565 section 3.4, for a
+single agent): the target this generator gives the state at step t + 1 of the same trajectory (the state the noisy
+walker actually reached), built the same way as ``target`` (soft or one-hot, smoothing) and mapped through this
+example's own symmetry or mirror. It is omitted when step t + 1 is not part of the recorded trajectory (the maze
+goal was reached, the snake died, the episode ended or hit its cap). A model with ``"next_head": true`` learns it
+(``train(..., w_next=0.15)``); others ignore it. ``next_target=False`` leaves it out.
 
 Lessons carried over from autogo: train on soft targets where the expert has ties, augment with the game's exact
 symmetries, draw many diverse short slices of episodes rather than a few long ones, include off-expert states
@@ -276,14 +284,10 @@ def _maze_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
                 a = opt[0]
             pos = (pos[0] + _VEC[a][0], pos[1] + _VEC[a][1])
             steps += 1
+        at = {t: p for p, t in visited}  # step -> position along the walk actually taken
         keep = visited if len(visited) <= cfg["per_episode"] else rng.sample(visited, cfg["per_episode"])
         for pos, t in keep:
-            opt = _maze_moves(wall, dist, pos)
-            expert = opt[0]  # BFS in ACTIONS order: the same move Maze.expert() makes
-            if cfg["soft"]:
-                target = [1.0 / len(opt) if a in opt else 0.0 for a in GRID_ACTIONS]
-            else:
-                target = [float(a == expert) for a in GRID_ACTIONS]
+            target, expert = _maze_target(wall, dist, pos, cfg["soft"])
             sym = rng.randrange(8) if cfg["flip"] else 0
             d = dist[pos]
             ex = {"state": {"image": _grid_png(_maze_grid(wall, pos, goal), sym)},
@@ -292,19 +296,31 @@ def _maze_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
                   "id": "maze-%d-n%d-r%d-c%d-t%d-g%d" % (seed + i, maze.size, pos[0], pos[1], t, sym)}
             if cfg["value"]:
                 ex["value"] = float(cfg["gamma"] ** d) if d <= cap - t else 0.0
+            if cfg["next_target"] and t + 1 in at:  # the walk's next state (none at the goal or past the cap)
+                ex["next_target"] = _smooth(sym_target(_maze_target(wall, dist, at[t + 1], cfg["soft"])[0], sym),
+                                            cfg["smooth"])
             out.append(ex)
     return out
+
+
+def _maze_target(wall, dist, pos, soft: bool) -> Tuple[List[float], str]:
+    """(target over ``GRID_ACTIONS``, the BFS expert's move) at ``pos``, before any symmetry or smoothing."""
+    opt = _maze_moves(wall, dist, pos)
+    expert = opt[0]  # BFS in ACTIONS order: the same move Maze.expert() makes
+    if soft:
+        return [1.0 / len(opt) if a in opt else 0.0 for a in GRID_ACTIONS], expert
+    return [float(a == expert) for a in GRID_ACTIONS], expert
 
 
 def maze_examples(n: int, sizes: Sequence[int] = (4, 6), seed: int = 0, soft: bool = True, flip: bool = True,
                   value: bool = True, eps: float = 0.3, per_episode: int = 8, random_start: float = 0.5,
                   gamma: float = 0.97, smooth: float = 0.0, workers: int = 0,
-                  dataset: str = "game_maze") -> List[Dict]:
+                  dataset: str = "game_maze", next_target: bool = True) -> List[Dict]:
     """``n`` Maze examples from seeds ``seed, seed + 1, ...`` (must stay below 100_000); see the module docstring."""
     from laya.games import maze_question
 
     cfg = dict(sizes=tuple(sizes), soft=soft, flip=flip, value=value, eps=eps, per_episode=per_episode,
-               random_start=random_start, gamma=gamma, smooth=smooth)
+               random_start=random_start, gamma=gamma, smooth=smooth, next_target=next_target)
     out = _generate(_maze_episodes, n, seed, cfg, workers, per_episode * 0.9)
     q = _internal(maze_question())
     for ex in out:
@@ -388,15 +404,10 @@ def _snake_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
                 _, safe = snake_moves(s)
                 a = rng.choice(safe) if safe else rng.choice(GRID_ACTIONS)
             s.step(a)
+        step_of = {id(st): j for j, st in enumerate(snaps)}
         keep = snaps if len(snaps) <= cfg["per_episode"] else rng.sample(snaps, cfg["per_episode"])
         for st in keep:
-            expert = st.expert()
-            opt, safe = snake_moves(st)
-            if cfg["soft"]:
-                support = opt or safe or [expert]
-                target = [1.0 / len(support) if a in support else 0.0 for a in GRID_ACTIONS]
-            else:
-                target = [float(a == expert) for a in GRID_ACTIONS]
+            target, expert = _snake_target(st, cfg["soft"])
             sym = rng.randrange(8) if cfg["flip"] else 0
             ex = {"state": {"image": _grid_png(_snake_grid(st), sym)},
                   "target": _smooth(sym_target(target, sym), cfg["smooth"]),
@@ -404,19 +415,32 @@ def _snake_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
                   "id": "snake-%d-t%d-g%d" % (seed + i, st.steps, sym)}
             if cfg["value"]:
                 ex["value"] = _snake_value(st, cfg["horizon"])
+            j = step_of[id(st)] + 1
+            if cfg["next_target"] and j < len(snaps):  # the next recorded state (none after death or the cap)
+                ex["next_target"] = _smooth(sym_target(_snake_target(snaps[j], cfg["soft"])[0], sym), cfg["smooth"])
             out.append(ex)
     return out
+
+
+def _snake_target(s, soft: bool) -> Tuple[List[float], str]:
+    """(target over ``GRID_ACTIONS``, the expert's move) in snake state ``s``, before any symmetry or smoothing."""
+    expert = s.expert()
+    if soft:
+        opt, safe = snake_moves(s)
+        support = opt or safe or [expert]
+        return [1.0 / len(support) if a in support else 0.0 for a in GRID_ACTIONS], expert
+    return [float(a == expert) for a in GRID_ACTIONS], expert
 
 
 def snake_examples(n: int, sizes: Sequence[int] = (8, 10), seed: int = 0, soft: bool = True, flip: bool = True,
                    value: bool = True, eps: float = 0.2, per_episode: int = 12, horizon: int = 30,
                    episode_cap: int = 600, smooth: float = 0.0, workers: int = 0,
-                   dataset: str = "game_snake") -> List[Dict]:
+                   dataset: str = "game_snake", next_target: bool = True) -> List[Dict]:
     """``n`` Snake examples from seeds ``seed, seed + 1, ...`` (below 100_000); see the module docstring."""
     from laya.games import snake_question
 
     cfg = dict(sizes=tuple(sizes), soft=soft, flip=flip, value=value, eps=eps, per_episode=per_episode,
-               horizon=horizon, episode_cap=episode_cap, smooth=smooth)
+               horizon=horizon, episode_cap=episode_cap, smooth=smooth, next_target=next_target)
     out = _generate(_snake_episodes, n, seed, cfg, workers, per_episode * 0.9)
     q = _internal(snake_question())
     for ex in out:
@@ -449,12 +473,13 @@ def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
         rng = random.Random("control-%s-%d-%d" % (game, seed, i))
         env = ControlGame(game, seed + i)
         actions = env.actions
-        recs = []
+        recs, experts = [], []  # experts[t]: the expert's action at every step t, kept or not
         keep_now = rng.random() < cfg["keep"]
         reward = 0.0
         while not env.done:
             keep_next = rng.random() < cfg["keep"]
             expert = env.expert()
+            experts.append(expert)
             if keep_now:
                 img = env.render()  # ghosts the previous frame if it was rendered (it was, see keep_next)
                 recs.append((env.steps, expert, img))
@@ -481,6 +506,9 @@ def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
                   "id": "%s-%d-t%d%s" % (game.lower(), seed + i, t, "-f" if flip else "")}
             if cfg["value"]:
                 ex["value"] = float(v)
+            if cfg["next_target"] and t + 1 < end:  # the expert's action at step t + 1 (none at the last step)
+                nxt = flips.get(experts[t + 1], experts[t + 1]) if flip else experts[t + 1]
+                ex["next_target"] = _smooth([float(a == nxt) for a in actions], cfg["smooth"])
             out.append(ex)
     return out
 
@@ -488,7 +516,7 @@ def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
 def control_examples(game: str, n: int, seed: int = 0, eps: Optional[float] = None, keep: Optional[float] = None,
                      smooth: float = 0.1,
                      flip: bool = True, value: bool = True, workers: int = 0,
-                     dataset: Optional[str] = None) -> List[Dict]:
+                     dataset: Optional[str] = None, next_target: bool = True) -> List[Dict]:
     """``n`` examples of a ``laya.controlgames`` game from seeds ``seed, seed + 1, ...`` (below 100_000); see the
     module docstring. ``eps`` / ``keep`` default per game (``CONTROL_EPS`` / ``CONTROL_KEEP``). Needs
     ``gymnasium[classic-control,box2d]`` (imported lazily)."""
@@ -501,7 +529,7 @@ def control_examples(game: str, n: int, seed: int = 0, eps: Optional[float] = No
     keep = CONTROL_KEEP[game] if keep is None else keep
     mean_len = {"CartPole": 500, "Acrobot": 100, "MountainCar": 140, "LunarLander": 220}[game]
     per_ep = mean_len * keep
-    cfg = dict(game=game, eps=eps, keep=keep, smooth=smooth, flip=flip, value=value)
+    cfg = dict(game=game, eps=eps, keep=keep, smooth=smooth, flip=flip, value=value, next_target=next_target)
     out = _generate(_control_episodes, n, seed, cfg, workers, per_ep)
     q = _internal(control_question(game))
     for ex in out:

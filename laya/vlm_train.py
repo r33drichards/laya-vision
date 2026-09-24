@@ -138,6 +138,13 @@ def make_item(
         if not 0.0 <= v <= 1.0:
             raise ValueError("example value must be in [0, 1], got %r" % ex["value"])
         it["value"] = v
+    if ex.get("next_target") is not None:  # optional next-move target: a distribution over the same options
+        nt = [float(p) for p in ex["next_target"]]
+        if len(nt) != k or not all(math.isfinite(p) and p >= 0 for p in nt) or sum(nt) <= 0:
+            raise ValueError("example next_target must be %d non-negative floats with a positive sum, got %r"
+                             % (k, ex["next_target"]))
+        total = sum(nt)
+        it["next_target"] = [nt[i] / total for i in order]  # permuted to marker order, like the target
     return it
 
 
@@ -198,6 +205,21 @@ def value_loss(value_logits: Optional[torch.Tensor], value: Optional[torch.Tenso
     if not bool(has.any()):
         return 0.0
     return w_value * torch.nn.functional.binary_cross_entropy_with_logits(value_logits.float()[has], value[has])
+
+
+def next_loss(next_logits: Optional[torch.Tensor], next_target: Optional[torch.Tensor], w_next: float = 0.15):
+    """``w_next * soft cross-entropy(next_logits, next_target)`` over the rows whose ``next_target`` is not NaN
+    (``collate_vlm`` marks rows without one that way; padded options carry target 0 and logit -1e4). A plain
+    ``0.0`` when the model has no next-move head, the batch no targets, or ``w_next`` is 0, so nothing about such a
+    step changes."""
+    if next_logits is None or next_target is None or not w_next:
+        return 0.0
+    next_target = next_target.to(next_logits.device).float()
+    has = ~torch.isnan(next_target).any(-1)
+    if not bool(has.any()):
+        return 0.0
+    logp = torch.log_softmax(next_logits.float()[has], -1)
+    return w_next * -(next_target[has] * logp).sum(-1).mean()
 
 
 def _to(b: Dict, device, dtype) -> Dict:
@@ -331,6 +353,7 @@ def train(
     mix_weights: Optional[Dict[str, float]] = None,
     mix_alpha: float = 0.0,
     w_value: float = 1.0,
+    w_next: float = 0.15,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -347,6 +370,12 @@ def train(
     ``"value"`` (a float in [0, 1], e.g. whether the episode this game state came from was won), the loss adds
     ``w_value * BCE(value_logit, value)`` averaged over those examples only (``value_loss``); examples without one
     contribute nothing to it, and a batch with none (or a model without the head) trains exactly as before.
+
+    Next-move head (auxiliary, never used for play; KataGo's opponent-move target, arXiv 1902.10565 section 3.4):
+    when the model has one (config ``"next_head": true``) and a batch carries examples with a ``"next_target"``
+    (a distribution over the same options: the expert's move at the next step of the same trajectory), the loss
+    adds ``w_next * soft cross-entropy(next_logits, next_target)`` over those examples only (``next_loss``); as for
+    the value head, examples without one contribute nothing and a batch with none trains exactly as before.
 
     Sampling mix: dataset ``k`` is drawn with probability proportional to
     ``mix_weights.get(k, 1.0) * n_k ** mix_alpha`` (``ItemStream``); the defaults draw every dataset equally.
@@ -457,6 +486,7 @@ def train(
         if not train_act:
             loss = loss + 0.0 * act.float().sum()
         loss = loss + value_loss(model.last_value, b.get("value"), w_value)
+        loss = loss + next_loss(model.last_next, b.get("next_target"), w_next)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_([p for g in groups for p in g["params"]], 1.0)
@@ -503,7 +533,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     ``label`` indexes the rendered options (choice: criteria order; score: level; noul: 0=false, 1=true).
     An optional ``"target"`` (a probability per option, same order) replaces the one-hot target, e.g. an expert
     policy's action distribution; ``label`` is still used for accuracy. An optional ``"value"`` (in [0, 1]) is the
-    value-head target for the state (``train``).
+    value-head target for the state, an optional ``"next_target"`` (a probability per option, same order) the
+    next-move head's (``train``).
     """
     qdef = rec["question"]
     q = VLMAgent._to_internal(qdef)
@@ -527,6 +558,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     ex = {"state": state or "", "q": q, "target": target, "label": label, "dataset": dataset, "id": rec.get("id")}
     if rec.get("value") is not None:  # optional value-head target in [0, 1]
         ex["value"] = float(rec["value"])
+    if rec.get("next_target") is not None:  # optional next-move-head target, checked by make_item
+        ex["next_target"] = [float(p) for p in rec["next_target"]]
     return ex
 
 

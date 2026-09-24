@@ -403,7 +403,9 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
     the real ones, and ``VLMDecisionModel.forward`` turns them into pixels on the GPU.
 
     Items with a ``"value"`` (value-head target, ``laya.vlm_train.make_item``) give ``"value"`` ``[n]`` with NaN
-    for the items without one; the key is absent when no item has one.
+    for the items without one; the key is absent when no item has one. Items with a ``"next_target"`` (next-move
+    head target, a distribution over the item's options in marker order) give ``"next_target"`` ``[n, kmax]``,
+    zero-padded past each row's options, with whole rows of NaN for the items without one; absent when none has one.
     """
     n, L = len(items), max(len(it["ids"]) for it in items)
     kmax = max(len(it["markers"]) for it in items)
@@ -442,6 +444,15 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
         # value-head targets in [0, 1]; NaN marks the rows that have none (the loss skips them)
         res["value"] = torch.tensor([float(it["value"]) if it.get("value") is not None else float("nan")
                                      for it in items], dtype=torch.float32)
+    if any(it.get("next_target") is not None for it in items):
+        # next-move targets over each row's options; a NaN row marks an item without one (the loss skips it)
+        nt = torch.zeros((n, kmax), dtype=torch.float32)
+        for i, it in enumerate(items):
+            if it.get("next_target") is not None:
+                nt[i, : len(it["next_target"])] = torch.tensor(it["next_target"], dtype=torch.float32)
+            else:
+                nt[i] = float("nan")
+        res["next_target"] = nt
     n_img = max(it.get("n_images", 0) for it in items)
     if with_pixels and n_img > 0 and any(it.get("raw_images") is not None for it in items):
         ref = next(it["raw_images"] for it in items if it.get("raw_images") is not None)
@@ -517,6 +528,7 @@ class VLMDecisionModel(nn.Module):
         prep: Optional[ImagePrep] = None,
         readout: str = "terminator",
         value_head: bool = False,
+        next_head: bool = False,
     ):
         super().__init__()
         option_attention = normalize_option_attention(option_attention)
@@ -548,6 +560,16 @@ class VLMDecisionModel(nn.Module):
         # ``(logits, act)``; the value logits of the last readout are left in ``last_value`` ([B] float, or None).
         self.value_head = nn.Sequential(nn.Linear(d + 4, 256), nn.GELU(), nn.Linear(256, 1)) if value_head else None
         self.last_value: Optional[torch.Tensor] = None
+        # Optional auxiliary next-move head (config ``"next_head": true``; KataGo's opponent-move target, arXiv
+        # 1902.10565 section 3.4, single-agent): logits over the same options as the current question for the
+        # expert's move at the next step of the trajectory. A per-option scorer over the option marker features the
+        # policy scorer reads (the head transformer's output at each option's readout token), so it handles any
+        # number of options and shares everything below it with the policy. Training signal only: ``predict``
+        # never reads it. Absent (None, no state-dict keys) by default; built after the value head so a model
+        # without it is bit-identical. Its logits (padded options at -1e4) are left in ``last_next`` ([B, k]).
+        self.next_head = nn.Sequential(nn.LayerNorm(d), nn.Linear(d, 256), nn.GELU(), nn.Linear(256, 1)) \
+            if next_head else None
+        self.last_next: Optional[torch.Tensor] = None
 
     @property
     def backbone(self) -> nn.Module:
@@ -689,6 +711,8 @@ class VLMDecisionModel(nn.Module):
         z = torch.cat([pooled, feats], -1)
         act_logits = self.act_head(z)
         self.last_value = self.value_head(z).squeeze(-1).float() if self.value_head is not None else None
+        self.last_next = (self.next_head(m).squeeze(-1).float().masked_fill(~marker_mask, -1e4)
+                          if self.next_head is not None else None)
         return logits, act_logits
 
 
@@ -747,6 +771,7 @@ def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.
         prep=prep,
         readout=cfg.get("readout") or readout_for(backbone.config),
         value_head=bool(cfg.get("value_head", False)),
+        next_head=bool(cfg.get("next_head", False)),
     )
 
 
@@ -755,18 +780,24 @@ def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.
 # ---------------------------------------------------------------------------------------------------------
 
 
+#: optional heads a checkpoint may lack: passed as a config override (``"value_head": true``), one starts fresh
+OPTIONAL_HEADS = (("value_head", "value head"), ("next_head", "next-move head"))
+
+
 def _load_weights(model: VLMDecisionModel, sd: Dict[str, torch.Tensor], head_only: bool) -> None:
-    """Load a checkpoint's state dict: strict, except that a head-only file lacks the backbone and that a value head
-    the checkpoint never had (``"value_head": true`` passed as an override to fine-tune one onto it) starts freshly
-    initialised. A checkpoint that has value-head weights refuses to load into a model without the head."""
+    """Load a checkpoint's state dict: strict, except that a head-only file lacks the backbone and that an optional
+    head the checkpoint never had (``"value_head": true`` or ``"next_head": true`` passed as an override to
+    fine-tune one onto it) starts freshly initialised. A checkpoint that has an optional head's weights refuses to
+    load into a model without that head."""
     missing, unexpected = model.load_state_dict(sd, strict=False)
-    fresh_value = model.value_head is not None and not any(k.startswith("value_head.") for k in sd)
+    fresh = [(name, what) for name, what in OPTIONAL_HEADS
+             if getattr(model, name) is not None and not any(k.startswith(name + ".") for k in sd)]
     bad = [k for k in missing if not (head_only and k.startswith("encoder."))
-           and not (fresh_value and k.startswith("value_head."))] + list(unexpected)
+           and not any(k.startswith(name + ".") for name, _ in fresh)] + list(unexpected)
     if bad:
         raise ValueError("checkpoint mismatch (missing or unexpected keys): %s" % bad[:5])
-    if fresh_value:
-        warnings.warn("this checkpoint has no value head; 'value_head' starts untrained", stacklevel=3)
+    for name, what in fresh:
+        warnings.warn("this checkpoint has no %s; %r starts untrained" % (what, name), stacklevel=3)
 
 
 def _resolve_device(device: Optional[str]) -> torch.device:
