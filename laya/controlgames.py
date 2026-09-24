@@ -25,6 +25,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
+from . import frames as F
 from .frames import GHOST, blend  # GHOST: weight of the previous frame in ``render`` (0.35)
 
 # game -> Gymnasium id, action names in the environment's action order, and the score counted as solved
@@ -135,13 +136,19 @@ def random_policy(seed: int = 0):
     return lambda env: rng.choice(env.actions)
 
 
-def model_policy(agent, game: str):
-    """The model's most likely action from the rendered (ghosted) screen, via ``predict``. Plays the "single"
-    frame mode only; ``autoresearch/games_eval.py`` plays every mode."""
+def model_policy(agent, game: str, mode: str = "single"):
+    """The model's most likely action, via ``predict``, in the game frame mode ``mode``
+    (``laya.frames.mode_for(agent.cfg, "control")``): ``single`` sends the rendered (ghosted) screen, exactly as
+    before modes existed; any other mode sends ``laya.frames.state`` of the episode's ``frame()`` history
+    (``trail-N`` one blended image, ``stack-N`` N images) with the question describing that screen."""
     from laya.games import control_question
 
-    q = control_question(game)
-    return lambda env: agent.predict({"image": env.render()}, q)["answers"]["action"]["choice"]
+    if mode == "single":
+        q = control_question(game)
+        return lambda env: agent.predict({"image": env.render()}, q)["answers"]["action"]["choice"]
+    q = control_question(game, mode)
+    return F.episode_policy(lambda env, st: agent.predict(st, q)["answers"]["action"]["choice"],
+                            lambda env: env.frame(), mode, "control")
 
 
 __all__ = ["GAMES", "ControlGame", "play_episodes", "normalized", "expert_policy", "random_policy", "model_policy"]

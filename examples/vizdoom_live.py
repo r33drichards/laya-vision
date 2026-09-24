@@ -10,6 +10,8 @@ buttons picks the action (held for 4 tics). The window shows the game next to th
 
 Scenarios: basic, defend_the_center, defend_the_line, health_gathering, take_cover, predict_position,
 deadly_corridor, my_way_home. Keys: SPACE pause/resume, R new episode, ESC or close the window to quit.
+The model sees its own game frame mode (`laya.frames.mode_for(cfg, "doom")`: one screen, or `trail-N` /
+`stack-N` of the episode's decision screens); `--cuda-graph` plays the one-screen mode only.
 Zero-shot: the model was trained on photo/diagram questions, not games.
 """
 import argparse
@@ -23,6 +25,7 @@ import vizdoom as vzd
 from PIL import Image
 
 import laya
+from laya import frames as F
 from laya.games import doom_buttons, doom_question
 from laya.static_step import StaticStep
 from atari_live import PANEL_W, draw
@@ -57,12 +60,17 @@ def main():
     print("loading %s on %s ..." % (args.model, args.device))
     agent = laya.load_vlm(args.model, device=args.device, dtype=args.dtype)
     qs = doom_question(args.scenario, buttons)
+    mode = F.mode_for(agent.cfg, "doom")
+    if args.cuda_graph and mode != "single":
+        raise SystemExit("--cuda-graph plays the single frame mode only, not %s" % mode)
     static = StaticStep(agent, qs["action"]) if args.cuda_graph else None
+    print("frame mode", mode)
     print("buttons:", buttons)
 
     pygame.init()
     game.new_episode()
     obs = game.get_state().screen_buffer
+    hist = []  # this episode's decision screens, oldest first
     screen = pygame.display.set_mode((obs.shape[1] * SCALE + PANEL_W, max(obs.shape[0] * SCALE, 560)))
     pygame.display.set_caption("Laya Vision plays Doom: %s" % args.scenario)
     fonts = [pygame.font.SysFont("menlo,monospace", s) for s in (26, 18, 15)]
@@ -77,7 +85,7 @@ def main():
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_SPACE:
                 paused = not paused
             elif e.type == pygame.KEYDOWN and e.key == pygame.K_r:
-                game.new_episode(); step = 0
+                game.new_episode(); step = 0; hist = []
                 obs = game.get_state().screen_buffer
         score = game.get_total_reward()
         if paused:
@@ -85,10 +93,11 @@ def main():
             time.sleep(0.05)
             continue
         t0 = time.perf_counter()
+        hist = (hist + [obs])[-F.MAX_FRAMES:]
         if static is not None:
             ans = static.answer(obs)
         else:
-            ans = agent.predict({"image": Image.fromarray(obs)}, qs)["answers"]["action"]
+            ans = agent.predict(F.state(hist, mode, "doom", Image.fromarray), qs)["answers"]["action"]
         ms = 0.8 * ms + 0.2 * (time.perf_counter() - t0) * 1000 if ms else (time.perf_counter() - t0) * 1000
         counts[ans["choice"]] += 1
         game.make_action(one_hot[ans["choice"]], args.tics)
@@ -97,7 +106,7 @@ def main():
             score = game.get_total_reward()
             best = max(best, score)
             print("episode %d: reward %.1f in %d steps" % (ep, score, step))
-            game.new_episode(); ep, step = ep + 1, 0
+            game.new_episode(); ep, step, hist = ep + 1, 0, []
         obs = game.get_state().screen_buffer
         draw(screen, fonts, obs, "Doom: " + args.scenario, ep, step, game.get_total_reward(),
              best if best > float("-inf") else 0, ans, ms, counts, False, SCALE)
