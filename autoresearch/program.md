@@ -31,7 +31,8 @@ keep / discard call, not you.
      for ideas; change behaviour by writing it in `experiment.py`, not by editing them.
 4. **Modal**: `modal volume ls laya-checkpoints` must work. In a Claude Code cloud sandbox, set it up as
    `.claude/skills/evals/SKILL.md` section 1 describes (the proxy extra and CA bundle, in a scratch venv).
-5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v2`). If it is missing, build
+5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v3`, which holds only the
+   `games` parts, and `pool-v2`, whose `train` / `calib` / `eval` parts v3 reuses). If a part is missing, build
    it once with `modal run autoresearch/harness.py --prepare-pool` (it reads the prepared `cauldron_*`, `score_*` and
    `eval_*` sets). Every image the harness uses comes from this pool: reading the datasets' small image files
    straight from the volume is too slow to keep an H100 fed.
@@ -186,8 +187,8 @@ globally, and the benchmark fixes what the model sees.
 - **Value head**: `"value_head": true` with `value` targets, as an auxiliary loss.
 - **Next-move head** (KataGo's auxiliary opponent-move target, arXiv 1902.10565 section 3.4, which learned ~1.3x
   faster): `"next_head": true` adds a small per-option scorer predicting the expert's move at the next step of the
-  same trajectory, trained on the `next_target` that `toolkit` maze / snake / control examples carry
-  (`train(..., w_next=0.15)`, KataGo's weight). It is never used for play and changes nothing when off.
+  same trajectory, trained on the `next_target` that `toolkit` maze / snake / control examples and the pool's
+  Atari / ViZDoom frames (`ctx.game_examples()`, pool v3) carry (`train(..., w_next=0.15)`, KataGo's weight). It is never used for play and changes nothing when off.
 - **Train on the model's own states (DAgger)**: expert data never shows the states the model's mistakes lead to.
   Mid-training, roll the current model out on training seeds, label the frames it visits with the BFS / expert move
   (or a short `laya.search` where there is no expert), add them to the mix, keep training. autogo's version is
