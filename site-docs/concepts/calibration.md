@@ -23,5 +23,5 @@ it is moves. The `score` field (the expected level) does move a little, since it
 
 The probabilities are a softmax over the options you list. A question whose right answer is not among them still
 gets a confident-looking distribution. On a photo of a washing machine, a `choice` between electronics, clothing,
-furniture, food and other put "food" first (46%); with "home appliance" added it was 93%. Add an option such as
+furniture, food and other put "food" first (32%); with "home appliance" added it was 90%. Add an option such as
 "other" or "none of these" when the answer may not be listed.

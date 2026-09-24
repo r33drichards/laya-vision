@@ -6,7 +6,7 @@ runs on your GPU with WebGPU (or on your CPU with WASM). There is no server; the
 **Open the demo: <https://r33drichards.github.io/laya-vision/demo/>**
 
 WebGPU needs a browser that supports it; without it the page runs on the CPU with WASM, much more slowly. It
-has been tested in Chrome on macOS (Apple GPU, fp16). The first load downloads 250 to 950 MB
+has been tested in Chrome on macOS (Apple GPU, fp16). The first load downloads 230 to 810 MB
 depending on the precision (see step 1); after that the files come from the browser's cache.
 
 ## 1. Load the model

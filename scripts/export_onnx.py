@@ -315,6 +315,9 @@ def write_config(agent: VLMAgent, out: str, source: str, ids: Dict[str, Any]) ->
     web = {
         "format_version": FORMAT_VERSION,
         "source": source,
+        # the Hub commit the graphs were exported from (a Hub id such as thaitea/laya-vision can later point at
+        # another model); None for a local checkpoint directory
+        "checkpoint": dict(agent.source),
         "backbone": cfg["backbone"],
         "readout": agent.model.readout,
         "option_attention": agent.model.option_attention,
@@ -491,6 +494,7 @@ def validate(agent: VLMAgent, out: str, variants: List[str], tol: float) -> Dict
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("checkpoint", nargs="?", default="thaitea/laya-vision", help="checkpoint dir or Hub id")
+    ap.add_argument("--revision", default=None, help="Hub commit to export (recorded in laya_web.json either way)")
     ap.add_argument("--out", default="web-demo/models/laya-vision")
     ap.add_argument("--quantize", default="", help="comma list of fp16, int8")
     ap.add_argument("--opset", type=int, default=18)
@@ -501,7 +505,7 @@ def main(argv=None):
     ap.add_argument("--skip-export", action="store_true", help="only (re)validate existing files")
     a = ap.parse_args(argv)
 
-    agent = VLMAgent(a.checkpoint, device="cpu", dtype="fp32")
+    agent = VLMAgent(a.checkpoint, device="cpu", dtype="fp32", revision=a.revision)
     kinds = [k for k in a.quantize.split(",") if k]
     if not a.skip_export:
         ids = export_all(agent, a.out, a.opset, a.parts.split(","))

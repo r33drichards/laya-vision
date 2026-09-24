@@ -7,18 +7,21 @@ The [browser demo](../tutorials/browser-demo.md) is the static page in
 ## Exported files
 
 [`scripts/export_onnx.py`](https://github.com/r33drichards/laya-vision/blob/main/scripts/export_onnx.py) writes,
-into `--out`:
+into `--out`. The sizes and checks below are for the hosted export,
+[thaitea/laya-vision-web](https://huggingface.co/thaitea/laya-vision-web): `thaitea/laya-vision` at Hub revision
+`8b318c9`, the 201M checkpoint (20 of SmolVLM's 30 language layers). `laya_web.json` records the exported revision
+under `checkpoint`.
 
 | File | What | Size |
 |---|---|---|
 | `vision.onnx` (+ `_fp16`, `_q8`, `_q4`) | vision tower + connector: `pixel_values [n,3,512,512]` → `image_features [n,64,576]` | 374 / 187 / 110 / 64 MB |
-| `text.onnx` (+ variants) | token embeddings, image merge, language model, the option-block 4D mask built in-graph from `option_span`: → `last_hidden_state [1,L,576]` | 540 / 271 / 234 / 181 MB |
+| `text.onnx` (+ variants) | token embeddings, image merge, language model, the option-block 4D mask built in-graph from `option_span`: → `last_hidden_state [1,L,576]` | 398 / 199 / 194 / 159 MB |
 | `head.onnx` (+ variants) | type embedding, 2 head transformer layers, scorer, act head: → `logits [K]`, `act_logits [2]` | 34 / 17 / 11 / 7 MB |
 | `laya_web.json` | temperatures, token ids, text templates, budgets, image settings, file sizes and SHA-256 | |
 | `tokenizer/` | the checkpoint's `tokenizer.json` and `tokenizer_config.json` | |
 | `validation.json` | ONNX (onnxruntime, CPU) vs `VLMAgent.predict`, per variant; the page shows its summary after loading | |
 
-Totals: fp32 948 MB, fp16 475 MB, q8 355 MB, q4 252 MB.
+Totals: fp32 806 MB, fp16 404 MB, q8 314 MB, q4 229 MB.
 
 - **fp16**: weights and activations in float16, with every normalisation kept in float32 (they square residuals of
   a few thousand, which overflows float16).
@@ -44,15 +47,17 @@ questions of the Home page example through onnxruntime (CPU) and through PyTorch
 
 | Variant | Size | max \|Δp\| | max \|Δlogit\| | same top answer |
 |---|---|---|---|---|
-| fp32 | 948 MB | 2.0e-6 | 2.5e-5 | 9/9 |
-| fp16 | 475 MB | 2.5e-3 | 3.2e-2 | 9/9 |
-| q8 | 355 MB | 1.8e-2 | 0.25 | 9/9 |
-| q4 | 252 MB | 0.17 | 1.7 | 6/9 |
-| int8 dynamic (dropped) | 329 MB | 0.62 | 5.3 | 5/9 |
+| fp32 | 806 MB | 4.0e-6 | 4.3e-5 | 9/9 |
+| fp16 | 404 MB | 3.8e-3 | 3.1e-2 | 9/9 |
+| q8 | 314 MB | 1.7e-2 | 0.31 | 9/9 |
+| q4 | 229 MB | 0.23 | 5.5 | 6/9 |
+
+Dynamic int8, tried on the previous checkpoint (329 MB): 0.62 in probability, 5.3 in logit, same top answer 5/9.
 
 onnxruntime's CPU backend runs some float16 operations in float32, so this check alone cannot catch a float16
-overflow. The fp16 graphs are also checked with onnx's reference evaluator in true float16 arithmetic on a real
-photo: text-graph option hidden states within 0.06 of fp32, vision features within 0.09 (of values up to 93).
+overflow. The fp16 graphs are also checked with onnx's reference evaluator in true float16 arithmetic, on the example photo:
+text-graph option hidden states within 0.05 of fp32 (of values up to 15), vision features within 0.26 (of values up
+to 94), nothing infinite.
 
 ## Other checks
 
@@ -64,7 +69,12 @@ photo: text-graph option hidden states within 0.06 of fp32, vision features with
   change in `laya/vlm.py` fails until the fixture is refreshed.
 - **Pixels.** The JavaScript resize against the Hugging Face processor on four images (smooth 640×480, noise
   210×160, noise 100×300, 2600×1300): mean difference 0.02 to 0.05 grey levels, at most 2 levels.
-- **Headless browser.** `web-demo/smoke_test.mjs` drives the page in headless Chromium: load, upload a PNG (the
+- **Headless browser, current export.** `web-demo/smoke_test.mjs` with the hosted q8 files on WASM, the page's
+  preloaded example photo and its default questions and note, against PyTorch at revision `8b318c9` on the same file:
+  P(damage level 0) 0.1834 against 0.1848, P(category = electronics) 0.8027 against 0.8156, P(outdoors) 0.1211
+  against 0.1235. Loading took 21 s and the three questions 19 s, single-threaded on a shared container.
+- **Headless browser** (previous checkpoint, `thaitea/laya-vision-smolvlm-256m-score`). `web-demo/smoke_test.mjs`
+  drives the page in headless Chromium: load, upload a PNG (the
   export's 640×480 validation drawing), run the questions with the example note as state. Against PyTorch on the
   same image (P(damage level 0), P(category = other), P(outdoors)):
 
@@ -80,7 +90,8 @@ photo: text-graph option hidden states within 0.06 of fp32, vision features with
   The fp32 browser run differs from PyTorch by up to 0.0016 where onnxruntime on the processor's own pixels differs
   by 2e-6; that remainder is the JavaScript image path. Timings are single-threaded WASM on a shared 4-core container
   under load: they show that it runs, not how fast it is.
-- **A real GPU.** One report, Chrome on macOS with an Apple GPU, fp16 on WebGPU, the fixed export: a photo of a
+- **A real GPU** (previous checkpoint). One report, Chrome on macOS with an Apple GPU, fp16 on WebGPU, the fixed
+  export: a photo of a
   washer-dryer with the three example questions ran in 2.0 s (vision 1.6 s), with probabilities within 0.04 of
   PyTorch on the same photo (for example P(category = food) 0.442 against 0.461; the photo compared in PyTorch was a
   re-encoded copy).
