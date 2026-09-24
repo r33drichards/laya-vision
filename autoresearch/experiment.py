@@ -46,7 +46,7 @@ WARMUP_STEPS = 20
 GAME_FRAC = 0.45
 # auxiliary next-move head (KataGo 1902.10565 sec. 3.4): predicts the expert's move at t+1, training only
 NEXT_HEAD = True
-W_NEXT = 0.5
+W_NEXT = 1.0
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
