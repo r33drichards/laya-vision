@@ -1,0 +1,195 @@
+{
+  "run": "autoresearch/full/long-sep24-b64-stack2/best",
+  "checkpoint_path": "/ckpt/autoresearch/full/long-sep24-b64-stack2/best",
+  "created_utc": "2026-09-24T17:46:19+00:00",
+  "code_commit": "8b4613d7f6c5806e188c590aadbafaa3b8cd376d",
+  "prompt_format_version": "1",
+  "weights_sha256": "d787ba4a3c80cc2596df8e71ea4fffbe1ad334d11907eebd2dcb79756b4baf7d",
+  "config_sha256": "9177b5e79462b6465a75a3e8217670b0775dab0297108c1f088047ceea2916c5",
+  "backbone": "HuggingFaceTB/SmolVLM-256M-Instruct",
+  "backbone_revision": null,
+  "readout": "terminator",
+  "option_attention": "block",
+  "temperature": [
+    3.59200382232666,
+    2.2971136569976807,
+    3.2057652473449707
+  ],
+  "calibration": "probs_calibrated = softmax(logits / temperature[qtype]), qtype order (choice, score, noul)",
+  "scoring": {
+    "orders": "identity",
+    "n_permutations": 1,
+    "autocast": "bf16",
+    "batch_size": 32,
+    "weights_dtype": "float32"
+  },
+  "gpu": "NVIDIA L4",
+  "torch": "2.14.0+cu130",
+  "transformers": "5.17.0",
+  "datasets": {
+    "aokvqa": {
+      "n": 1138,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "27b06a99788837cfe0bb5c48cb9ee12c446028abc5558652a0d8c16d2042523b",
+      "meta.json": {
+        "dataset": "aokvqa",
+        "source": "HuggingFaceM4/A-OKVQA",
+        "counts": {
+          "train": 17026,
+          "val": 1138
+        },
+        "label_counts": {
+          "train": {
+            "3": 4381,
+            "0": 4112,
+            "1": 4218,
+            "2": 4315
+          },
+          "val": {
+            "3": 287,
+            "2": 294,
+            "1": 279,
+            "0": 278
+          }
+        },
+        "images": 18164,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 116.0
+      }
+    },
+    "scienceqa": {
+      "n": 2097,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "34eb99b352f00d7ccd9f7540658ddf931986afe8d38e506f0dc1a2d5579305e3",
+      "meta.json": {
+        "dataset": "scienceqa",
+        "source": "derek-thomas/ScienceQA",
+        "counts": {
+          "train": 6218,
+          "val": 2097
+        },
+        "label_counts": {
+          "train": {
+            "0": 2273,
+            "1": 2179,
+            "2": 1167,
+            "3": 583,
+            "4": 16
+          },
+          "val": {
+            "1": 764,
+            "2": 389,
+            "3": 209,
+            "0": 728,
+            "4": 7
+          }
+        },
+        "images": 8315,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 38.0
+      }
+    },
+    "vqav2_yesno": {
+      "n": 5000,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "2005732643ac1475f298e29b0a0877fbbee066420ad5330e47d020f926e7a42f",
+      "meta.json": {
+        "dataset": "vqav2_yesno",
+        "source": "lmms-lab-encoder/VQAv2",
+        "counts": {
+          "train": 50000,
+          "val": 5000
+        },
+        "label_counts": {
+          "train": {
+            "0": 24774,
+            "1": 25226
+          },
+          "val": {
+            "0": 2445,
+            "1": 2555
+          }
+        },
+        "images": 23330,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 512.3
+      }
+    }
+  },
+  "val_split": "val",
+  "n_rows": 8235,
+  "minutes": 1.88,
+  "metrics": {
+    "val_raw": {
+      "all": {
+        "n": 8235,
+        "acc": 0.7302975106253795,
+        "ece": 0.21032171708638553,
+        "nll": 1.1299998505008702
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.6142355008787346,
+        "ece": 0.32319906380138835,
+        "nll": 2.305131557150846
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8288030519790176,
+        "ece": 0.1273751021369503,
+        "nll": 0.845417465442265
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7154,
+        "ece": 0.22028346165418627,
+        "nll": 0.9818937263609144
+      }
+    },
+    "val_calibrated": {
+      "all": {
+        "n": 8235,
+        "acc": 0.7302975106253795,
+        "ece": 0.04801720009475456,
+        "nll": 0.5937863073779387
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.6142355008787346,
+        "ece": 0.09237273830940104,
+        "nll": 1.0044402099478014
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8288030519790176,
+        "ece": 0.030085457980092704,
+        "nll": 0.45407594091529413
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7154,
+        "ece": 0.055401795530319195,
+        "nll": 0.558916006847471
+      }
+    }
+  },
+  "rows_file": "smolvlm-autoresearch-full-long-sep24-b64-stack2-best.vqa-val.predictions.jsonl.gz"
+}
