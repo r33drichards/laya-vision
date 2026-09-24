@@ -7,4 +7,4 @@ huggingface_hub
 numpy
 pillow
 num2words
-laya @ git+https://github.com/r33drichards/laya-vision@main
+laya @ git+https://github.com/r33drichards/laya-vision@404fc4a63208d14b544d5c852f81e88972d267bb
