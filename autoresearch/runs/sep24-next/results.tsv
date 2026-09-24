@@ -8,3 +8,4 @@ ae8ec00	0.6382	0.6598	0.0216	0.2916	201.1613	0.8372	discard	rerun 7283cc7 (train
 0ce2732	0.5564	0.5671	0.0107	0.1771	165.7604	0.6719	keep	rerun 37ebc61 (10 layers)
 6838889	0.6798	0.7054	0.0256	0.1921	201.3105	0.8331	discard	results: sep24-next 62623ee (rerun d8a7aa6, 15 layers); exp: next-move head (w 0.15) on the batch-64 point dba11d5
 cf7514b	0.6582	0.6909	0.0327	0.2995	201.3105	0.8298	discard	exp: next-move head (w 0.15) on the vision-half-LR point 09704d2
+1e5ad68	0.6806	0.7064	0.0259	0.2333	201.3105	0.8394	discard	exp: next-move head at w 0.5 on the batch-64 point
