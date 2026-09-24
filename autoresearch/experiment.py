@@ -53,7 +53,7 @@ WARMUP_STEPS = 20
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.45
 # how game states are shown (laya.frames): "single", "trail-N" or "stack-N"; saved in the checkpoint
-GAME_FRAMES = "single"
+GAME_FRAMES = "trail-4"
 # auxiliary next-move head (KataGo 1902.10565 sec. 3.4): predicts the expert's move at t+1, training only
 NEXT_HEAD = False
 W_NEXT = 0.5
