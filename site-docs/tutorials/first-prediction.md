@@ -40,40 +40,42 @@ generated.
 
 ## 3. Read the answers
 
-`result["answers"]` has one entry per question. This is what the checkpoint returned (on a CPU, in float32):
+`result["answers"]` has one entry per question. This is what the checkpoint returned, at Hub revision `8b318c9`
+(the 201M checkpoint published 2026-09-24), on a CPU in float32. A later checkpoint gives different numbers; pin
+one with `load_vlm(..., revision=...)`.
 
 ```json
 {
   "category": {
     "type": "choice",
     "choice": "electronics",
-    "probabilities": {"electronics": 0.9548, "clothing": 0.0079, "furniture": 0.0074, "food": 0.0057, "other": 0.0241},
-    "confidence": 0.852,
-    "action": {"act_probability": 0.9999}
+    "probabilities": {"electronics": 0.8571, "clothing": 0.0285, "furniture": 0.0314, "food": 0.0276, "other": 0.0554},
+    "confidence": 0.6261,
+    "action": {"act_probability": 0.9796}
   },
   "record": {
     "type": "noul",
-    "noul": 0.2152,
-    "confidence": 0.7848,
-    "action": {"act_probability": 1.0}
+    "noul": 0.2924,
+    "confidence": 0.7076,
+    "action": {"act_probability": 0.9997}
   },
   "condition": {
     "type": "score",
-    "score": 1.9788,
+    "score": 1.9767,
     "legend": {"0": "poor: broken or missing parts", "1": "fair: heavy wear", "2": "good: light wear", "3": "like new"},
-    "probabilities": {"0": 0.0923, "1": 0.1946, "2": 0.3551, "3": 0.358},
-    "confidence": 0.0811,
+    "probabilities": {"0": 0.1287, "1": 0.1946, "2": 0.2481, "3": 0.4286},
+    "confidence": 0.0685,
     "action": {"act_probability": 1.0}
   }
 }
 ```
 
-- **`category`** (`choice`): `choice` is the most probable option, here `electronics` at 95%. The probabilities
+- **`category`** (`choice`): `choice` is the most probable option, here `electronics` at 86%. The probabilities
   are over the options you listed and sum to 1.
 - **`condition`** (`score`): `score` is the *expected* level, the probability-weighted average of the level
-  indices, here 1.98, between "good" and "like new". The probabilities show the model is split between those two
-  (36% each), and `confidence` (0.08, one minus the normalised entropy) says the same.
-- **`record`** (`noul`): `noul` is P(true). Here it is **0.22**, and it is wrong: the left turntable holds a gold
+  indices, here 1.98, around "good". The probabilities show the model leaning to "like new" (43%) but spread over
+  every level, and `confidence` (0.07, one minus the normalised entropy) says the same.
+- **`record`** (`noul`): `noul` is P(true). Here it is **0.29**, and it is wrong: the left turntable holds a gold
   record. A probability is the model's belief, calibrated on its validation sets, not a guarantee; on your own
   photos, check a sample and [calibrate on your data](../how-to/calibrate.md) before acting on a threshold.
 

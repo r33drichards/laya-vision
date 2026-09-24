@@ -18,9 +18,9 @@ checkpoint in three graphs, split where the browser wants to reuse work:
   that it always runs on WASM, where a WebGPU dispatch per operation would cost more than the arithmetic.
 
 The backbone is exported from the checkpoint rather than reused from `HuggingFaceTB/SmolVLM-256M-Instruct`'s own
-ONNX files, because the published checkpoint was trained with the language model unfrozen: all 272 text-model tensors
-and the connector differ from the base model (largest absolute change 0.035 and 0.016); the 197 vision-tower tensors
-are identical.
+ONNX files, because the published checkpoints are trained with the language model unfrozen (and the current one keeps
+20 of its 30 layers). For the previous checkpoint, all 272 text-model tensors and the connector differed from the base
+model (largest absolute change 0.035 and 0.016); the 197 vision-tower tensors were identical.
 
 ## Reproducing predict
 
