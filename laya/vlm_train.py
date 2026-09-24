@@ -25,6 +25,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 from typing import Callable, Dict, Iterable, List, Optional, Sequence
 
@@ -563,11 +564,70 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     return ex
 
 
-def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] = None) -> List[Dict]:
-    """Load ``<root>/<name>/<split>.jsonl``; ``limit`` keeps the first records in file order."""
+_ID_EPISODE_STEP = re.compile(r"^(?P<episode>.+)-(?P<step>\d+)$")
+
+
+def episode_step(rec: Dict) -> Optional[tuple]:
+    """``(episode, step)`` of a recorded game frame, or None when the record does not say.
+
+    Records with ``"episode"`` and ``"step"`` fields (the Atari expert sets, ``laya.atari_data``) use them. Otherwise
+    the id is ``<episode>-<step>`` with a decimal step, e.g. ViZDoom basic's ``"train-000000-001"`` (``modal_app.py``
+    ``prepare_doom_basic`` writes ``"%s-%06d-%03d" % (split, episode, t)``): episode ``"train-000000"``, step 1.
+    """
+    if rec.get("episode") is not None and rec.get("step") is not None:
+        return (rec["episode"], int(rec["step"]))
+    m = _ID_EPISODE_STEP.match(str(rec.get("id") or ""))
+    return (m.group("episode"), int(m.group("step"))) if m else None
+
+
+def with_next_targets(recs: List[Dict]) -> List[Dict]:
+    """The records, each copied with ``"next_target"`` = the training target of the next step of the same recorded
+    episode (the frame at ``(episode, step + 1)``, see ``episode_step``): its ``"target"`` (e.g. the expert's action
+    distribution) normalised, or the one-hot of its ``"label"``, exactly the target ``jsonl_example`` builds for it.
+
+    A record keeps no ``next_target`` (and is returned unchanged) when its successor was not recorded (an episode's
+    last frame, or a step the recording skipped), when its successor's options differ from its own (a different
+    question type or option list / order: the target is only meaningful over the same options), when either record
+    is not a valid example, or when ``episode_step`` cannot place it. Duplicate ``(episode, step)`` keys raise.
+    """
+    keys = [episode_step(r) for r in recs]
+    at: Dict = {}
+    for i, key in enumerate(keys):
+        if key is None:
+            continue
+        if key in at:
+            raise ValueError("duplicate game frame %r (records %d and %d)" % (key, at[key], i))
+        at[key] = i
+    parsed: Dict[int, Optional[Dict]] = {}
+
+    def example(i):
+        if i not in parsed:
+            parsed[i] = jsonl_example(recs[i], "")
+        return parsed[i]
+
+    out = []
+    for i, (rec, key) in enumerate(zip(recs, keys)):
+        j = at.get((key[0], key[1] + 1)) if key is not None else None
+        ex, nxt = (example(i), example(j)) if j is not None else (None, None)
+        same = ex is not None and nxt is not None and (
+            (ex["q"]["t"], render_options(ex["q"])) == (nxt["q"]["t"], render_options(nxt["q"])))
+        if not same:
+            out.append(rec)
+            continue
+        out.append(dict(rec, next_target=list(nxt["target"])))
+    return out
+
+
+def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] = None,
+                        next_targets: bool = False) -> List[Dict]:
+    """Load ``<root>/<name>/<split>.jsonl``; ``limit`` keeps the first records in file order. ``next_targets`` adds
+    each recorded game frame's ``next_target`` from the whole file (``with_next_targets``) before ``limit`` applies;
+    off, the examples are exactly as before."""
     base = os.path.join(root, name)
     with open(os.path.join(base, split + ".jsonl")) as f:
         recs = [json.loads(line) for line in f if line.strip()]
+    if next_targets:
+        recs = with_next_targets(recs)
     if limit:
         recs = recs[:limit]
     out = [jsonl_example(r, base, name) for r in recs]

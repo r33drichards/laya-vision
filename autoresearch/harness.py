@@ -33,7 +33,7 @@ The four objectives (see ``pareto.py``):
 The result lands in ``autoresearch/runs/<tag>/<commit>.json`` and ``pareto.py`` appends it to
 ``autoresearch/runs/<tag>/results.tsv`` as keep / discard.
 
-The data pool. Every image the harness touches comes from a fixed, versioned pool (``POOL_DIR`` on the
+The data pool. Every image the harness touches comes from a fixed, versioned pool (``pool_dir(kind)`` on the
 ``laya-datasets`` volume), not from the prepared datasets' image folders: reading those small files from the volume
 costs about 0.4 s each (measured: 2.4 files/s serially, ~28 files/s with 32 threads), which starved training of
 data. ``modal run autoresearch/harness.py --prepare-pool`` builds the pool once, one container per dataset, as
@@ -43,9 +43,22 @@ pickles of examples with the encoded image bytes inline:
   excluded. A 15-minute experiment sees ~90k samples, under one pass over the pool (up to 6,000 per set), and every experiment trains from
   the same one;
 * ``calib``: the last ``N_CALIB`` train records of each ``CALIB_DATASETS`` set;
-* ``eval``: ``EVAL_PER_SET`` seeded val examples of each ``EVAL_DATASETS`` set.
+* ``eval``: ``EVAL_PER_SET`` seeded val examples of each ``EVAL_DATASETS`` set;
+* ``games``: ``TRAIN_POOL_PER_SET`` seeded frames of each ``GAME_DATASETS`` train split, each with the
+  ``next_target`` of its recorded successor where there is one (``laya.vlm_train.with_next_targets``: the target of
+  step s + 1 of the same episode, computed over the whole split before sampling, so a sampled frame gets it even
+  when its successor is not sampled).
 
-The pool is immutable: changing what goes in means a new ``POOL_VERSION``.
+The pool is immutable: changing what goes in means a new ``POOL_VERSION``. A new version need not rebuild every part:
+``POOL_KIND_VERSIONS`` names, per part kind, the version whose directory (``pool_dir``) holds that kind's parts, and
+a kind whose selection is unchanged keeps reading the older version's files. ``POOL_VERSION`` is the newest version;
+``--prepare-pool`` builds only kinds at ``POOL_VERSION`` (create-only: an existing part file is never rewritten) and
+refuses to rebuild a missing part of an older version. History:
+
+* ``v1``: 2,000 per set, which 15 minutes cycled through twice (quality fell 0.02);
+* ``v2``: 6,000 per set, every kind;
+* ``v3``: ``games`` rebuilt with ``next_target`` (the next-move head's auxiliary target), otherwise the same seeded
+  frames as v2; ``train``, ``calib`` and ``eval`` are read unchanged from ``pool-v2``.
 
 Memory snapshots. Both GPU jobs are ``@app.cls(enable_memory_snapshot=True, single_use_containers=True)`` classes
 whose ``@modal.enter(snap=True)`` method does the experiment-independent CPU work, which Modal then restores from a
@@ -82,8 +95,11 @@ N_CALIB = 100              # last train records per calibration set, held out fr
 TRAIN_POOL_PER_SET = 6000  # seeded train examples per trainable set in the pool (fewer where a set is smaller)
 SEED = 0
 REFERENCE = "cauldron-score-2ep-bidir-full/best"   # latency is reported relative to this checkpoint (= thaitea/laya-vision)
-POOL_VERSION = "v2"         # v1: 2,000 per set, which 15 minutes cycled through twice (quality fell 0.02)
-POOL_DIR = "/data/autoresearch/pool-" + POOL_VERSION
+POOL_VERSION = "v3"         # the newest pool version (history in the module docstring)
+# The version whose directory holds each kind's parts: v3 rebuilt only ``games`` (adding next_target).
+POOL_KIND_VERSIONS = {"train": "v2", "calib": "v2", "eval": "v2", "games": "v3"}
+POOL_ROOT = "/data/autoresearch"
+POOL_DIR = os.path.join(POOL_ROOT, "pool-" + POOL_VERSION)   # where this version's own parts go
 
 VQA = ("aokvqa", "scienceqa", "vqav2_yesno")
 CAULDRON = tuple("cauldron_" + s for s in (
@@ -182,7 +198,8 @@ def pool_selection(kind: str, name: str) -> List[Dict]:
     rng = random.Random("%d:%s:%s" % (SEED, kind, name))
     if kind == "games":
         root, prepared = GAME_DATASETS[name]
-        exs = [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train")]
+        # next_target from the whole split, before sampling; the list, and so the seeded sample, is v2's
+        exs = [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train", next_targets=True)]
         return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
     if kind == "eval":
         exs = load_split(name, "val")
@@ -194,8 +211,13 @@ def pool_selection(kind: str, name: str) -> List[Dict]:
     return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
 
 
+def pool_dir(kind: str) -> str:
+    """The pool directory that holds part kind ``kind`` (``POOL_KIND_VERSIONS``)."""
+    return os.path.join(POOL_ROOT, "pool-" + POOL_KIND_VERSIONS[kind])
+
+
 def _pool_file(kind: str, name: str) -> str:
-    return os.path.join(POOL_DIR, kind, name + ".pkl")
+    return os.path.join(pool_dir(kind), kind, name + ".pkl")
 
 
 POOL_PARTS = ([("train", n) for n in TRAINABLE_DATASETS] + [("calib", n) for n in CALIB_DATASETS]
@@ -211,7 +233,7 @@ def load_pool(kinds=("train", "calib", "eval", "games")) -> Dict[str, Dict[str, 
     missing = [_pool_file(k, n) for k, n in parts if not os.path.exists(_pool_file(k, n))]
     if missing:
         raise FileNotFoundError("the autoresearch data pool %s is incomplete (%d parts missing, e.g. %s); build it "
-                                "with: modal run autoresearch/harness.py --prepare-pool" % (POOL_DIR, len(missing), missing[0]))
+                                "with: modal run autoresearch/harness.py --prepare-pool" % (POOL_VERSION, len(missing), missing[0]))
 
     def read(part):
         with open(_pool_file(*part), "rb") as f:
@@ -237,8 +259,9 @@ class Context:
 
     def game_examples(self, names=tuple(GAME_DATASETS)) -> List[Dict]:
         """Expert frames from the data pool: Atari Freeway and Breakout (the expert agents' action distributions as
-        soft targets where recorded) and ViZDoom basic (the scripted labeller). ``toolkit.py`` generates Maze, Snake
-        and classic-control examples on the fly."""
+        soft targets where recorded) and ViZDoom basic (the scripted labeller). Each frame whose next step of the same
+        episode was recorded carries that step's target as ``next_target`` (for a ``"next_head"`` model).
+        ``toolkit.py`` generates Maze, Snake and classic-control examples on the fly."""
         out = []
         for name in names:
             if name not in GAME_DATASETS:
@@ -469,6 +492,9 @@ def build_pool_part(kind: str, name: str) -> Dict:
     path = _pool_file(kind, name)
     if os.path.exists(path):
         return {"kind": kind, "name": name, "examples": -1, "mb": round(os.path.getsize(path) / 1e6, 1), "seconds": 0.0}
+    if POOL_KIND_VERSIONS[kind] != POOL_VERSION:  # an older version's part: immutable, never rebuilt by newer code
+        raise FileNotFoundError("%s is missing; %s parts belong to pool-%s, which this harness (pool-%s) does not "
+                                "rebuild" % (path, kind, POOL_KIND_VERSIONS[kind], POOL_VERSION))
     exs = pool_selection(kind, name)
     with ThreadPoolExecutor(64) as pool:  # each small-file read is ~0.4 s of latency; overlap many
         exs = list(pool.map(_with_bytes, exs))
@@ -490,7 +516,8 @@ def build_pool():
             continue
         total += r["mb"]
         print("%-6s %-28s %6d examples %8.1f MB %6.1f s" % (r["kind"], r["name"], r["examples"], r["mb"], r["seconds"]))
-    print("pool %s: %.1f GB" % (POOL_DIR, total / 1e3))
+    print("pool %s: %.1f GB (%s)" % (POOL_VERSION, total / 1e3, ", ".join(
+        "%s from pool-%s" % kv for kv in POOL_KIND_VERSIONS.items())))
 
 
 @app.function(image=image, timeout=10 * 60, volumes={"/ckpt": ckpt_vol})
