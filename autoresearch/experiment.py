@@ -44,10 +44,10 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-TRAIN_VISION = True       # with "full": train the vision tower too (at LR_BACKBONE)
+TRAIN_VISION = False      # with "full": train the vision tower too (at LR_BACKBONE)
 LR_HEAD = 5e-5
-LR_BACKBONE = 5e-6
-BATCH_SIZE = 32
+LR_BACKBONE = 1e-5
+BATCH_SIZE = 64
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
@@ -55,7 +55,7 @@ GAME_FRAC = 0.45
 # how game states are shown (laya.frames): "single", "trail-N" or "stack-N"; saved in the checkpoint
 GAME_FRAMES = "single"
 # auxiliary next-move head (KataGo 1902.10565 sec. 3.4): predicts the expert's move at t+1, training only
-NEXT_HEAD = True
+NEXT_HEAD = False
 W_NEXT = 0.5
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
