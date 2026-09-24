@@ -520,6 +520,13 @@ def pipeline(source: str, name: str, commit: str, token: str, minutes: float, da
     res["games"] = {"per_game": g["per_game"], "results": played}
     res.update(meta)
     res["total_s"] = round(time.time() - t0, 1)
+    # modal_app.bench_latency (full_eval's latency part) reads the eval dataset list from <run>/metrics.json, which a
+    # training run from modal_app writes and this layout otherwise lacks
+    mpath = os.path.join(run_dir, "metrics.json")
+    if not os.path.exists(mpath):
+        with open(mpath, "w") as f:
+            json.dump({"args": {"val_datasets": "vqa,cauldron,score,eval"},
+                       "note": "written by full_run.py for full_eval's latency part"}, f, indent=2)
     out = os.path.join(run_dir, "result.json")
     if not os.path.exists(out):
         with open(out, "w") as f:
