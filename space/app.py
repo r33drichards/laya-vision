@@ -10,8 +10,11 @@ import torch
 import laya
 
 MODEL_ID = os.environ.get("LAYA_MODEL", "thaitea/laya-vision")
+# Pinned: the Hub id can later name another checkpoint, and the Space only loads at startup. Bump this (and
+# redeploy with `modal run modal_app.py::publish_space`) when a new checkpoint is published; "" follows the id.
+REVISION = os.environ.get("LAYA_REVISION", "8b318c99d7ad3ce19c24369263463882eada9d1e")
 torch.set_num_threads(max(1, os.cpu_count() or 1))
-agent = laya.load_vlm(MODEL_ID, device="cpu")
+agent = laya.load_vlm(MODEL_ID, device="cpu", revision=REVISION or None)
 
 EXAMPLE_URL = "https://upload.wikimedia.org/wikipedia/commons/4/4d/Cat_November_2010-1a.jpg"
 EXAMPLE_PATH = "example_cat.jpg"
@@ -101,10 +104,11 @@ with gr.Blocks(title="Laya Vision") as demo:
     gr.Markdown(
         "# Laya Vision\n"
         "Calibrated yes/no, multiple-choice and rubric-score decisions about an image, in one forward pass with no text generation. "
-        "Model: [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision) · "
+        "Model: [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision)%s · " % (
+            " @ `%s`" % REVISION[:7] if REVISION else "") +
         "Code: [r33drichards/laya-vision](https://github.com/r33drichards/laya-vision)\n\n"
-        "Experimental. Trained on The Cauldron (photos, diagrams, charts, documents) and on rubric-scored sets: response grading, "
-        "photo aesthetics, generated-image quality and damage severity. A `score` question takes a rubric, lowest level first, and "
+        "Experimental. Trained on The Cauldron (photos, diagrams, charts, documents), on rubric-scored sets (response grading, "
+        "photo aesthetics, generated-image quality, damage severity) and on game frames. A `score` question takes a rubric, lowest level first, and "
         "answers with the probability-weighted level. On this free CPU Space, expect 1–3 s per image."
     )
     with gr.Row():

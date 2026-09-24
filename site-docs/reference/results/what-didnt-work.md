@@ -9,5 +9,8 @@
   produce and lost to a prior-only baseline until the balancing was removed.
 - **A third epoch over the same rubric data**: half a point on VLFeedback, nothing elsewhere. More passes are flat;
   the next gains need new rubric data ([Score head results](score-results.md)).
-- **Dynamic int8 quantisation for the browser**: moved probabilities by up to 0.62 and flipped the top answer on 4
-  of 9 validation questions ([Browser demo files and checks](../web-demo.md#exported-files)).
+- **An in-browser demo (ONNX Runtime Web, WebGPU)**: the model exported to ONNX and run on the visitor's device.
+  It ran, and matched PyTorch closely at fp32, but the smaller exports it needed (fp16 on the GPU, 8- and 4-bit
+  weights) and the browser's own image decoding moved the answers enough to misrepresent the model, so it was
+  removed in favour of the [Hugging Face Space](https://huggingface.co/spaces/thaitea/laya-vision-demo). Dynamic int8 quantisation, tried for it, moved probabilities
+  by up to 0.62 and flipped the top answer on 4 of 9 validation questions. The code is in the repository history.

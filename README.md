@@ -27,7 +27,6 @@ Inputs are cut to fit the checkpoint's token budgets: each option to 48 tokens (
 
 Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces its ModernBERT text encoder with a small vision-language model. Laya's `predict(state, questions)` API, output schema, RLCD training objective and temperature calibration are unchanged. It is an experimental research project, not affiliated with Convai Innovations, the authors of Laya.
 
-- **In your browser:** <https://r33drichards.github.io/laya-vision/demo/> runs a model on your own GPU with WebGPU (or WASM on the CPU); no server, and the image never leaves the page.
 - **Try it:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU, about 3 s per image. Source in `space/`.
 - **Install:** `pip install -e .` plus `torchvision`, which the image processor needs. ModernVBERT needs `transformers >= 5.3`.
 - **Documentation:** <https://r33drichards.github.io/laya-vision/>, built from [`site-docs/`](site-docs/).
@@ -80,12 +79,12 @@ python autoresearch/pareto.py show --tsv autoresearch/runs/<tag>/results.tsv
 
 The documentation site, <https://r33drichards.github.io/laya-vision/>, is built from [`site-docs/`](site-docs/) with MkDocs:
 
-- [Install](https://r33drichards.github.io/laya-vision/install/overview/) and [Tutorials](https://r33drichards.github.io/laya-vision/tutorials/overview/): a first prediction in Python, and the model in your browser.
-- [How-to guides](https://r33drichards.github.io/laya-vision/how-to/overview/): [calibrate on your own data](https://r33drichards.github.io/laya-vision/how-to/calibrate/), [run jobs on Modal](https://r33drichards.github.io/laya-vision/how-to/run-on-modal/), [evaluate a checkpoint](https://r33drichards.github.io/laya-vision/how-to/evaluate/), [export for the browser](https://r33drichards.github.io/laya-vision/how-to/export-for-the-web/), [play games](https://r33drichards.github.io/laya-vision/how-to/play-games/).
+- [Install](https://r33drichards.github.io/laya-vision/install/overview/) and [Tutorials](https://r33drichards.github.io/laya-vision/tutorials/overview/): the demo Space, and a first prediction in Python.
+- [How-to guides](https://r33drichards.github.io/laya-vision/how-to/overview/): [calibrate on your own data](https://r33drichards.github.io/laya-vision/how-to/calibrate/), [run jobs on Modal](https://r33drichards.github.io/laya-vision/how-to/run-on-modal/), [evaluate a checkpoint](https://r33drichards.github.io/laya-vision/how-to/evaluate/), [play games](https://r33drichards.github.io/laya-vision/how-to/play-games/).
 - [Concepts](https://r33drichards.github.io/laya-vision/concepts/overview/): [how it works](https://r33drichards.github.io/laya-vision/concepts/how-it-works/), the [architecture](https://r33drichards.github.io/laya-vision/concepts/architecture/), [calibration](https://r33drichards.github.io/laya-vision/concepts/calibration/), the [training data](https://r33drichards.github.io/laya-vision/concepts/data/).
 - [Reference](https://r33drichards.github.io/laya-vision/reference/overview/): [`predict()` and the answer schema](https://r33drichards.github.io/laya-vision/reference/predict/), [checkpoints](https://r33drichards.github.io/laya-vision/reference/checkpoints/), and every result, from [typed answers vs generated JSON](https://r33drichards.github.io/laya-vision/reference/results/decision-vs-generation/) to [what didn't work](https://r33drichards.github.io/laya-vision/reference/results/what-didnt-work/).
 
-To build it: `nix build .#docs` (the site, with the browser demo under `demo/`, lands in `./result`), or
+To build it: `nix build .#docs` (the site lands in `./result`), or
 `pip install mkdocs mkdocs-mermaid2-plugin && mkdocs build --strict`. Pull requests run the build, a link check and a
 headless-browser check (`docs-check.yml`); pushes to `main` deploy it to GitHub Pages (`deploy-docs.yml`).
 

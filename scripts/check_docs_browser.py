@@ -87,16 +87,15 @@ def main() -> int:
     chrome = find_chrome(args.chrome)
 
     # (path, strings that must appear in the rendered DOM). The architecture page checks that Mermaid actually
-    # rendered (an <svg> inside the diagram), and /demo/ that the browser demo is published with the site.
+    # rendered (an <svg> inside the diagram).
     checks = [
-        ("/", ["Laya Vision", "Try it in your browser", "Install"]),
+        ("/", ["Laya Vision", "Try the demo", "Install"]),
         ("/install/overview/", ["Install", "pip install -e ."]),
-        ("/tutorials/browser-demo/", ["Run it in your browser", "Load model"]),
+        ("/tutorials/space-demo/", ["Try the demo", "laya-vision-demo"]),
         ("/reference/predict/", ["predict() and the answer schema", "act_probability"]),
         ("/concepts/architecture/", ["Architecture", 'class="mermaid"', "<svg"]),
         ("/reference/evals/laya-vision/", ["Laya Vision scorecard"]),
-        ("/demo/", ["Laya Vision, in your browser", "Load model", "An example photo is loaded"]),
-        ("/demo/example.jpg", ["<img"]),
+        ("/tutorials/example.jpg", ["<img"]),
     ]
 
     handler = lambda *a, **kw: http.server.SimpleHTTPRequestHandler(*a, directory=str(site_dir), **kw)

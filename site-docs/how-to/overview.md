@@ -12,8 +12,6 @@ These are **task-oriented** recipes for getting specific things done. They assum
   preparation, training, evaluation and publishing.
 - [Evaluate a checkpoint](evaluate.md): run the whole evaluation suite on one checkpoint and turn the results into
   a scorecard.
-- [Export for the browser](export-for-the-web.md): export a checkpoint to ONNX, host it, and point the browser demo
-  at it.
 - [Play games with a checkpoint](play-games.md): watch a checkpoint play in a local window, and score it on the games
   suite.
 

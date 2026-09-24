@@ -21,6 +21,5 @@ per batch of questions, whatever the answers are.
 - [Training data](data.md): the prepared datasets, from The Cauldron to the held-out evaluation sets.
 - [Training data for score questions](score-data.md): the four rubric-scored datasets behind the `score` head, and
   how they were cleaned.
-- [The browser runtime](browser-runtime.md): how the web page reproduces `predict` with ONNX Runtime Web.
 - [Caching the fixed question in game play](game-caching.md): what caching the constant question could save, and
   the CUDA-graph path that was built instead.
