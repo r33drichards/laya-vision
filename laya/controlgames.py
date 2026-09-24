@@ -125,10 +125,10 @@ def play_episodes(game: str, policy, episodes: int, seed: int = 0, max_steps: in
             env.step(a)
         eps.append({"score": round(env.score, 3), "steps": env.steps, "terminated": env.terminated})
         env.close()
-    scores = [e["score"] for e in eps]
+    scores, solved = [e["score"] for e in eps], make.SPECS[game]["solved"]  # None: no threshold
     return {"game": game, "episodes": episodes, "seed": seed, "actions": dict(counts), "results": eps,
             "mean_score": float(np.mean(scores)), "std_score": float(np.std(scores)),
-            "solved_rate": float(np.mean([s >= make.SPECS[game]["solved"] for s in scores])),
+            "solved_rate": None if solved is None else float(np.mean([s >= solved for s in scores])),
             "mean_steps": float(np.mean([e["steps"] for e in eps]))}
 
 

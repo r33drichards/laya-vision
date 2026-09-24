@@ -89,7 +89,47 @@ CONTROL_GOALS = {
                         "the pole upright.",
     "InvertedDoublePendulum": "Two poles are hinged end to end on a cart that slides along a rail; push the cart "
                               "left or right to keep both poles upright.",
+    "Reacher": "A two-joint arm lies flat on a table; move its fingertip onto the red target and keep it there "
+               "with little effort.",
+    "Pusher": "A seven-joint arm stands by a table; push the white cylinder onto the red goal.",
+    "Swimmer": "A three-segment swimmer lies in a thick fluid; wriggle its two joints to swim forward.",
+    "Hopper": "A one-legged robot stands upright; hop forward as fast as you can without falling.",
+    "Walker2d": "A two-legged robot stands upright; walk forward as fast as you can without falling.",
+    "HalfCheetah": "A two-legged running robot; run forward as fast as you can.",
+    "Ant": "A four-legged robot; walk forward as fast as you can without flipping over.",
+    "Humanoid": "A humanoid robot stands upright; walk forward as fast as you can without falling.",
+    "HumanoidStandup": "A humanoid robot lies on the ground; get up and raise your head as high as you can.",
 }
+
+# MuJoCo joint-torque games: the actuated joints in the environment's actuator order. Each gets a push each way
+# (``<JOINT>_POS``, ``<JOINT>_NEG``), after ``NONE``; ``laya.mujocogames`` maps them onto the action vector.
+TORQUE_JOINTS = {
+    "Reacher": ("shoulder", "elbow"),
+    "Pusher": ("shoulder pan", "shoulder lift", "upper arm roll", "elbow flex", "forearm roll", "wrist flex",
+               "wrist roll"),
+    "Swimmer": ("front joint", "back joint"),
+    "Hopper": ("thigh", "knee", "foot"),
+    "Walker2d": ("right thigh", "right knee", "right foot", "left thigh", "left knee", "left foot"),
+    "HalfCheetah": ("back thigh", "back shin", "back foot", "front thigh", "front shin", "front foot"),
+    "Ant": ("leg 4 hip", "leg 4 ankle", "leg 1 hip", "leg 1 ankle", "leg 2 hip", "leg 2 ankle", "leg 3 hip",
+            "leg 3 ankle"),
+    "Humanoid": ("abdomen y", "abdomen z", "abdomen x", "right hip x", "right hip z", "right hip y", "right knee",
+                 "left hip x", "left hip z", "left hip y", "left knee", "right shoulder 1", "right shoulder 2",
+                 "right elbow", "left shoulder 1", "left shoulder 2", "left elbow"),
+}
+TORQUE_JOINTS["HumanoidStandup"] = TORQUE_JOINTS["Humanoid"]
+
+
+def torque_actions(joints: Sequence[str]) -> Dict[str, str]:
+    """``NONE``, then ``<JOINT>_POS`` / ``<JOINT>_NEG`` per joint, with what each does."""
+    out = {"NONE": "apply no torque"}
+    for j in joints:
+        key = j.upper().replace(" ", "_")
+        out[key + "_POS"] = "torque the %s one way (positive)" % j
+        out[key + "_NEG"] = "torque the %s the other way (negative)" % j
+    return out
+
+
 CONTROL_ACTIONS = {
     "CartPole": {"LEFT": "push the cart left", "RIGHT": "push the cart right"},
     "Acrobot": {"CLOCKWISE": "twist the lower link clockwise", "NONE": "do nothing",
@@ -101,6 +141,7 @@ CONTROL_ACTIONS = {
     "InvertedDoublePendulum": {"HARD_LEFT": "push the cart left hard", "LEFT": "push the cart left gently",
                                "NONE": "do not push", "RIGHT": "push the cart right gently",
                                "HARD_RIGHT": "push the cart right hard"},
+    **{game: torque_actions(joints) for game, joints in TORQUE_JOINTS.items()},
 }
 
 
