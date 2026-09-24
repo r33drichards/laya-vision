@@ -509,7 +509,7 @@ def pipeline(source: str, name: str, commit: str, token: str, minutes: float, da
     tag = "full/" + name  # the harness classes load os.path.join(harness.ROOT, tag, commit)
     lat = latency().run.spawn(tag, "best")
     fams = {f: games().run.spawn(tag, "best", f) for f in games_eval.FAMILIES}
-    res["summary"].update({k: v for k, v in lat.get().items() if k.startswith("latency")})
+    res["summary"].update({k: v for k, v in lat.get().items() if k.startswith(("latency", "game_move"))})
     played = {}
     for f, c in fams.items():
         played.update(c.get())
