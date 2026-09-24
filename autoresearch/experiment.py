@@ -37,9 +37,10 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
+TRAIN_VISION = True       # with "full": train the vision tower too (at LR_BACKBONE)
 LR_HEAD = 5e-5
 LR_BACKBONE = 1e-5
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
@@ -104,7 +105,12 @@ def build(ctx):
 
 
 def train(agent, ctx):
+    import laya.vlm_train as vt
     from laya.vlm_train import train as train_loop
+
+    if TRAIN_VISION:
+        base = vt.set_trainable
+        vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
 
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
