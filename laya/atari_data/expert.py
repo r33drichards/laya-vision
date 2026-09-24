@@ -214,11 +214,15 @@ class Player:
         if self.fire is not None and not self.done:
             self._act(self.fire)
 
-    def step(self, action: int):
+    def step(self, action: int) -> bool:
+        """Play one decision. Returns True when a life was lost and FIRE was pressed automatically (a game
+        without FIRE never resets its frame history this way)."""
         lives = self.lives
         self._act(action)
         if not self.done and self.lives < lives:
             self._fire()
+            return self.fire is not None
+        return False
 
     def _act(self, action: int):
         grays = [self.last_gray]
@@ -273,13 +277,20 @@ def _png(rgb: np.ndarray) -> bytes:
 
 
 def play(player: Player, policy: Optional[Policy], mode: str, seed: int, rng: np.random.Generator,
-         keep: Optional[EvenSample] = None, max_steps: Optional[int] = None) -> float:
+         keep: Optional[EvenSample] = None, max_steps: Optional[int] = None, history: int = 0) -> float:
     """One episode. ``mode`` is ``greedy`` (argmax), ``random`` (uniform), or ``behaviour`` (sample from the
     policy, with an ``EPSILON`` chance of a uniform-random action instead). ``max_steps`` ends the episode after
-    that many decisions (auto-FIRE steps not counted). Returns the episode score."""
+    that many decisions (auto-FIRE steps not counted). Returns the episode score.
+
+    ``history`` > 0 also gives each kept item ``"hist"``: ``[(step, png), ...]``, the RGB screens of up to
+    ``history`` previous decisions, oldest first, as ``laya.atari_train.play`` keeps them at play time: the
+    history starts empty on reset and again after an auto-FIRE (a life lost), so it never reaches back past one.
+    Recording it draws nothing from ``rng``: the trajectory is the same as without it."""
     n = len(player.actions)
     player.reset(seed)
     t = 0
+    past: List = []   # (step, rgb) of the previous decisions since the last reset / auto-FIRE
+    pngs: Dict[int, bytes] = {}  # step -> encoded screen, for the steps in ``past``
     while not player.done and (max_steps is None or t < max_steps):
         if mode == "random":
             a = int(rng.integers(n))
@@ -290,14 +301,25 @@ def play(player: Player, policy: Optional[Policy], mode: str, seed: int, rng: np
             else:
                 a = int(rng.integers(n)) if rng.random() < EPSILON else int(rng.choice(n, p=p))
                 if keep is not None and keep.wants(t):
-                    keep.add({"step": t, "png": _png(player.rgb), "target": p, "taken": a})
-        player.step(a)
+                    item = {"step": t, "png": _png(player.rgb), "target": p, "taken": a}
+                    if history:
+                        for s, rgb in past:
+                            if s not in pngs:
+                                pngs[s] = _png(rgb)
+                        item["hist"] = [(s, pngs[s]) for s, _ in past]
+                    keep.add(item)
+        rgb = player.rgb
+        if player.step(a):
+            past, pngs = [], {}
+        elif history:
+            past = (past + [(t, np.array(rgb))])[-history:]
+            pngs = {s: pngs[s] for s, _ in past if s in pngs}
         t += 1
     return player.score
 
 
 def collect(player: Player, policy: Policy, n_frames: int, per_episode: int, first_episode: int, seed_base: int,
-            rng: np.random.Generator, max_steps: int, log: Callable = print):
+            rng: np.random.Generator, max_steps: int, log: Callable = print, history: int = 0):
     """Play behaviour episodes until ``n_frames`` are kept (at most ``per_episode`` per episode, spread evenly over
     the episode) or ``max_steps`` agent steps are used. Then subsample evenly across episodes down to ``n_frames``.
     Returns ``(records, episodes_played, scores)``, where ``records`` is a list of ``(episode, item)``."""
@@ -305,7 +327,7 @@ def collect(player: Player, policy: Policy, n_frames: int, per_episode: int, fir
     while sum(len(k) for _, k in kept) < n_frames and steps < max_steps:
         keep = EvenSample(per_episode)
         t0 = time.time()
-        scores.append(play(player, policy, "behaviour", seed_base + ep, rng, keep))
+        scores.append(play(player, policy, "behaviour", seed_base + ep, rng, keep, history=history))
         steps += player.steps
         kept.append((ep, keep.result()))
         log("  episode %d: score %.0f, %d steps, kept %d (%.0fs)"
@@ -327,13 +349,27 @@ def baseline_scores(game: str, max_steps: int, episodes: int = 5, sticky: float 
 
 
 def generate(game: str, out_root: str, train_frames: int = 20_000, val_frames: int = 1_000, eval_episodes: int = 5,
-             seed: int = 0, sticky: float = 0.25, log: Callable = print) -> Dict:
+             seed: int = 0, sticky: float = 0.25, log: Callable = print, source: str = "expert", history: int = 0,
+             baselines: Optional[Dict] = None, create_only: bool = False) -> Dict:
     """Measure expert and random scores for ``game``. If ``train_frames`` > 0, also write
     ``<out_root>/<game>/{train,val}.jsonl, images/, meta.json``. The caller commits and then writes ``_READY``.
     Returns the summary that also goes in ``meta.json``. ``sticky`` is ALE's repeat_action_probability. Keep the
-    v5 default (0.25) for data. 0 reproduces the agents' training env, which is useful only as a pipeline check."""
+    v5 default (0.25) for data. 0 reproduces the agents' training env, which is useful only as a pipeline check.
+
+    ``history`` > 0 also stores, per record, ``"history"``: the image paths of up to ``history`` previous decision
+    screens of the same episode, oldest first (fewer after a reset or an auto-FIRE; see ``play``). Each screen is
+    written once as ``images/<source>-<Game>-e<episode>-s<step>.png`` and shared by every record that needs it.
+
+    ``baselines`` (the score fields of an earlier run's meta.json) are copied in instead of re-measured. The greedy
+    expert episodes draw nothing from the RNG, so they are skipped; the random ones are still played (and their
+    scores dropped) so the RNG reaches the data episodes in the state an ordinary run leaves it in: with the same
+    ``seed`` the recording then replays the earlier run's trajectories exactly. ``create_only`` refuses an
+    existing ``<out_root>/<game>`` instead of replacing it."""
     from laya.games import atari_question
 
+    out = os.path.join(out_root, game)
+    if create_only and os.path.exists(out):
+        raise FileExistsError("%s exists; this recording is create-only" % out)
     repo = agent_repo(game)
     player = Player(game, sticky)
     actions = player.actions
@@ -348,11 +384,29 @@ def generate(game: str, out_root: str, train_frames: int = 20_000, val_frames: i
 
     rng = np.random.default_rng(seed)
     t0 = time.time()
-    expert = [play(player, policy, "greedy", EXPERT_EVAL_SEED + i, rng) for i in range(eval_episodes)]
-    random_ = [play(player, None, "random", RANDOM_EVAL_SEED + i, rng) for i in range(eval_episodes)]
-    log("%s: expert %s | random %s (%.0fs)" % (game, expert, random_, time.time() - t0))
+    if baselines is None:
+        expert = [play(player, policy, "greedy", EXPERT_EVAL_SEED + i, rng) for i in range(eval_episodes)]
+        random_ = [play(player, None, "random", RANDOM_EVAL_SEED + i, rng) for i in range(eval_episodes)]
+        log("%s: expert %s | random %s (%.0fs)" % (game, expert, random_, time.time() - t0))
+        baselines = {
+            "expert_score": float(np.mean(expert)), "expert_scores": expert,
+            "random_score": float(np.mean(random_)), "random_scores": random_,
+            "eval": {"env": "ALE/%s-v5" % game,
+                     "settings": "defaults: frameskip 4, repeat_action_probability %s, minimal action set, max "
+                                 "108000 frames; run as frameskip=1 x 4 so the agent sees max-pooled frames" % sticky,
+                     "repeat_action_probability": sticky, "sticky_actions": sticky > 0,
+                     "score": "sum of raw (unclipped) ALE v5 rewards until game over or the step cap",
+                     "episodes": eval_episodes, "expert_policy": "greedy (argmax of the PPO policy)",
+                     "random_policy": "uniform over the minimal action set",
+                     "fire_after_reset_and_life_loss": player.fire is not None,
+                     "max_episode_steps": MAX_EPISODE_STEPS},
+        }
+    else:
+        random_ = [play(player, None, "random", RANDOM_EVAL_SEED + i, rng) for i in range(eval_episodes)]
+        log("%s: baselines copied (expert %s, random %s); random episodes replayed for the RNG: %s (%.0fs)"
+            % (game, baselines.get("expert_score"), baselines.get("random_score"), random_, time.time() - t0))
     meta = {
-        "source": "expert", "game": game, "frame_format": "rgb_210x160", "actions": actions,
+        "source": source, "game": game, "frame_format": "rgb_210x160", "actions": actions,
         "origin": "https://huggingface.co/" + repo,
         "license": "agent weights: CleanRL (MIT); frames rendered with ale-py (ROMs bundled under GPL-2.0)",
         "agent": {"repo": repo, "algorithm": "PPO", "network": policy.arch, "framework": "JAX/Flax (CleanRL)",
@@ -360,23 +414,12 @@ def generate(game: str, out_root: str, train_frames: int = 20_000, val_frames: i
                   "trained_env": "envpool %s-v5: minimal action set, frameskip 4 + max-pool of last 2 frames, ALE "
                                  "grayscale 84x84 INTER_AREA, 4-frame stack, repeat_action_probability 0, "
                                  "noop_max 30, episodic_life, FIRE on reset, reward clipping" % game},
-        "expert_score": float(np.mean(expert)), "expert_scores": expert,
-        "random_score": float(np.mean(random_)), "random_scores": random_,
-        "eval": {"env": "ALE/%s-v5" % game,
-                 "settings": "defaults: frameskip 4, repeat_action_probability %s, minimal action set, max 108000 "
-                            "frames; run as frameskip=1 x 4 so the agent sees max-pooled frames" % sticky,
-                 "repeat_action_probability": sticky, "sticky_actions": sticky > 0,
-                 "score": "sum of raw (unclipped) ALE v5 rewards until game over or the step cap",
-                 "episodes": eval_episodes, "expert_policy": "greedy (argmax of the PPO policy)",
-                 "random_policy": "uniform over the minimal action set",
-                 "fire_after_reset_and_life_loss": player.fire is not None,
-                 "max_episode_steps": MAX_EPISODE_STEPS},
+        **baselines,
         "action_check": check,
     }
     if train_frames <= 0:
         return meta
 
-    out = os.path.join(out_root, game)
     if os.path.exists(out):
         shutil.rmtree(out)
     os.makedirs(os.path.join(out, "images"))
@@ -384,25 +427,36 @@ def generate(game: str, out_root: str, train_frames: int = 20_000, val_frames: i
     t0 = time.time()
     log("%s: val episodes" % game)
     val, n_val_eps, val_scores = collect(player, policy, val_frames, max(1, val_frames // 2), 0, VAL_SEED, rng,
-                                         budget // 20, log)
+                                         budget // 20, log, history)
     log("%s: train episodes" % game)
     train, n_train_eps, train_scores = collect(player, policy, train_frames, max(1, train_frames // 10),
-                                               n_val_eps, TRAIN_SEED, rng, budget, log)
+                                               n_val_eps, TRAIN_SEED, rng, budget, log, history)
     question = atari_question(game, actions)["action"]
     for split, recs, n_eps, scores in (("val", val, n_val_eps, val_scores), ("train", train, n_train_eps,
                                                                            train_scores)):
-        labels = Counter()
+        labels, written = Counter(), set()
+
+        def save(ep, step, png):
+            name = "%s-%s-e%06d-s%06d.png" % (source, game, ep, step)
+            if name not in written:
+                with open(os.path.join(out, "images", name), "wb") as img:
+                    img.write(png)
+                written.add(name)
+            return "images/" + name
+
         with open(os.path.join(out, split + ".jsonl"), "w") as f:
             for ep, it in recs:
-                rid = "expert-%s-e%06d-s%06d" % (game, ep, it["step"])
-                with open(os.path.join(out, "images", rid + ".png"), "wb") as img:
-                    img.write(it["png"])
+                rid = "%s-%s-e%06d-s%06d" % (source, game, ep, it["step"])
+                image = save(ep, it["step"], it["png"])
                 target = [round(float(p), 6) for p in it["target"]]
                 label = int(np.argmax(it["target"]))
                 labels[actions[label]] += 1
-                f.write(json.dumps({"id": rid, "image": "images/%s.png" % rid, "game": game, "actions": actions,
-                                    "label": label, "target": target, "question": question, "source": "expert",
-                                    "episode": ep, "step": it["step"], "taken": it["taken"]}) + "\n")
+                rec = {"id": rid, "image": image, "game": game, "actions": actions,
+                       "label": label, "target": target, "question": question, "source": source,
+                       "episode": ep, "step": it["step"], "taken": it["taken"]}
+                if history:
+                    rec["history"] = [save(ep, s, png) for s, png in it["hist"]]
+                f.write(json.dumps(rec) + "\n")
         meta[split] = {"records": len(recs), "episodes": len({ep for ep, _ in recs}), "episodes_played": n_eps,
                        "labels": dict(labels.most_common()), "behaviour_scores": scores}
     meta["dropped"] = {"not_in_minimal_set": 0}
@@ -414,6 +468,11 @@ def generate(game: str, out_root: str, train_frames: int = 20_000, val_frames: i
                                    "then an even subsample across episodes" % (max(1, train_frames // 10),
                                                                                max(1, val_frames // 2)),
                          "episode_seeds": {"val": VAL_SEED, "train": TRAIN_SEED}}
+    if history:
+        meta["history"] = ("per record, the image paths of up to %d previous decision screens of the same episode "
+                           "(4 emulator frames apart), oldest first, saved at decision time; empty on the first "
+                           "decision and restarted after an auto-FIRE (reset or life loss), exactly the frames "
+                           "laya.atari_train.play keeps at play time" % history)
     with open(os.path.join(out, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
     log("%s: wrote %d train / %d val frames (%.0fs)" % (game, len(train), len(val), time.time() - t0))
