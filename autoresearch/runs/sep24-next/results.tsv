@@ -1,2 +1,4 @@
 commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
 0417741	0.6759	0.6993	0.0234	0.3122	201.1613	0.8472	keep	rerun 09704d2 (vision half LR)
+65d8c32	0.6788	0.7089	0.0301	0.2007	201.1613	0.8287	discard	rerun 5e9ef40 (20 layers, games 45%)
+c99d785	0.6834	0.7075	0.0240	0.1869	201.1613	0.8344	keep	rerun dba11d5 (batch 64)

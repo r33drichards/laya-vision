@@ -4,7 +4,7 @@
 | objective   | better | margin        | what                                                                  |
 |-------------|--------|---------------|-----------------------------------------------------------------------|
 | `quality`   | higher | 0.005 (abs)   | macro dataset accuracy minus ECE on single-answer questions            |
-| `games`     | higher | 0.03 (abs)    | mean normalized game score, 0 = random play, 1 = the scripted expert   |
+| `games`     | higher | 0.04 (abs)    | mean normalized game score, 0 = random play, 1 = the scripted expert   |
 | `params_m`  | lower  | 1% (rel)      | parameters of the saved model, millions                                |
 | `latency_x` | lower  | 5% (rel)      | median predict time / the base checkpoint's, timed in the same L4 run  |
 
@@ -35,11 +35,14 @@ from typing import Dict, List, Optional, Sequence, Tuple
 # layers + game data) moved games by 0.013 (0.148 / 0.135: DoomBasic 0.78 / 0.66, every other game within 0.02).
 # On a real player (sep23-v2, 20 layers, games 45%) a repeat moved games by 0.003 (0.2375 / 0.2409) while single
 # games moved up to 0.12 (Acrobot 0.24 / 0.16, MountainCar 0.31 / 0.43), which the 10-game mean averages out.
+# A third run of that recipe (sep24-next) gave 0.2007 (MountainCar 0.20, LunarLander 0.01): spread 0.040 over three
+# runs, so the games margin is 0.04. Quality repeats within 0.004 for most recipes, but a recipe that trains the
+# vision tower gave 0.6634 / 0.6759 across two runs: repeat such a recipe before trusting a quality keep from it.
 # latency_x was 3% from the full model timed twice; the 15-layer architecture timed three times gave 0.768 / 0.749 /
 # 0.733 (4.6% spread, host noise alone: 9a06403 changed only the LR and was kept on latency), so the margin is 5%.
 OBJECTIVES = (
     ("quality", "max", 0.005, False),
-    ("games", "max", 0.03, False),
+    ("games", "max", 0.04, False),
     ("params_m", "min", 0.01, True),
     ("latency_x", "min", 0.05, True),
 )
