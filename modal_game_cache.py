@@ -1,4 +1,4 @@
-"""Modal job for docs/game-caching.md: one game decision's latency breakdown on a GPU, and duplicate-frame rates.
+"""Modal job for site-docs/concepts/game-caching.md: one game decision's latency breakdown on a GPU, and duplicate-frame rates.
 
     modal run modal_game_cache.py::main            # L4: examples/bench_game_step.py in bf16 and fp32, causal and block
     modal run modal_game_cache.py::main --mode graphs    # only the CUDA-graph comparison and the ViZDoom duplicates

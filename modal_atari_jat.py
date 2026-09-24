@@ -1,5 +1,5 @@
 """Modal jobs that convert the Atari subsets of ``jat-project/jat-dataset`` (``laya.atari_data.jat``) into
-``/data/atari/jat/<Game>/`` in the format of ``docs/atari-data-format.md``. CPU only.
+``/data/atari/jat/<Game>/`` in the format of ``site-docs/reference/atari-data-format.md``. CPU only.
 
     modal run modal_atari_jat.py::inspect --games pong,breakout     # stream one episode per game, print format facts
     modal run --detach modal_atari_jat.py::convert                  # every game, in parallel

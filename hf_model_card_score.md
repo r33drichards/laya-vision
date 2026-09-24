@@ -26,7 +26,7 @@ Typed, calibrated decisions about an **image plus optional text**, in one forwar
 
 This is the recommended Laya Vision checkpoint, pinned to the run `cauldron-score-2ep-bidir-full` (the moving copy is [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision)): a SmolVLM-256M backbone whose answer options attend to each other, trained on 19 closed-form subsets of The Cauldron and on four rubric-scored image datasets, so that the `score` head is trained for the first time. Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces its ModernBERT text encoder with a small vision-language model and keeps Laya's `predict(state, questions)` API, RLCD training objective and temperature calibration.
 
-- **Code and the other checkpoints:** [github.com/r33drichards/laya-vision](https://github.com/r33drichards/laya-vision). The data is described in `docs/score-data.md` and the runs in `docs/score-results.md`.
+- **Code and the other checkpoints:** [github.com/r33drichards/laya-vision](https://github.com/r33drichards/laya-vision). The data is described in `site-docs/concepts/score-data.md` and the runs in `site-docs/reference/results/score-results.md`.
 - **Demo:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU.
 - **Status:** experimental research project, not affiliated with Convai Innovations, the authors of Laya.
 

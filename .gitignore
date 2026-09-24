@@ -29,3 +29,7 @@ checkpoints/
 
 # autoresearch: per-run logs stay local; results.tsv and the per-experiment JSONs are committed
 autoresearch/runs/*/*.log
+
+# MkDocs output (mkdocs build) and nix build results
+site/
+result

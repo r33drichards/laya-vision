@@ -4,7 +4,7 @@
 #   Actions -> eval -> Run workflow, pick the branch whose code trained the checkpoint, fill in the checkpoint
 #   gh workflow run eval.yml --ref <branch> -f model=cauldron-score-2ep-bidir-full/best [-f games=false] [-f pr=15]
 #
-# Each part (datasets, games, latency) is its own job running `modal run modal_app.py::full_eval --parts <part>`
+# Each part (datasets, games, latency, robustness) is its own job running `modal run modal_app.py::full_eval --parts <part>`
 # without --detach, so the Modal containers' output is that job's log, and cancelling the run stops the Modal
 # app. The report job merges the parts' result files (scripts/eval_report.py), writes them to the run summary,
 # and creates or updates one comment per checkpoint on the pull request.
@@ -30,6 +30,10 @@ on:
         default: true
       latency:
         description: "Run the latency benchmark"
+        type: boolean
+        default: true
+      robustness:
+        description: "Run the robustness checks (shuffled-image / no-image controls, option order, typographic injection)"
         type: boolean
         default: true
       dataset_groups:
@@ -61,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [datasets, games, latency]
+        part: [datasets, games, latency, robustness]
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
@@ -70,7 +74,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
       MODEL: ${{ inputs.model }}
       PART: ${{ matrix.part }}
-      ENABLED: ${{ (matrix.part == 'datasets' && inputs.datasets) || (matrix.part == 'games' && inputs.games) || (matrix.part == 'latency' && inputs.latency) }}
+      ENABLED: ${{ (matrix.part == 'datasets' && inputs.datasets) || (matrix.part == 'games' && inputs.games) || (matrix.part == 'latency' && inputs.latency) || (matrix.part == 'robustness' && inputs.robustness) }}
       DATASETS: ${{ inputs.dataset_groups }}
       VAL_SPLIT: ${{ inputs.val_split }}
     steps:
@@ -124,11 +128,12 @@ jobs:
         run: |
           # the matrix job's result is shared, so derive each part's state from its requested flag and its file
           status=""
-          for part in datasets games latency; do
+          for part in datasets games latency robustness; do
             case "$part" in
               datasets) on="${{ inputs.datasets }}" ;;
               games) on="${{ inputs.games }}" ;;
               latency) on="${{ inputs.latency }}" ;;
+              robustness) on="${{ inputs.robustness }}" ;;
             esac
             if [ "$on" != "true" ]; then s=skipped
             elif [ -f "eval-results/$part.json" ]; then s=success

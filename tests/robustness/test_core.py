@@ -217,6 +217,12 @@ def test_summary_on_hand_made_predictions():
     lo, hi = tx["acc_ci"]
     assert 0 <= lo <= tx["acc"] <= hi <= 1
     assert "|" in R.format_table(R.summarize(preds, n_boot=0))
+    c = R.compact(R.summarize(preds, n_boot=200))
+    assert set(c["datasets"]["d"]) == {"orig", "option_order", "text"} and "text" in c["macro"]
+    assert "variants" not in c["datasets"]["d"]["text"] and "acc_by_order" not in c["datasets"]["d"]["option_order"]
+    assert c["datasets"]["d"]["option_order"]["acc_spread"] == pytest.approx(1 / 3)
+    assert c["datasets"]["d"]["text"]["delta_acc_ci"] == s["text"]["delta_acc_ci"]
+    json.dumps(c)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -266,3 +272,20 @@ def test_image_shuffle_control_plumbing(agent, dataset):
     assert s["image_shuffle"]["n_groups"] == s["text_only"]["n_groups"] == 8 and s["orig"]["n_groups"] == 9
     assert 0 <= s["image_shuffle"]["agree_with_text_only"] <= 1 and "majority_label_acc" in s["text_only"]
     json.dumps(s)  # JSON-able
+
+
+def test_extra_families_end_to_end(agent, dataset):
+    """Every opt-in family through ``build_variants`` -> plain ``score_rows`` (its default transform draws the
+    ``typo`` ops) -> ``summarize``: the core table stays the core families, each extension gets its own block."""
+    rows = rows_of(dataset)
+    variants = R.build_variants(rows, families=R.EXTRA_FAMILIES, seed=0)
+    assert {v["family"] for v in variants} == {"orig"} | set(R.EXTRA_FAMILIES)
+    assert R.build_variants(rows, families=R.EXTRA_FAMILIES, seed=0) == variants  # deterministic
+    preds = R.score_rows(agent.model, agent.processor, variants, agent.temperature, batch_size=8)
+    assert [p["id"] for p in preds] == [v["id"] for v in variants]
+    s = R.summarize(preds, n_boot=20, ece_floor_sims=20)
+    assert set(s["datasets"]["sq"]) == {"orig"}
+    assert {"options", "form", "injection", "ece_floor"} <= set(s)
+    json.dumps(s)
+    with pytest.raises(ValueError):
+        R.build_variants(rows, families=("nope",))

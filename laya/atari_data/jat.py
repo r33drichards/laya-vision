@@ -1,4 +1,4 @@
-"""Convert the Atari subsets of ``jat-project/jat-dataset`` into the shared format of ``docs/atari-data-format.md``.
+"""Convert the Atari subsets of ``jat-project/jat-dataset`` into the shared format of ``site-docs/reference/atari-data-format.md``.
 
 How JAT recorded Atari (``huggingface/jat`` ``data/envs/atari/create_atari_dataset.py``): a Sample Factory agent on
 envpool (``envpool.make(..., episodic_life=True, reward_clip=True)``, defaults ``full_action_space=False``,

@@ -18,9 +18,10 @@
 
   <section id="model-panel">
     <h2>1. Model</h2>
-    <p class="hint">The model files are not hosted anywhere public. Export them with
-      <code>scripts/export_onnx.py</code> (see the README in <code>web-demo/</code>) and point this at the folder,
-      or pass <code>?models=&lt;url&gt;</code>.</p>
+    <p class="hint">By default the model files load from
+      <a href="https://huggingface.co/thaitea/laya-vision-web">thaitea/laya-vision-web</a> on Hugging Face (fp16 is
+      475 MB, q8 355 MB; kept in the browser cache after the first load). To use your own export from
+      <code>scripts/export_onnx.py</code>, point this at its folder or pass <code>?models=&lt;url&gt;</code>.</p>
     <div class="row">
       <label>Model folder URL <input id="base-url" type="text" value="./models/laya-vision/" spellcheck="false"></label>
     </div>
@@ -51,6 +52,7 @@
     <h2>2. Image and state</h2>
     <div class="row">
       <label>Image <input id="image" type="file" accept="image/*"></label>
+      <span class="hint">An example photo is loaded; choose a file, paste an image (Ctrl/Cmd+V) or drop one on the page to use your own.</span>
       <button id="clear-image" type="button">No image</button>
     </div>
     <canvas id="preview" width="0" height="0"></canvas>

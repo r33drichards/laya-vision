@@ -1,4 +1,4 @@
-"""One game decision as a single CUDA graph: what the fixed question buys on a GPU (docs/game-caching.md).
+"""One game decision as a single CUDA graph: what the fixed question buys on a GPU (site-docs/concepts/game-caching.md).
 
 In game play every step asks the same ``choice`` question (the same instructions, the same buttons) about a new
 screen. The question cannot be cached as keys/values: in the causal "terminator" layout it comes *after* the

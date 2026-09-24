@@ -6,7 +6,7 @@ buttons picks the action (held for 4 tics). The window shows the game next to th
     pip install -e . torchvision vizdoom pygame
     python examples/vizdoom_live.py                        # "basic": shoot the monster in front of you
     python examples/vizdoom_live.py --scenario defend_the_center --device cpu
-    python examples/vizdoom_live.py --device cuda --cuda-graph --dtype bf16   # docs/game-caching.md
+    python examples/vizdoom_live.py --device cuda --cuda-graph --dtype bf16   # site-docs/concepts/game-caching.md
 
 Scenarios: basic, defend_the_center, defend_the_line, health_gathering, take_cover, predict_position,
 deadly_corridor, my_way_home. Keys: SPACE pause/resume, R new episode, ESC or close the window to quit.
@@ -41,7 +41,7 @@ def main():
                     help="weights dtype (default: the checkpoint's); bf16 makes the vision tower ~4.6x faster on a GPU")
     ap.add_argument("--cuda-graph", action="store_true",
                     help="run each decision as one captured CUDA graph (same answer, 3-5x faster at batch 1 in bf16 "
-                         "on an L4; see docs/game-caching.md). Runs eagerly, with no speedup, off CUDA")
+                         "on an L4; see site-docs/concepts/game-caching.md). Runs eagerly, with no speedup, off CUDA")
     args = ap.parse_args()
 
     game = vzd.DoomGame()

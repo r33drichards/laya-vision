@@ -1,0 +1,70 @@
+site_name: Laya Vision
+site_description: Typed, calibrated decisions about an image plus optional text, in one forward pass
+site_url: https://r33drichards.github.io/laya-vision/
+repo_url: https://github.com/r33drichards/laya-vision
+repo_name: r33drichards/laya-vision
+edit_uri_template: edit/main/site-docs/{path}
+docs_dir: site-docs
+site_dir: site
+theme:
+    name: mkdocs
+plugins:
+  - search
+  # As in mcp-js: the vendored mermaid library is loaded via extra_javascript (below), not the plugin's
+  # `javascript:` option, so MkDocs computes the right per-page URL; the plugin then skips its own injection
+  # because the filename contains "mermaid".
+  - mermaid2
+nav:
+  - Home: index.md
+
+  - Install:
+      - Overview: install/overview.md
+
+  - Tutorials:
+      - Overview: tutorials/overview.md
+      - Your first prediction: tutorials/first-prediction.md
+      - Run it in your browser (WebGPU): tutorials/browser-demo.md
+
+  - How-to:
+      - Overview: how-to/overview.md
+      - Calibrate on your own data: how-to/calibrate.md
+      - Run jobs on Modal: how-to/run-on-modal.md
+      - Evaluate a checkpoint: how-to/evaluate.md
+      - Export for the browser: how-to/export-for-the-web.md
+      - Play games with a checkpoint: how-to/play-games.md
+
+  - Concepts:
+      - Overview: concepts/overview.md
+      - How it works: concepts/how-it-works.md
+      - Architecture: concepts/architecture.md
+      - Calibration: concepts/calibration.md
+      - Training data: concepts/data.md
+      - Training data for score questions: concepts/score-data.md
+      - The browser runtime: concepts/browser-runtime.md
+      - Caching the fixed question in game play: concepts/game-caching.md
+
+  - Reference:
+      - Overview: reference/overview.md
+      - predict() and the answer schema: reference/predict.md
+      - Checkpoints: reference/checkpoints.md
+      - Browser demo files and checks: reference/web-demo.md
+      - Atari training data format: reference/atari-data-format.md
+      - Results:
+          - Scorecard (thaitea/laya-vision, 201M): reference/evals/laya-vision-201m.md
+          - Scorecard (previous checkpoint): reference/evals/laya-vision.md
+          - Score head results: reference/results/score-results.md
+          - ModernVBERT on The Cauldron: reference/results/modernvbert-cauldron.md
+          - Image splitting on SmolVLM2: reference/results/split-bench.md
+          - Robustness: reference/results/robustness.md
+          - Game training: reference/results/game-training.md
+          - Typed answers vs generated JSON: reference/results/decision-vs-generation.md
+          - What didn't work: reference/results/what-didnt-work.md
+markdown_extensions:
+  - tables
+  - toc:
+      permalink: true
+extra_css:
+    - stylesheets/footer-nav.css
+extra_javascript:
+    - js/footer-nav.js
+    - js/mermaid.min.js

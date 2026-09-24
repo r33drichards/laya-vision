@@ -33,18 +33,64 @@ function setStatus(el, text, kind = "") {
 
 const mb = (n) => (n / 1e6).toFixed(1) + " MB";
 
-$("image").addEventListener("change", async (ev) => {
-  const file = ev.target.files[0];
-  if (!file) return;
-  // the browser decodes (and applies EXIF orientation); the model's own resize runs in the worker
-  const bmp = await createImageBitmap(file);
+/** Decode ``blob`` into the preview canvas and the RGBA buffer the worker resizes. The browser decodes (and applies
+ * EXIF orientation); the model's own resize runs in the worker. */
+async function showImage(blob) {
+  const bmp = await createImageBitmap(blob);
   const c = $("preview");
   c.width = bmp.width;
   c.height = bmp.height;
   const ctx = c.getContext("2d", { willReadFrequently: true });
   ctx.drawImage(bmp, 0, 0);
   image = { rgba: ctx.getImageData(0, 0, bmp.width, bmp.height).data, width: bmp.width, height: bmp.height };
+}
+
+$("image").addEventListener("change", async (ev) => {
+  const file = ev.target.files[0];
+  if (file) await showImage(file);
 });
+
+// paste an image from the clipboard (screenshot, copied photo) anywhere on the page; text pastes pass through
+document.addEventListener("paste", async (ev) => {
+  const item = [...(ev.clipboardData?.items || [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
+  if (!item) return;
+  ev.preventDefault();
+  $("image").value = "";
+  await showImage(item.getAsFile());
+});
+
+// drag and drop an image file anywhere on the page; other drops (text into the boxes) behave as usual
+const imageFile = (dt) => [...(dt?.files || [])].find((f) => f.type.startsWith("image/"));
+const hasFiles = (dt) => [...(dt?.types || [])].includes("Files");
+let dragDepth = 0;
+document.addEventListener("dragenter", (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  dragDepth++;
+  document.body.classList.add("dragging");
+});
+document.addEventListener("dragleave", (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("dragging"); }
+});
+document.addEventListener("dragover", (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  ev.preventDefault(); // without this the browser opens the file instead of dropping it here
+  ev.dataTransfer.dropEffect = "copy";
+});
+document.addEventListener("drop", async (ev) => {
+  if (!hasFiles(ev.dataTransfer)) return;
+  ev.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove("dragging");
+  const file = imageFile(ev.dataTransfer);
+  if (!file) return;
+  $("image").value = "";
+  await showImage(file);
+});
+
+// preload the example photo (two turntables and a mixer) so a first visit can press Run straight away
+fetch("example.jpg").then((r) => (r.ok ? r.blob() : null)).then((b) => { if (b && !image) return showImage(b); })
+  .catch(() => {});
 
 $("clear-image").addEventListener("click", () => {
   image = null;
