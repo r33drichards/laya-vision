@@ -39,3 +39,19 @@ validation sets". That range is the ECE pooled over all of a checkpoint's valida
 per set, for the recommended checkpoint, both the committed metrics JSON and these rows give 0.16 (A-OKVQA),
 0.035-0.038 (ScienceQA) and 0.076-0.077 (VQAv2 yes/no), as the model card (`hf_model_card_score.md`) says. The
 README sentence now states both.
+
+## serving-throughput-l4.json, serving-throughput-h100.json
+
+`modal run modal_app.py::serving_throughput` (and `--gpu H100 --output results/raw/serving-throughput-h100.json`),
+code commit `1bb8f65`, `thaitea/laya-vision` at `8b318c99d7ad3ce19c24369263463882eada9d1e`, bf16, one container with
+8 cores and 16 GiB. 512 requests (one image and one question each, mean 120 input tokens) from the A-OKVQA,
+ScienceQA and VQAv2 yes/no val splits, seed 0. See `benchmarks/serving_throughput.py` for what each path times.
+
+| GPU | `predict` one at a time | GPU only, best batch | Pipelined with CPU preprocessing, best batch | $ per 1M requests, best pipelined |
+|---|---|---|---|---|
+| L4 | 21.6 req/s (46 ms) | 104 req/s (batch 16) | 65.5 req/s (batch 8-16) | $5.53 |
+| H100 | 21.0 req/s (35 ms) | 330 req/s (batch 128) | 154 req/s (batch 128) | $8.03 |
+
+Cost is the container's Modal list price (read 2026-09-24, recorded in `pricing`) over requests/second at 100% busy.
+Batching agrees with `predict` on 97.5-99% of argmaxes (195-198 of 200) with raw logits up to 1.0 apart: padding
+changes the bf16 kernels' rounding, and a near-tied row can flip. Batch 1 is exact.

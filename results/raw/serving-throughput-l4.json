@@ -1,0 +1,262 @@
+{
+  "version": "laya-serving-throughput-v1",
+  "code": {
+    "git_sha": "1bb8f65ef4c04a6f65ae2d9a67d11a11c6e430ba",
+    "dirty": false
+  },
+  "hardware": {
+    "gpu": "NVIDIA L4",
+    "gpu_priced_as": "L4",
+    "cpu_cores_requested": 8,
+    "memory_gib_requested": 16,
+    "os_cpu_count": 24,
+    "cpu": "x86_64"
+  },
+  "software": {
+    "torch": "2.14.0+cu130",
+    "transformers": "5.17.0",
+    "python": "3.12.10"
+  },
+  "dtype": "bf16",
+  "model": {
+    "source": "thaitea/laya-vision",
+    "revision": "8b318c99d7ad3ce19c24369263463882eada9d1e",
+    "provenance": {
+      "prompt_format_version": "1",
+      "checkpoint": {
+        "id": "thaitea/laya-vision",
+        "revision": "8b318c99d7ad3ce19c24369263463882eada9d1e"
+      },
+      "backbone": {
+        "id": "HuggingFaceTB/SmolVLM-256M-Instruct",
+        "revision": null
+      },
+      "dtype": "bfloat16",
+      "readout": "terminator",
+      "option_attention": "block"
+    }
+  },
+  "input": {
+    "n_requests": 510,
+    "datasets": "aokvqa,scienceqa,vqav2_yesno val, seed 0, 170 per set",
+    "questions_per_request": 1,
+    "mean_input_tokens": 120.08
+  },
+  "pricing": {
+    "source": "https://modal.com/pricing",
+    "read_on": "2026-09-24",
+    "gpu_per_second": {
+      "L4": 0.000222,
+      "A10G": 0.000306,
+      "A100-40GB": 0.000583,
+      "A100-80GB": 0.000694,
+      "H100": 0.001097
+    },
+    "cpu_core_per_second": 1.31e-05,
+    "memory_gib_per_second": 2.22e-06,
+    "container_usd_per_second": 0.00036232
+  },
+  "sequential": {
+    "latency_ms": {
+      "median": 46.2279504999934,
+      "p90": 49.75885199999652,
+      "n": 200
+    },
+    "requests_per_second": 21.617903573577028,
+    "usd_per_million_requests": 16.76018207625155
+  },
+  "cpu_preprocessing": {
+    "1": {
+      "requests_per_second": 58.94662377761487
+    },
+    "2": {
+      "requests_per_second": 112.55308898307969
+    },
+    "4": {
+      "requests_per_second": 178.79224369083573
+    },
+    "8": {
+      "requests_per_second": 187.28365604856432
+    }
+  },
+  "gpu_batched": {
+    "1": {
+      "batch_latency_ms": {
+        "median": 32.52029600000128,
+        "p90": 34.360900999999444,
+        "n": 510
+      },
+      "requests_per_second": 30.757440602565044,
+      "peak_cuda_bytes": 459806720,
+      "usd_per_million_requests": 11.779913832290195
+    },
+    "2": {
+      "batch_latency_ms": {
+        "median": 37.297585000004574,
+        "p90": 39.443328000004385,
+        "n": 255
+      },
+      "requests_per_second": 53.379216623093654,
+      "peak_cuda_bytes": 482450432,
+      "usd_per_million_requests": 6.7876604963746905
+    },
+    "4": {
+      "batch_latency_ms": {
+        "median": 50.239515000015444,
+        "p90": 53.552566999997,
+        "n": 127
+      },
+      "requests_per_second": 78.98743477279012,
+      "peak_cuda_bytes": 526492672,
+      "usd_per_million_requests": 4.58705870170648
+    },
+    "8": {
+      "batch_latency_ms": {
+        "median": 77.99051300000315,
+        "p90": 82.02455299999656,
+        "n": 63
+      },
+      "requests_per_second": 101.75127338750791,
+      "peak_cuda_bytes": 616969216,
+      "usd_per_million_requests": 3.5608399574533713
+    },
+    "16": {
+      "batch_latency_ms": {
+        "median": 151.1299949999909,
+        "p90": 173.35569499999792,
+        "n": 31
+      },
+      "requests_per_second": 103.70503848481069,
+      "peak_cuda_bytes": 797037568,
+      "usd_per_million_requests": 3.493755031517275
+    },
+    "32": {
+      "batch_latency_ms": {
+        "median": 345.05536599999687,
+        "p90": 379.74446999999145,
+        "n": 15
+      },
+      "requests_per_second": 93.42489583241421,
+      "peak_cuda_bytes": 1157764096,
+      "usd_per_million_requests": 3.8781953864838172
+    },
+    "64": {
+      "batch_latency_ms": {
+        "median": 787.8738850000104,
+        "p90": 858.98628999999,
+        "n": 7
+      },
+      "requests_per_second": 81.16547732241607,
+      "peak_cuda_bytes": 1879217152,
+      "usd_per_million_requests": 4.463966848377487
+    },
+    "128": {
+      "batch_latency_ms": {
+        "median": 1680.6397979999872,
+        "p90": 1800.567104999999,
+        "n": 3
+      },
+      "requests_per_second": 74.9487326368981,
+      "peak_cuda_bytes": 3322123264,
+      "usd_per_million_requests": 4.834237848361238
+    }
+  },
+  "pipelined": {
+    "1": {
+      "requests_per_second": 26.123714522964928,
+      "threads": 8,
+      "usd_per_million_requests": 13.869390575428714
+    },
+    "2": {
+      "requests_per_second": 39.70304214567726,
+      "threads": 8,
+      "usd_per_million_requests": 9.125749071584638
+    },
+    "4": {
+      "requests_per_second": 53.62833520338304,
+      "threads": 8,
+      "usd_per_million_requests": 6.75612991948972
+    },
+    "8": {
+      "requests_per_second": 65.4758886390688,
+      "threads": 8,
+      "usd_per_million_requests": 5.533640054849249
+    },
+    "16": {
+      "requests_per_second": 65.5149617434702,
+      "threads": 8,
+      "usd_per_million_requests": 5.53033979350697
+    },
+    "32": {
+      "requests_per_second": 63.72236693895222,
+      "threads": 8,
+      "usd_per_million_requests": 5.685915596122042
+    },
+    "64": {
+      "requests_per_second": 62.449718165536275,
+      "threads": 8,
+      "usd_per_million_requests": 5.801787592373014
+    },
+    "128": {
+      "requests_per_second": 61.11208968941698,
+      "threads": 8,
+      "usd_per_million_requests": 5.928777789163775
+    }
+  },
+  "agreement_with_predict": {
+    "1": {
+      "n": 200,
+      "argmax_matches": 200,
+      "max_abs_logit_diff": 0.0,
+      "median_abs_logit_diff": 0.0
+    },
+    "2": {
+      "n": 200,
+      "argmax_matches": 197,
+      "max_abs_logit_diff": 0.8961081504821777,
+      "median_abs_logit_diff": 0.061008572578430176
+    },
+    "4": {
+      "n": 200,
+      "argmax_matches": 195,
+      "max_abs_logit_diff": 0.8693761825561523,
+      "median_abs_logit_diff": 0.09003329277038574
+    },
+    "8": {
+      "n": 200,
+      "argmax_matches": 197,
+      "max_abs_logit_diff": 1.0098834037780762,
+      "median_abs_logit_diff": 0.061279296875
+    },
+    "16": {
+      "n": 200,
+      "argmax_matches": 197,
+      "max_abs_logit_diff": 0.6019231677055359,
+      "median_abs_logit_diff": 0.0705946683883667
+    },
+    "32": {
+      "n": 200,
+      "argmax_matches": 196,
+      "max_abs_logit_diff": 0.6429624557495117,
+      "median_abs_logit_diff": 0.07047836482524872
+    },
+    "64": {
+      "n": 200,
+      "argmax_matches": 197,
+      "max_abs_logit_diff": 0.5075573921203613,
+      "median_abs_logit_diff": 0.06712204217910767
+    },
+    "128": {
+      "n": 200,
+      "argmax_matches": 198,
+      "max_abs_logit_diff": 0.9642224311828613,
+      "median_abs_logit_diff": 0.06897187232971191
+    }
+  },
+  "best": {
+    "batch_size": 16,
+    "requests_per_second": 65.5149617434702,
+    "threads": 8,
+    "usd_per_million_requests": 5.53033979350697
+  }
+}
