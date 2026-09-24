@@ -11,3 +11,5 @@ cf7514b	0.6582	0.6909	0.0327	0.2995	201.3105	0.8298	discard	exp: next-move head 
 1e5ad68	0.6806	0.7064	0.0259	0.2333	201.3105	0.8394	discard	exp: next-move head at w 0.5 on the batch-64 point
 56328f0	0.6812	0.7055	0.0243	0.2519	201.3105	0.8372	keep	repeat: next head w 0.5 on batch 64
 f40043f	0.6792	0.7056	0.0264	0.2031	201.3105	0.8437	discard	exp: next-move head at w 1.0 on the batch-64 point
+62ed48b	0.6669	0.6943	0.0273	0.2964	201.3105	0.8490	discard	exp: next-move head at w 0.5 on the vision-half-LR point (sep24-next)
+2e21003	0.6563	0.6864	0.0301	0.3141	201.3105	0.8342	discard	repeat: next head w 0.5 on vision half LR
