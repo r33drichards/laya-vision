@@ -388,7 +388,7 @@ def train_eval(source: str, name: str, commit: str, token: str, minutes: float, 
         pool_dir = FULL_POOL_DIR
     else:
         pool = H.load_pool(("train", "games"))
-        pool_dir = H.POOL_DIR
+        pool_dir = "%s + %s" % (H.pool_dir("train"), H.pool_dir("games"))
     sizes = {n: len(v) for n, v in pool["train"].items()}
     sizes.update({n: len(v) for n, v in pool["games"].items()})
     _log(t_run, "data (%s): train %d examples, games %d, calib %d, eval %d" % (
@@ -454,7 +454,7 @@ def train_eval(source: str, name: str, commit: str, token: str, minutes: float, 
            "setup_s": round(setup_s, 1), "train_s": round(train_s, 1), "checkpoint": out_dir,
            "config": {k: v for k, v in agent.cfg.items() if isinstance(v, (str, int, float, bool)) or v is None},
            "full_run": {"name": name, "minutes": minutes, "data": data, "pool_dir": pool_dir,
-                        "calib_eval_pool": H.POOL_DIR, "attempts": len(attempts), "resumed_from_step":
+                        "calib_eval_pool": H.pool_dir("calib"), "attempts": len(attempts), "resumed_from_step":
                         resume["step"] if resume else None, "train_loop": {k: v for k, v in record.items() if k != "stats"},
                         "steps": stats.get("steps"), "steps_per_s": stats.get("steps_per_s"),
                         "data_wait_frac": stats.get("data_wait_frac"), "samples": sum(seen.values()) or None,
