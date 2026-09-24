@@ -86,8 +86,15 @@ if HERE not in sys.path:
 
 import harness as H  # noqa: E402  (the fixed harness: constants, volumes, image, pool, Context, _summary)
 
-FULL_POOL_VERSION = "full-v1"
+FULL_POOL_VERSION = "full-v2"   # the version --prepare-pool builds: its kinds are those mapped to it below
+# Which version's directory holds each kind: full-v1's train parts (15 GB) are unchanged, full-v2 adds game frames
+# with their frame history (harness.POOL_HISTORY previous screens) and next-move targets, for any GAME_FRAMES mode.
+FULL_POOL_VERSIONS = {"train": "full-v1", "games": "full-v2"}
 FULL_POOL_DIR = "/data/autoresearch/pool-" + FULL_POOL_VERSION
+
+
+def _full_dir(kind: str) -> str:
+    return "/data/autoresearch/pool-" + FULL_POOL_VERSIONS[kind]
 SHARD_RECORDS = 8000        # records per pool shard (one CPU container reads each shard's images, ~40 files/s)
 FULL_ROOT = os.path.join(H.ROOT, "full")    # /ckpt/autoresearch/full/<name>/
 MAX_MINUTES = 20 * 60       # the training function's 24 h timeout, less loading, calibration and eval
@@ -107,7 +114,8 @@ def full_selection(kind: str, name: str) -> List[Dict]:
 
     if kind == "games":
         root, prepared = H.GAME_DATASETS[name]
-        return [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train")]
+        return [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train", next_targets=True,
+                                                                      history=H.POOL_HISTORY)]
     if kind != "train":
         raise ValueError(kind)
     exs = H.load_split(name, "train")
@@ -121,7 +129,8 @@ def _image_paths(ex: Dict) -> List[str]:
     s = ex["state"]
     if not isinstance(s, dict):
         return []
-    return ([s["image"]] if isinstance(s.get("image"), str) else []) + [p for p in s.get("images") or []]
+    return (([s["image"]] if isinstance(s.get("image"), str) else []) + [p for p in s.get("images") or []]
+            + [p for p in ex.get("history") or []])  # a game frame's previous screens
 
 
 def _shard_of(ex: Dict, i: int, n_shards: int) -> int:
@@ -132,7 +141,7 @@ def _shard_of(ex: Dict, i: int, n_shards: int) -> int:
 
 
 def _shard_file(kind: str, name: str, shard: int, n_shards: int) -> str:
-    return os.path.join(FULL_POOL_DIR, kind, name, "%03d-of-%03d.pkl" % (shard, n_shards))
+    return os.path.join(_full_dir(kind), kind, name, "%03d-of-%03d.pkl" % (shard, n_shards))
 
 
 @app.function(image=image, cpu=2, memory=8192, timeout=30 * 60, volumes={"/data": H.data_vol.read_only()})
@@ -177,6 +186,8 @@ def build_shard(kind: str, name: str, shard: int, n_shards: int) -> Dict:
             if state.get("images"):
                 state["images"] = [data[p] for p in state["images"]]
             ex = dict(ex, state=state)
+            if ex.get("history"):
+                ex["history"] = [data[p] for p in ex["history"]]
         out.append(ex)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".tmp", "wb") as f:
@@ -208,7 +219,8 @@ def write_manifest(manifest: Dict) -> str:
 def build_full_pool() -> None:
     """``--prepare-pool``: plan every part, build every missing shard in parallel, then write the manifest."""
     t0 = time.time()
-    plans = sorted(plan_part.starmap(FULL_PARTS), key=lambda p: FULL_PARTS.index((p["kind"], p["name"])))
+    parts = [(k, n) for k, n in FULL_PARTS if FULL_POOL_VERSIONS[k] == FULL_POOL_VERSION]
+    plans = sorted(plan_part.starmap(parts), key=lambda p: parts.index((p["kind"], p["name"])))
     jobs = [(p["kind"], p["name"], s, p["shards"]) for p in plans for s in range(p["shards"])]
     print("full pool %s: %d parts, %d shards, %d records, %d unique images" % (
         FULL_POOL_DIR, len(plans), len(jobs), sum(p["records"] for p in plans), sum(p["unique_images"] for p in plans)))
@@ -225,6 +237,7 @@ def build_full_pool() -> None:
     if failed:
         raise SystemExit("%d shards failed; re-run --prepare-pool to build the missing ones" % failed)
     manifest = {"version": FULL_POOL_VERSION, "dir": FULL_POOL_DIR, "shard_records": SHARD_RECORDS,
+                "kinds": sorted({p["kind"] for p in plans}), "history": H.POOL_HISTORY,
                 "harness": {"n_calib": H.N_CALIB, "trainable": list(H.TRAINABLE_DATASETS),
                             "calib": list(H.CALIB_DATASETS), "games": {k: list(v) for k, v in H.GAME_DATASETS.items()}},
                 "built_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "code": _git_state(),
@@ -239,15 +252,20 @@ def load_full_pool() -> Dict[str, Dict[str, List[Dict]]]:
     import pickle
     from concurrent.futures import ThreadPoolExecutor
 
-    mpath = os.path.join(FULL_POOL_DIR, "manifest.json")
-    if not os.path.exists(mpath):
-        raise FileNotFoundError("the full data pool %s is missing or incomplete (no manifest.json); build it with: "
-                                "modal run autoresearch/full_run.py --prepare-pool" % FULL_POOL_DIR)
-    with open(mpath) as f:
-        manifest = json.load(f)
-    if manifest["harness"]["n_calib"] != H.N_CALIB or manifest["harness"]["trainable"] != list(H.TRAINABLE_DATASETS):
-        raise RuntimeError("the full pool was built for other harness datasets / calibration tail; build a new version")
-    files = [_shard_file(p["kind"], p["name"], s, p["shards"]) for p in manifest["parts"] for s in range(p["shards"])]
+    wanted = []  # (manifest part) for every kind, from the version that holds it
+    for version in sorted(set(FULL_POOL_VERSIONS.values())):
+        d = "/data/autoresearch/pool-" + version
+        mpath = os.path.join(d, "manifest.json")
+        if not os.path.exists(mpath):
+            raise FileNotFoundError("the full data pool %s is missing or incomplete (no manifest.json); build it with: "
+                                    "modal run autoresearch/full_run.py --prepare-pool (from code whose "
+                                    "FULL_POOL_VERSION is %s)" % (d, version))
+        with open(mpath) as f:
+            manifest = json.load(f)
+        if manifest["harness"]["n_calib"] != H.N_CALIB or manifest["harness"]["trainable"] != list(H.TRAINABLE_DATASETS):
+            raise RuntimeError("the full pool %s was built for other harness datasets / calibration tail" % d)
+        wanted += [p for p in manifest["parts"] if FULL_POOL_VERSIONS[p["kind"]] == version]
+    files = [_shard_file(p["kind"], p["name"], s, p["shards"]) for p in wanted for s in range(p["shards"])]
 
     def read(path):
         with open(path, "rb") as f:
@@ -258,7 +276,7 @@ def load_full_pool() -> Dict[str, Dict[str, List[Dict]]]:
         for blob in pool.map(read, files):
             parts.setdefault((blob["kind"], blob["name"]), []).extend(zip(blob["indices"], blob["examples"]))
     out: Dict[str, Dict[str, List[Dict]]] = {"train": {}, "games": {}}
-    for p in manifest["parts"]:
+    for p in wanted:
         rows = sorted(parts.get((p["kind"], p["name"]), []), key=lambda r: r[0])
         if len(rows) != p["records"]:
             raise RuntimeError("%s/%s: %d records in the shards, manifest says %d" % (p["kind"], p["name"], len(rows),
@@ -393,7 +411,7 @@ def train_eval(source: str, name: str, commit: str, token: str, minutes: float, 
     held = H.load_pool(("calib", "eval"))  # calibration and eval always from the harness pool
     if data == "full":
         pool = load_full_pool()
-        pool_dir = FULL_POOL_DIR
+        pool_dir = " + ".join("%s from %s" % kv for kv in FULL_POOL_VERSIONS.items())
     else:
         pool = H.load_pool(("train", "games"))
         pool_dir = "%s + %s" % (H.pool_dir("train"), H.pool_dir("games"))
