@@ -9,8 +9,8 @@
    "weights_sha256": "31220803f38b44b8b1649b207c632612c9a35dee0da2ef1ea35d21e4b424be68",
    "published_as": {
     "repo": "thaitea/laya-vision-201m",
-    "revision": "PENDING",
-    "note": "also thaitea/laya-vision"
+    "revision": "0b6228f7a0762566de1c4539e9aa4eb1c1aef5f4",
+    "note": "model.safetensors LFS sha256 on the Hub equals weights_sha256; also thaitea/laya-vision at 8b318c99d7ad3ce19c24369263463882eada9d1e"
    },
    "evidence": "results/raw/smolvlm-autoresearch-full-long-sep24-b64-best.vqa-val.predictions.jsonl.gz",
    "meta": "results/raw/smolvlm-autoresearch-full-long-sep24-b64-best.vqa-val.meta.json",

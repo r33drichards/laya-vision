@@ -74,7 +74,7 @@ Calibrated answers, as `predict` returns them. These three numbers are backed by
 
 ### Full evaluation suite
 
-From the repository's `full_eval` run on this checkpoint ([scorecard](https://github.com/r33drichards/laya-vision/blob/main/docs/evals/laya-vision-201m.md)), next to the same suite on the previous checkpoint:
+From the repository's `full_eval` run on this checkpoint ([scorecard](https://github.com/r33drichards/laya-vision/blob/ded975c10f51c57912f7c7be3cb31486807d5029/docs/evals/laya-vision-201m.md)), next to the same suite on the previous checkpoint:
 
 | | This model | Previous checkpoint |
 |---|---:|---:|
