@@ -1,0 +1,506 @@
+{
+ "name": "sep25-ep-lr2e6",
+ "checkpoint": "/ckpt/autoresearch/rl-smoke/sep25-ep-lr2e6",
+ "from": "/ckpt/autoresearch/full/long-sep24-b64-stack2/best",
+ "config": {
+  "games": [
+   "CartPole",
+   "LunarLander",
+   "Acrobot"
+  ],
+  "group": 8,
+  "episodes_per_phase": 16,
+  "temperature": 1.0,
+  "lr": 2e-06,
+  "kl": 0.0,
+  "entropy": 0.0,
+  "returns": "episode",
+  "gamma": 0.99,
+  "clip": 0.2,
+  "epochs": 1,
+  "minibatch": 64,
+  "max_update_steps": 0,
+  "every": 200,
+  "seed": 1,
+  "seed_lo": 10000,
+  "caps": {}
+ },
+ "rl_seconds": 531.4793667793274,
+ "summary": {
+  "phases": 7,
+  "episodes": 336,
+  "decisions": 35658,
+  "rollout_s": 490.5417025089264,
+  "update_s": 40.86007332801819,
+  "rollout_frac": 0.9231088882537801,
+  "episodes_per_s": 0.6849570551932551,
+  "decisions_per_s": 72.6910674823842
+ },
+ "phases": [
+  {
+   "phase": 0,
+   "step": null,
+   "rollout_s": 73.93387866020203,
+   "update_s": 7.526996612548828,
+   "rollout_frac": 0.9075998559143073,
+   "episodes": 48,
+   "decisions": 5258,
+   "episodes_per_s": 0.6492287550691965,
+   "decisions_per_s": 71.11759987820491,
+   "games": {
+    "CartPole": {
+     "mean_score": 28.0,
+     "mean_return": 28.0,
+     "episodes": 16,
+     "mean_steps": 28.0,
+     "cut": 0,
+     "normalized": 0.03977669225401256
+    },
+    "LunarLander": {
+     "mean_score": -220.43744358927896,
+     "mean_return": -220.43744358927896,
+     "episodes": 16,
+     "mean_steps": 101.3125,
+     "cut": 0,
+     "normalized": -0.11848114648790667
+    },
+    "Acrobot": {
+     "mean_score": -199.25,
+     "mean_return": -199.25,
+     "episodes": 16,
+     "mean_steps": 199.3125,
+     "cut": 0,
+     "normalized": 0.006644518272425249
+    }
+   },
+   "lr": 2e-06,
+   "update_steps": 58,
+   "rows": 3658,
+   "mean_abs_adv": 0.7453552581679856,
+   "entropy": 1.0839766654474983,
+   "clip_frac": 0.04040948275862069,
+   "ratio_dev": 0.04574525343446896,
+   "loss": -0.054754251132494415
+  },
+  {
+   "phase": 1,
+   "step": null,
+   "rollout_s": 69.57305788993835,
+   "update_s": 2.8929145336151123,
+   "rollout_frac": 0.9600789938109651,
+   "episodes": 48,
+   "decisions": 5098,
+   "episodes_per_s": 0.6899222408181911,
+   "decisions_per_s": 73.27549132689872,
+   "games": {
+    "CartPole": {
+     "mean_score": 28.375,
+     "mean_return": 28.375,
+     "episodes": 16,
+     "mean_steps": 28.375,
+     "cut": 0,
+     "normalized": 0.0418702023726448
+    },
+    "LunarLander": {
+     "mean_score": -224.7685732010356,
+     "mean_return": -224.7685732010356,
+     "episodes": 16,
+     "mean_steps": 90.25,
+     "cut": 0,
+     "normalized": -0.12867473664525808
+    },
+    "Acrobot": {
+     "mean_score": -200.0,
+     "mean_return": -200.0,
+     "episodes": 16,
+     "mean_steps": 200.0,
+     "cut": 0,
+     "normalized": 0.0
+    }
+   },
+   "lr": 2e-06,
+   "update_steps": 30,
+   "rows": 1898,
+   "mean_abs_adv": 0.8550962945775178,
+   "entropy": 1.140989851951599,
+   "clip_frac": 0.010193452487389247,
+   "ratio_dev": 0.026572835942109425,
+   "loss": -0.09176573120057582
+  },
+  {
+   "phase": 2,
+   "step": null,
+   "rollout_s": 67.29325985908508,
+   "update_s": 2.6320855617523193,
+   "rollout_frac": 0.9623586333980702,
+   "episodes": 48,
+   "decisions": 4926,
+   "episodes_per_s": 0.7132958055608246,
+   "decisions_per_s": 73.20198204567963,
+   "games": {
+    "CartPole": {
+     "mean_score": 29.375,
+     "mean_return": 29.375,
+     "episodes": 16,
+     "mean_steps": 29.375,
+     "cut": 0,
+     "normalized": 0.04745289602233078
+    },
+    "LunarLander": {
+     "mean_score": -210.84302125330214,
+     "mean_return": -210.84302125330217,
+     "episodes": 16,
+     "mean_steps": 78.5,
+     "cut": 0,
+     "normalized": -0.09590006075359654
+    },
+    "Acrobot": {
+     "mean_score": -200.0,
+     "mean_return": -200.0,
+     "episodes": 16,
+     "mean_steps": 200.0,
+     "cut": 0,
+     "normalized": 0.0
+    }
+   },
+   "lr": 2e-06,
+   "update_steps": 27,
+   "rows": 1726,
+   "mean_abs_adv": 0.8692040365517191,
+   "entropy": 1.1084969176186457,
+   "clip_frac": 0.015139635514329982,
+   "ratio_dev": 0.027240337252064987,
+   "loss": -0.10390362867878543
+  },
+  {
+   "phase": 3,
+   "step": null,
+   "rollout_s": 71.32171034812927,
+   "update_s": 7.654982805252075,
+   "rollout_frac": 0.903072887714034,
+   "episodes": 48,
+   "decisions": 5207,
+   "episodes_per_s": 0.6730068553559163,
+   "decisions_per_s": 73.00722282996368,
+   "games": {
+    "CartPole": {
+     "mean_score": 30.1875,
+     "mean_return": 30.1875,
+     "episodes": 16,
+     "mean_steps": 30.1875,
+     "cut": 0,
+     "normalized": 0.05198883461270063
+    },
+    "LunarLander": {
+     "mean_score": -135.29477298980507,
+     "mean_return": -135.29477298980507,
+     "episodes": 16,
+     "mean_steps": 99.4375,
+     "cut": 0,
+     "normalized": 0.08190756657150262
+    },
+    "Acrobot": {
+     "mean_score": -195.625,
+     "mean_return": -195.625,
+     "episodes": 16,
+     "mean_steps": 195.8125,
+     "cut": 0,
+     "normalized": 0.03875968992248062
+    }
+   },
+   "lr": 2e-06,
+   "update_steps": 82,
+   "rows": 5207,
+   "mean_abs_adv": 0.7165074596670419,
+   "entropy": 1.0501390797335928,
+   "clip_frac": 0.030065283679017205,
+   "ratio_dev": 0.038806496029038254,
+   "loss": -0.005267824364326349
+  },
+  {
+   "phase": 4,
+   "step": null,
+   "rollout_s": 70.06657981872559,
+   "update_s": 5.270496368408203,
+   "rollout_frac": 0.93004113465571,
+   "episodes": 48,
+   "decisions": 5100,
+   "episodes_per_s": 0.6850626949993041,
+   "decisions_per_s": 72.78791134367606,
+   "games": {
+    "CartPole": {
+     "mean_score": 24.6875,
+     "mean_return": 24.6875,
+     "episodes": 16,
+     "mean_steps": 24.6875,
+     "cut": 0,
+     "normalized": 0.021284019539427775
+    },
+    "LunarLander": {
+     "mean_score": -182.39714028006136,
+     "mean_return": -182.39714028006136,
+     "episodes": 16,
+     "mean_steps": 95.8125,
+     "cut": 0,
+     "normalized": -0.028950863131128747
+    },
+    "Acrobot": {
+     "mean_score": -198.125,
+     "mean_return": -198.125,
+     "episodes": 16,
+     "mean_steps": 198.25,
+     "cut": 0,
+     "normalized": 0.016611295681063124
+    }
+   },
+   "lr": 2e-06,
+   "update_steps": 55,
+   "rows": 3500,
+   "mean_abs_adv": 0.8817230054967455,
+   "entropy": 1.0894351374019275,
+   "clip_frac": 0.025826446305621753,
+   "ratio_dev": 0.032023013078353625,
+   "loss": -0.039265965433283284
+  },
+  {
+   "phase": 5,
+   "step": null,
+   "rollout_s": 68.57033896446228,
+   "update_s": 7.2980101108551025,
+   "rollout_frac": 0.903806920806856,
+   "episodes": 48,
+   "decisions": 4975,
+   "episodes_per_s": 0.7000111232478637,
+   "decisions_per_s": 72.55323621162755,
+   "games": {
+    "CartPole": {
+     "mean_score": 39.625,
+     "mean_return": 39.625,
+     "episodes": 16,
+     "mean_steps": 39.625,
+     "cut": 0,
+     "normalized": 0.104675505931612
+    },
+    "LunarLander": {
+     "mean_score": -158.309511222026,
+     "mean_return": -158.309511222026,
+     "episodes": 16,
+     "mean_steps": 74.75,
+     "cut": 0,
+     "normalized": 0.027740910260601857
+    },
+    "Acrobot": {
+     "mean_score": -196.4375,
+     "mean_return": -196.4375,
+     "episodes": 16,
+     "mean_steps": 196.5625,
+     "cut": 0,
+     "normalized": 0.03156146179401993
+    }
+   },
+   "lr": 2e-06,
+   "update_steps": 78,
+   "rows": 4975,
+   "mean_abs_adv": 0.7072675829140399,
+   "entropy": 1.0326005610135884,
+   "clip_frac": 0.026203627865283918,
+   "ratio_dev": 0.034503874607766286,
+   "loss": -0.03255514139070725
+  },
+  {
+   "phase": 6,
+   "step": null,
+   "rollout_s": 69.78287696838379,
+   "update_s": 7.584587335586548,
+   "rollout_frac": 0.9019667064983888,
+   "episodes": 48,
+   "decisions": 5094,
+   "episodes_per_s": 0.687847822922909,
+   "decisions_per_s": 72.99785020769372,
+   "games": {
+    "CartPole": {
+     "mean_score": 26.5625,
+     "mean_return": 26.5625,
+     "episodes": 16,
+     "mean_steps": 26.5625,
+     "cut": 0,
+     "normalized": 0.031751570132588974
+    },
+    "LunarLander": {
+     "mean_score": -128.12729747214203,
+     "mean_return": -128.12729747214203,
+     "episodes": 16,
+     "mean_steps": 94.0625,
+     "cut": 0,
+     "normalized": 0.09877667796719561
+    },
+    "Acrobot": {
+     "mean_score": -197.625,
+     "mean_return": -197.625,
+     "episodes": 16,
+     "mean_steps": 197.75,
+     "cut": 0,
+     "normalized": 0.021040974529346623
+    }
+   },
+   "lr": 2e-06,
+   "update_steps": 80,
+   "rows": 5094,
+   "mean_abs_adv": 0.6989577465070439,
+   "entropy": 1.0488205417990684,
+   "clip_frac": 0.0399157072417438,
+   "ratio_dev": 0.04603599960682914,
+   "loss": 0.0002499206457287073
+  }
+ ],
+ "before": {
+  "CartPole": {
+   "model": 22.6875,
+   "normalized": 0.010118632240055827,
+   "scores": [
+    8.0,
+    23.0,
+    21.0,
+    10.0,
+    27.0,
+    35.0,
+    13.0,
+    41.0,
+    40.0,
+    16.0,
+    40.0,
+    16.0,
+    11.0,
+    11.0,
+    24.0,
+    27.0
+   ],
+   "seconds": 10.8,
+   "frames": "stack-2"
+  },
+  "LunarLander": {
+   "model": -305.56323140790795,
+   "normalized": -0.3188301248443456,
+   "scores": [
+    -420.4231195509202,
+    -300.9613916717879,
+    -23.075696045178432,
+    -424.9886334977819,
+    -48.49434054094857,
+    -320.40910673485723,
+    -405.30301722840204,
+    -251.4767949249571,
+    -115.91793857853253,
+    -367.4055708852194,
+    -402.8774440984223,
+    -390.5727555017212,
+    -411.5044896626739,
+    -346.249153927165,
+    -349.0989990200479,
+    -310.2532506579113
+   ],
+   "seconds": 20.6,
+   "frames": "stack-2"
+  },
+  "Acrobot": {
+   "model": -102.625,
+   "normalized": 0.8626799557032115,
+   "scores": [
+    -142.0,
+    -80.0,
+    -134.0,
+    -87.0,
+    -95.0,
+    -102.0,
+    -89.0,
+    -65.0,
+    -105.0,
+    -169.0,
+    -118.0,
+    -100.0,
+    -69.0,
+    -74.0,
+    -112.0,
+    -101.0
+   ],
+   "seconds": 23.4,
+   "frames": "stack-2"
+  }
+ },
+ "after": {
+  "CartPole": {
+   "model": 29.9375,
+   "normalized": 0.05059316120027914,
+   "scores": [
+    27.0,
+    53.0,
+    13.0,
+    28.0,
+    36.0,
+    13.0,
+    24.0,
+    30.0,
+    24.0,
+    49.0,
+    32.0,
+    21.0,
+    38.0,
+    32.0,
+    16.0,
+    43.0
+   ],
+   "seconds": 6.2,
+   "frames": "stack-2"
+  },
+  "LunarLander": {
+   "model": -160.90651400652018,
+   "normalized": 0.02162869834462154,
+   "scores": [
+    -167.37483508434715,
+    -422.4337535264549,
+    3.59903613037001,
+    -81.98798457390312,
+    -124.60334789280203,
+    -223.40695803186765,
+    -102.23456241988842,
+    -121.42522568666627,
+    -111.0503673214865,
+    -155.64339603697294,
+    -303.9424890218501,
+    -108.8719515102876,
+    -124.06868542547782,
+    -165.88201621315193,
+    -171.41684041219318,
+    -193.76084707734353
+   ],
+   "seconds": 15.8,
+   "frames": "stack-2"
+  },
+  "Acrobot": {
+   "model": -115.375,
+   "normalized": 0.7497231450719822,
+   "scores": [
+    -117.0,
+    -162.0,
+    -77.0,
+    -106.0,
+    -80.0,
+    -86.0,
+    -112.0,
+    -139.0,
+    -122.0,
+    -115.0,
+    -118.0,
+    -134.0,
+    -128.0,
+    -186.0,
+    -88.0,
+    -76.0
+   ],
+   "seconds": 25.2,
+   "frames": "stack-2"
+  }
+ },
+ "total_seconds": 654.6991918087006,
+ "gpu": "NVIDIA H100 80GB HBM3"
+}

@@ -212,6 +212,12 @@ globally, and the benchmark fixes what the model sees.
   Mid-training, roll the current model out on training seeds, label the frames it visits with the BFS / expert move
   (or a short `laya.search` where there is no expert), add them to the mix, keep training. autogo's version is
   MCTS from its own positions, with the visit counts as targets.
+- **RL from game rewards** (`RL_GAMES`, `laya.game_rl`): GRPO on the model's own play, the game's score as the
+  reward (no expert, so no expert ceiling, and on the model's own states). Every `RL_EVERY` supervised steps a phase
+  plays `RL_EPISODES_PER_PHASE` episodes per game in groups of `RL_GROUP` from the same training seed, sampled at
+  `RL_TEMPERATURE`, and takes PPO-clip steps on the group-normalised returns (`RL_RETURN`: `"episode"` or `"togo"`)
+  at `RL_LR` times the schedule's factor, optionally held near the start by `RL_KL`. Control and grid games only here
+  (the training image has no ale-py or vizdoom). Watch the question-answering metrics: RL phases take training time.
 - **Calibration**: the harness fits temperatures, but training with the proper scoring rules (`w_ce_schedule`, `w_sph`)
   changes how well a single temperature can fix things.
 

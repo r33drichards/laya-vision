@@ -526,7 +526,7 @@ class RLConfig:
     group: int = 8                 # G: episodes per seed
     episodes_per_phase: int = 16   # per game per phase (rounded to whole groups, at least one)
     temperature: float = 1.0       # sampling temperature on top of the calibrated one
-    lr: float = 2e-6               # times the supervised schedule's factor when run as a train() hook
+    lr: float = 1e-5               # times the supervised schedule's factor when run as a train() hook
     kl: float = 0.0                # KL(pi || pi_start) weight (a frozen copy of the starting model when > 0)
     entropy: float = 0.0           # entropy bonus
     returns: str = "episode"       # "episode" (GRPO outcome) or "togo" (discounted return-to-go)
