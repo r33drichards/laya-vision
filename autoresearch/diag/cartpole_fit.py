@@ -12,9 +12,11 @@ time) a data/format problem, or can the model not see what the expert decides on
 
 Seeds: training episodes 20_000+, held-out and play 60_000+ (both below the 100_000 eval floor).
 ``modal run autoresearch/diag/cartpole_fit.py`` writes ``autoresearch/runs/full/cartpole-fit.json``."""
+import os
+
 import modal
 
-REPO = "/home/user/laya-vision"
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 img = (modal.Image.debian_slim(python_version="3.12")
        .pip_install("torch==2.14.0", "torchvision==0.29.0", "transformers==5.17.0", "safetensors", "huggingface_hub",
                     "numpy", "pillow", "num2words", "gymnasium[classic-control,box2d]==1.3.0")
@@ -118,7 +120,11 @@ def fit(arm: dict) -> dict:
     mode = F.mode_for(agent.cfg, "control")
     q = control_question("CartPole", mode)["action"]
     train_ex = toolkit.control_examples("CartPole", N_TRAIN, seed=TRAIN_SEED, frames=mode, workers=8)
-    probe = train_ex[:400]
+    probe_src = train_ex
+    if arm.get("mix"):  # the other control games alongside, as in the recipe's mix (probe stays CartPole)
+        for g in ("Acrobot", "MountainCar", "LunarLander"):
+            train_ex = train_ex + toolkit.control_examples(g, N_TRAIN, seed=TRAIN_SEED, frames=mode, workers=8)
+    probe = probe_src[:400]
 
     def choose(st):
         p = agent.predict(st, {"a": q})["answers"]["a"]["probabilities"]
@@ -157,7 +163,8 @@ def fit(arm: dict) -> dict:
         base = vt.set_trainable
         vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
     stats, t0 = {}, time.time()
-    losses = vt.train(agent.model, agent.processor, train_ex, steps=10**9, batch_size=BATCH, freeze="full",
+    extra = {"lr_vision": arm["lr_vision"]} if arm.get("lr_vision") is not None else {}
+    losses = vt.train(agent.model, agent.processor, train_ex, steps=10**9, batch_size=BATCH, freeze="full", **extra,
                       lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=20, max_minutes=MINUTES, num_workers=12,
                       log_every=100, device="cuda", stats=stats)
     after = measure()
@@ -169,8 +176,20 @@ def fit(arm: dict) -> dict:
 
 
 @app.local_entrypoint()
-def main():
+def main(lowlr: bool = False):
+    """``--lowlr``: the vision tower trained at its own low LR (``train(lr_vision=...)``), CartPole alone or with the
+    other control games; writes ``cartpole-fit-lowlr.json``."""
     import json
+
+    if lowlr:
+        arms = [{"ckpt": "stack-2", "vision": True, "lr_vision": 1e-6},
+                {"ckpt": "stack-2", "vision": True, "lr_vision": 2e-7},
+                {"ckpt": "stack-2", "vision": True, "lr_vision": 1e-6, "mix": True},
+                {"ckpt": "single", "vision": True, "lr_vision": 1e-6}]
+        res = {"fit": list(fit.map(arms))}
+        print(json.dumps(res, indent=1))
+        json.dump(res, open(REPO + "/autoresearch/runs/full/cartpole-fit-lowlr.json", "x"), indent=1)
+        return
 
     fc = format_check.spawn()
     arms = [{"ckpt": c, "vision": v} for c in ("single", "stack-2") for v in (False, True)]
