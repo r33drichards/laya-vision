@@ -33,6 +33,9 @@
     modal run modal_app.py::maze_eval --models <run>/best     # Maze at 4x4 / 6x6 / 8x8 cells: BFS expert, random, models
     modal run modal_app.py::snake_eval --models <run>/best    # Snake on a 10x10 board: greedy expert, random, models
     modal run modal_app.py::control_eval --models <run>/best  # CartPole / Acrobot / MountainCar / LunarLander: expert, random, models
+    modal run modal_app.py::mujoco_eval --model thaitea/laya-vision --revision <commit> [--games Hopper,Ant]
+                                                     # the 11 Gymnasium MuJoCo games, one GPU each: the model's first
+                                                     # episode as .webm, and its return against random / still / expert
     modal run modal_app.py::full_eval --model <run>/best  # EVERYTHING on one checkpoint, in parallel: evaluate over
                                                      # vqa,cauldron,score,eval + games suite + latency + robustness
                                                      # controls (shuffled / no image, option order); one JSON in
@@ -2127,11 +2130,14 @@ SUITE_ATARI_GAMES = ("Freeway", "Breakout", "Galaxian")
 SUITE_CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 
-def _load_policy_agent(model: str):
+def _load_policy_agent(model: str, revision: str = ""):
+    """A checkpoint on the volume, or a Hub model (at ``revision`` when given)."""
     from laya.vlm import VLMAgent
 
     path = _ckpt_path(model)
-    return VLMAgent(path if os.path.exists(path) else model, device="cuda", dtype="bf16")
+    if os.path.exists(path):
+        return VLMAgent(path, device="cuda", dtype="bf16")
+    return VLMAgent(model, device="cuda", dtype="bf16", revision=revision or None)
 
 
 def _play_grid(game: str, policy: str, model: str, episodes: int, size: int, seed: int, max_steps: int) -> dict:
@@ -2291,6 +2297,70 @@ def control_eval(models: str = "cauldron-score-2ep-bidir-full/best", games: str 
     for m in dict.fromkeys(m for m, _ in calls):
         print("\n== %s" % m)
         _control_print([r for mm, c in calls if mm == m for r in [_get(c, "control")] if r])
+
+
+SUITE_MUJOCO_GAMES = ("InvertedPendulum", "InvertedDoublePendulum", "Reacher", "Pusher", "Swimmer", "Hopper",
+                      "Walker2d", "HalfCheetah", "Ant", "Humanoid", "HumanoidStandup")  # laya.mujocogames.GAMES
+# OSMesa renders in software, so it needs nothing from the GPU driver
+mujoco_image = _with_local_code(base_image.apt_install("libosmesa6", "libgl1")
+                                .pip_install("gymnasium[mujoco]==1.3.0", "imageio[ffmpeg]")
+                                .env({"MUJOCO_GL": "osmesa", "PYOPENGL_PLATFORM": "osmesa"}))
+
+
+@app.function(image=mujoco_image, gpu=["L4", "A10G"], cpu=4, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+def play_mujoco(game: str, model: str, revision: str = "", episodes: int = 3, baseline_episodes: int = 10,
+                seed: int = GRID_SEED, max_steps: int = 300) -> dict:
+    """One MuJoCo game (``laya.mujocogames``) with a checkpoint, via ``laya.mujocogames.baseline``: the model's
+    first episode as a .webm (returned as bytes under ``video``), its mean return over ``episodes`` seeded episodes,
+    and random / still (always NONE) / expert play on the same seeds."""
+    import tempfile
+
+    from laya import mujocogames as mg
+
+    agent = _load_policy_agent(model, revision)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "%s-model.webm" % game)
+        row = mg.baseline(agent, game, path, episodes, baseline_episodes, seed, max_steps)
+        with open(path, "rb") as f:
+            video = f.read()
+    row.update(model=model, revision=agent.source.get("revision"))  # the resolved commit, for a Hub model
+    print(json.dumps(row))
+    row["video"] = video
+    return row
+
+
+@app.local_entrypoint()
+def mujoco_eval(model: str = "thaitea/laya-vision", revision: str = "", games: str = ",".join(SUITE_MUJOCO_GAMES),
+                episodes: int = 3, baseline_episodes: int = 10, max_steps: int = 300, out: str = "mujoco-baseline"):
+    """modal run modal_app.py::mujoco_eval --model thaitea/laya-vision --revision <commit> [--games Hopper,Ant]
+    [--out dir]  -- every MuJoCo game at once, one GPU each; writes <out>/<game>-model.webm and <out>/baseline.json
+    locally and prints the table. Pass --revision for a Hub model so the run is pinned."""
+    os.makedirs(out, exist_ok=True)
+    calls = [(g, play_mujoco.spawn(g, model, revision, episodes, baseline_episodes, GRID_SEED, max_steps))
+             for g in games.split(",") if g]
+    rows = []
+    for game, call in calls:
+        row = _get(call, "mujoco " + game)
+        if not row:
+            continue
+        row["video"], video = os.path.join(out, "%s-model.webm" % game), row["video"]
+        with open(row["video"], "wb") as f:
+            f.write(video)
+        rows.append(row)
+        with open(os.path.join(out, "baseline.json"), "w") as f:
+            json.dump({"git": _git_state(), "errors": _ERRORS, "rows": rows}, f, indent=1)
+    _mujoco_print(rows)
+
+
+def _mujoco_print(rows: list) -> None:
+    """As ``laya.mujocogames.baseline_table`` (this runs in the local client, which has no numpy)."""
+    print("\n%-22s %10s %10s %10s %10s %7s" % ("game", "model", "random", "still", "expert", "norm"))
+    for r in rows:
+        ex = "-" if r["expert_score"] is None else "%.1f" % r["expert_score"]
+        nm = "-" if r["normalized"] is None else "%.2f" % r["normalized"]
+        print("%-22s %10.1f %10.1f %10.1f %10s %7s" % (r["game"], r["model_score"], r["random_score"],
+                                                      r["still_score"], ex, nm))
 
 
 def _git_state() -> dict:

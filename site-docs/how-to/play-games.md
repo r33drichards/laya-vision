@@ -45,8 +45,16 @@ python examples/mujoco_baseline.py --model thaitea/laya-vision \
     --revision 8b318c99d7ad3ce19c24369263463882eada9d1e --out mujoco-baseline/
 ```
 
+The model takes about 1 s a step on a CPU, so the whole baseline takes an hour there. On Modal every game runs on
+its own GPU at the same time, and the videos and `baseline.json` land in `--out` locally:
+
+```bash
+modal run modal_app.py::mujoco_eval --model thaitea/laya-vision \
+    --revision 8b318c99d7ad3ce19c24369263463882eada9d1e --max-steps 0 --out mujoco-baseline/
+```
+
 On a machine with no display it renders through EGL (`apt-get install libegl1`), or set `MUJOCO_GL=osmesa`
-(`libosmesa6`). The MuJoCo games are not in the games suite yet, and no checkpoint has been trained on them.
+(`libosmesa6`, which the Modal image uses). The MuJoCo games are not in the games suite yet, and no checkpoint has been trained on them.
 
 ## Score a checkpoint on the games suite
 

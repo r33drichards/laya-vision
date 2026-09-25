@@ -170,5 +170,97 @@ def play_episodes(game: str, policy, episodes: int, seed: int = 0, max_steps: in
     return _play_episodes(game, policy, episodes, seed, max_steps, make=MujocoGame)
 
 
+PANEL_W = 300
+_CHOSEN, _OTHER = (255, 200, 80), (90, 90, 110)
+
+
+def draw(frame, env: MujocoGame, action: str, probs, label: str) -> np.ndarray:
+    """A video frame: the screen at 2x, and a panel with the step, the return and each action (the chosen one
+    highlighted, with the model's probabilities when given)."""
+    from PIL import Image, ImageDraw
+
+    w, h = frame.width * 2, frame.height * 2
+    img = Image.new("RGB", (w + PANEL_W, h), (24, 24, 28))
+    img.paste(frame.resize((w, h), Image.NEAREST), (0, 0))
+    d = ImageDraw.Draw(img)
+    x = w + 12
+    d.text((x, 12), "%s  (%s)" % (env.game, label), fill=(230, 230, 230))
+    d.text((x, 30), "step %d   return %.1f" % (env.steps, env.score), fill=(170, 170, 170))
+    row = min(26, (h - 60) // len(env.actions))  # 35 options for Humanoid
+    for i, a in enumerate(env.actions):
+        y = 56 + row * i
+        chosen = a == action
+        d.text((x, y), a, fill=_CHOSEN if chosen else (200, 200, 200))
+        p = probs.get(a, 0.0) if probs else (1.0 if chosen else 0.0)
+        d.rectangle((x + 160, y + 1, x + 160 + max(1, int(120 * p)), y + row - 3), fill=_CHOSEN if chosen else _OTHER)
+    return np.asarray(img)
+
+
+def model_chooser(agent, game: str):
+    """``choose(env) -> (action, probabilities)`` from the model's answer on the ghosted screen."""
+    from laya.games import control_question
+
+    question = control_question(game)
+
+    def choose(env):
+        ans = agent.predict({"image": env.render()}, question)["answers"]["action"]
+        return ans["choice"], ans.get("probabilities")
+    return choose
+
+
+def record(env: MujocoGame, choose, label: str, out_path: str, max_steps: int = 0) -> None:
+    """Play ``env`` to its end (or ``max_steps``) with ``choose(env) -> (action, probabilities or None)``, writing
+    each screen the policy saw to ``out_path`` (.webm: VP9, else H.264) in real time. Needs ``imageio[ffmpeg]``."""
+    import imageio.v2 as imageio
+
+    codec = {"codec": "libvpx-vp9", "ffmpeg_params": ["-b:v", "0", "-crf", "32"]} if out_path.endswith(".webm") else {}
+    fps = round(1 / env.env.unwrapped.dt)
+    with imageio.get_writer(out_path, fps=fps, macro_block_size=1, **codec) as out:
+        while not env.done and not (max_steps and env.steps >= max_steps):
+            frame = env.render()  # the ghosted screen, as the model sees it
+            action, probs = choose(env)
+            out.append_data(draw(frame, env, action, probs, label))
+            env.step(action)
+        out.append_data(draw(env.render(), env, "", None, label + (" - ended" if env.terminated else "")))
+
+
+def baseline(agent, game: str, video: str, episodes: int = 3, baseline_episodes: int = 10, seed: int = 200_000,
+             max_steps: int = 300) -> Dict:
+    """A model on ``game``: its first episode recorded to ``video``, its mean return over ``episodes`` seeded
+    episodes (seeds ``seed + i``), and random, still and (where there is one) expert play over ``baseline_episodes``
+    episodes from the same seed. Every episode stops at ``max_steps`` (0 = the environment's limit)."""
+    import time
+
+    t0 = time.time()
+    choose = model_chooser(agent, game)
+    env = MujocoGame(game, seed)
+    record(env, choose, "model", video, max_steps)
+    model = [{"score": round(env.score, 3), "steps": env.steps, "terminated": env.terminated}]
+    env.close()
+    if episodes > 1:
+        model += play_episodes(game, lambda e: choose(e)[0], episodes - 1, seed + 1, max_steps)["results"]
+    rnd = play_episodes(game, random_policy(seed), baseline_episodes, seed, max_steps)
+    still = play_episodes(game, still_policy, baseline_episodes, seed, max_steps)
+    exp = play_episodes(game, expert_policy, baseline_episodes, seed, max_steps) if has_expert(game) else None
+    m = float(np.mean([e["score"] for e in model]))
+    return {"game": game, "model_score": round(m, 3), "model_scores": [e["score"] for e in model],
+            "model_steps": [e["steps"] for e in model], "random_score": round(rnd["mean_score"], 3),
+            "still_score": round(still["mean_score"], 3),
+            "expert_score": None if exp is None else round(exp["mean_score"], 3),
+            "normalized": None if exp is None else normalized(m, rnd["mean_score"], exp["mean_score"]),
+            "episodes": episodes, "baseline_episodes": baseline_episodes, "seed": seed, "max_steps": max_steps,
+            "seconds": round(time.time() - t0, 1)}
+
+
+def baseline_table(rows) -> str:
+    lines = ["%-22s %10s %10s %10s %10s %7s" % ("game", "model", "random", "still", "expert", "norm")]
+    for r in rows:
+        ex = "-" if r["expert_score"] is None else "%.1f" % r["expert_score"]
+        nm = "-" if r["normalized"] is None else "%.2f" % r["normalized"]
+        lines.append("%-22s %10.1f %10.1f %10.1f %10s %7s" % (r["game"], r["model_score"], r["random_score"],
+                                                            r["still_score"], ex, nm))
+    return "\n".join(lines)
+
+
 __all__ = ["GAMES", "MujocoGame", "play_episodes", "normalized", "expert_policy", "random_policy", "still_policy",
-           "has_expert", "model_policy"]
+           "has_expert", "model_policy", "model_chooser", "record", "baseline", "baseline_table"]
