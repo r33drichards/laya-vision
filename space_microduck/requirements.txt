@@ -1,0 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0
+torchvision==0.29.0
+transformers==5.17.0
+safetensors
+huggingface_hub
+numpy
+pillow
+num2words
+quackd==0.14.0
+laya @ git+https://github.com/r33drichards/laya-vision@f4b4bd4655dfcfcfaae216114e461f885f6e2c1e
