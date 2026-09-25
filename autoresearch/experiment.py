@@ -63,8 +63,8 @@ CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 # RL from game rewards (laya.game_rl: GRPO, the game's own score as the reward, rollouts on training seeds < 100,000),
 # interleaved with the supervised batches through train()'s step_hook. RL_GAMES = () is off: the recipe is unchanged.
 # Games: CartPole, Acrobot, MountainCar, LunarLander, Maze4, Maze6, Snake10 (Atari needs ale-py, not in this image).
-RL_GAMES = ()
-RL_EVERY = 200             # supervised steps between RL phases; a value in (0, 1) is RL's share of the wall clock
+RL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
+RL_EVERY = 0.5            # supervised steps between RL phases; a value in (0, 1) is RL's share of the wall clock
 RL_GROUP = 8               # G: episodes per seed (the group the advantage is normalised over)
 RL_EPISODES_PER_PHASE = 16  # per game per phase (whole groups)
 RL_TEMPERATURE = 1.0       # sampling temperature on top of the checkpoint's calibrated one
