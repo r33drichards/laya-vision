@@ -139,6 +139,9 @@ def train(agent, ctx):
     if TRAIN_VISION:
         base = vt.set_trainable
         vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
+        # recompute the vision tower's activations in backward: at batch 64 with stack-2 its stored activations
+        # overflow the H100's 80 GB (the language layers are unaffected)
+        agent.model.encoder.vision_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
     extra = {}
     if RL_GAMES:
