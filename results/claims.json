@@ -63,6 +63,31 @@
      "vqav2_yesno": "VQAv2 yes/no"
     }
    }
+  },
+  {
+   "about": "HF model card hf_model_card_microduck_kick.md, thaitea/laya-vision-microduck-kick (run microduck-kick-ft2-cal/best: microduck-kick-ft2's weights, temperatures refitted on the autoresearch pool's calibration tail): accuracy on the three official VQA val splits; calibrated ECE from its metrics JSON",
+   "weights_sha256": "2992e2694ab85d32d4559d617d00e6d6ff56023949fb8d7937aecd2732b390f3",
+   "evidence": "results/raw/smolvlm-microduck-kick-ft2-cal-best.vqa-val.predictions.jsonl.gz",
+   "meta": "results/raw/smolvlm-microduck-kick-ft2-cal-best.vqa-val.meta.json",
+   "metrics_json": "docs/microduck-kick-ft2-cal-metrics.json",
+   "metrics_path": [
+    "final",
+    "val_calibrated"
+   ],
+   "datasets": [
+    "aokvqa",
+    "scienceqa",
+    "vqav2_yesno"
+   ],
+   "readme": {
+    "file": "hf_model_card_microduck_kick.md",
+    "row_contains": "[thaitea/laya-vision-microduck-kick](",
+    "columns": {
+     "aokvqa": "A-OKVQA",
+     "scienceqa": "ScienceQA",
+     "vqav2_yesno": "VQAv2 yes/no"
+    }
+   }
   }
  ]
 }

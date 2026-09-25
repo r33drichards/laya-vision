@@ -1,0 +1,365 @@
+{
+  "run": "microduck-kick-ft2-cal/best",
+  "source": "modal run modal_app.py::evaluate --run-name microduck-kick-ft2-cal/best (all 34 val sets, NVIDIA A10, app ap-zAvBUk5Y0d7Fg5t6rgrzjb); the checkpoint is microduck-kick-ft2/best's weights with temperatures refitted by modal_microduck.py::recalibrate",
+  "temperature": [
+    3.308541774749756,
+    2.1620657444000244,
+    2.898714303970337
+  ],
+  "final": {
+    "val_raw": {
+      "all": {
+        "n": 59427,
+        "acc": 0.691,
+        "ece": 0.181
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.591,
+        "ece": 0.342
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.83,
+        "ece": 0.117
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.711,
+        "ece": 0.234
+      },
+      "cauldron_ai2d": {
+        "n": 282,
+        "acc": 0.759,
+        "ece": 0.2
+      },
+      "cauldron_aokvqa": {
+        "n": 552,
+        "acc": 0.75,
+        "ece": 0.205
+      },
+      "cauldron_iconqa": {
+        "n": 606,
+        "acc": 0.919,
+        "ece": 0.068
+      },
+      "cauldron_intergps": {
+        "n": 94,
+        "acc": 0.319,
+        "ece": 0.444
+      },
+      "cauldron_scienceqa": {
+        "n": 301,
+        "acc": 0.887,
+        "ece": 0.077
+      },
+      "cauldron_tqa": {
+        "n": 264,
+        "acc": 0.758,
+        "ece": 0.2
+      },
+      "cauldron_visual7w": {
+        "n": 1729,
+        "acc": 0.859,
+        "ece": 0.096
+      },
+      "cauldron_raven": {
+        "n": 542,
+        "acc": 0.764,
+        "ece": 0.176
+      },
+      "cauldron_figureqa": {
+        "n": 1928,
+        "acc": 0.83,
+        "ece": 0.054
+      },
+      "cauldron_hateful_memes": {
+        "n": 456,
+        "acc": 0.884,
+        "ece": 0.107
+      },
+      "cauldron_nlvr2": {
+        "n": 906,
+        "acc": 0.78,
+        "ece": 0.18
+      },
+      "cauldron_vsr": {
+        "n": 160,
+        "acc": 0.919,
+        "ece": 0.081
+      },
+      "cauldron_vqarad": {
+        "n": 62,
+        "acc": 0.806,
+        "ece": 0.159
+      },
+      "cauldron_clevr": {
+        "n": 1718,
+        "acc": 0.622,
+        "ece": 0.086
+      },
+      "cauldron_dvqa": {
+        "n": 1397,
+        "acc": 0.904,
+        "ece": 0.039
+      },
+      "cauldron_mapqa": {
+        "n": 1598,
+        "acc": 0.613,
+        "ece": 0.04
+      },
+      "cauldron_ocrvqa": {
+        "n": 996,
+        "acc": 0.855,
+        "ece": 0.107
+      },
+      "cauldron_vqav2": {
+        "n": 1019,
+        "acc": 0.779,
+        "ece": 0.175
+      },
+      "cauldron_chartqa": {
+        "n": 41,
+        "acc": 0.659,
+        "ece": 0.312
+      },
+      "score_vlfeedback": {
+        "n": 2000,
+        "acc": 0.535,
+        "ece": 0.101
+      },
+      "score_ava": {
+        "n": 1000,
+        "acc": 0.848,
+        "ece": 0.277
+      },
+      "score_richhf": {
+        "n": 1990,
+        "acc": 0.562,
+        "ece": 0.124
+      },
+      "score_crisismmd": {
+        "n": 529,
+        "acc": 0.656,
+        "ece": 0.277
+      },
+      "eval_koniq": {
+        "n": 1000,
+        "acc": 0.506,
+        "ece": 0.128
+      },
+      "eval_evalmuse": {
+        "n": 3134,
+        "acc": 0.213,
+        "ece": 0.459
+      },
+      "eval_cifar10h": {
+        "n": 10000,
+        "acc": 0.793,
+        "ece": 0.158
+      },
+      "eval_ferplus": {
+        "n": 3569,
+        "acc": 0.475,
+        "ece": 0.302
+      },
+      "eval_vizwiz": {
+        "n": 4319,
+        "acc": 0.503,
+        "ece": 0.372
+      },
+      "eval_pope_random": {
+        "n": 3000,
+        "acc": 0.835,
+        "ece": 0.141
+      },
+      "eval_pope_popular": {
+        "n": 3000,
+        "acc": 0.817,
+        "ece": 0.159
+      },
+      "eval_pope_adversarial": {
+        "n": 3000,
+        "acc": 0.773,
+        "ece": 0.198
+      }
+    },
+    "val_calibrated": {
+      "all": {
+        "n": 59427,
+        "acc": 0.691,
+        "ece": 0.047
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.591,
+        "ece": 0.149
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.83,
+        "ece": 0.022
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.711,
+        "ece": 0.091
+      },
+      "cauldron_ai2d": {
+        "n": 282,
+        "acc": 0.759,
+        "ece": 0.089
+      },
+      "cauldron_aokvqa": {
+        "n": 552,
+        "acc": 0.75,
+        "ece": 0.045
+      },
+      "cauldron_iconqa": {
+        "n": 606,
+        "acc": 0.919,
+        "ece": 0.033
+      },
+      "cauldron_intergps": {
+        "n": 94,
+        "acc": 0.319,
+        "ece": 0.17
+      },
+      "cauldron_scienceqa": {
+        "n": 301,
+        "acc": 0.887,
+        "ece": 0.058
+      },
+      "cauldron_tqa": {
+        "n": 264,
+        "acc": 0.758,
+        "ece": 0.101
+      },
+      "cauldron_visual7w": {
+        "n": 1729,
+        "acc": 0.859,
+        "ece": 0.077
+      },
+      "cauldron_raven": {
+        "n": 542,
+        "acc": 0.764,
+        "ece": 0.084
+      },
+      "cauldron_figureqa": {
+        "n": 1928,
+        "acc": 0.83,
+        "ece": 0.078
+      },
+      "cauldron_hateful_memes": {
+        "n": 456,
+        "acc": 0.884,
+        "ece": 0.068
+      },
+      "cauldron_nlvr2": {
+        "n": 906,
+        "acc": 0.78,
+        "ece": 0.055
+      },
+      "cauldron_vsr": {
+        "n": 160,
+        "acc": 0.919,
+        "ece": 0.071
+      },
+      "cauldron_vqarad": {
+        "n": 62,
+        "acc": 0.806,
+        "ece": 0.107
+      },
+      "cauldron_clevr": {
+        "n": 1718,
+        "acc": 0.622,
+        "ece": 0.05
+      },
+      "cauldron_dvqa": {
+        "n": 1397,
+        "acc": 0.904,
+        "ece": 0.056
+      },
+      "cauldron_mapqa": {
+        "n": 1598,
+        "acc": 0.613,
+        "ece": 0.021
+      },
+      "cauldron_ocrvqa": {
+        "n": 996,
+        "acc": 0.855,
+        "ece": 0.069
+      },
+      "cauldron_vqav2": {
+        "n": 1019,
+        "acc": 0.779,
+        "ece": 0.045
+      },
+      "cauldron_chartqa": {
+        "n": 41,
+        "acc": 0.659,
+        "ece": 0.202
+      },
+      "score_vlfeedback": {
+        "n": 2000,
+        "acc": 0.535,
+        "ece": 0.089
+      },
+      "score_ava": {
+        "n": 1000,
+        "acc": 0.848,
+        "ece": 0.469
+      },
+      "score_richhf": {
+        "n": 1990,
+        "acc": 0.562,
+        "ece": 0.088
+      },
+      "score_crisismmd": {
+        "n": 529,
+        "acc": 0.656,
+        "ece": 0.183
+      },
+      "eval_koniq": {
+        "n": 1000,
+        "acc": 0.506,
+        "ece": 0.169
+      },
+      "eval_evalmuse": {
+        "n": 3134,
+        "acc": 0.213,
+        "ece": 0.247
+      },
+      "eval_cifar10h": {
+        "n": 10000,
+        "acc": 0.793,
+        "ece": 0.05
+      },
+      "eval_ferplus": {
+        "n": 3569,
+        "acc": 0.475,
+        "ece": 0.108
+      },
+      "eval_vizwiz": {
+        "n": 4319,
+        "acc": 0.503,
+        "ece": 0.206
+      },
+      "eval_pope_random": {
+        "n": 3000,
+        "acc": 0.835,
+        "ece": 0.042
+      },
+      "eval_pope_popular": {
+        "n": 3000,
+        "acc": 0.817,
+        "ece": 0.044
+      },
+      "eval_pope_adversarial": {
+        "n": 3000,
+        "acc": 0.773,
+        "ece": 0.075
+      }
+    }
+  }
+}
