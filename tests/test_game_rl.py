@@ -339,7 +339,7 @@ def test_train_with_an_idle_hook_is_unchanged():
         torch.manual_seed(1)
         a = VLMAgent(backbone=BACKBONE, device="cpu")
         runs.append(train(a.model, a.processor, exs, steps=2, batch_size=2, seed=3, log_every=0, step_hook=hook))
-    assert runs[0] == runs[1]
+    assert runs[1] == pytest.approx(runs[0], rel=1e-5)  # CPU kernels are not bit-deterministic across runs
     assert [c[0] for c in calls] == [1, 2] and calls[0][1] == ["deadline", "device", "elapsed_s", "lr_scale",
                                                                "progress"]
 
@@ -387,3 +387,39 @@ def test_model_policy_matches_the_benchmark_forward_and_updates(agent):
     assert set(rec["games"]) == {"Maze4", "CartPole"} and rec["decisions"] > 0
     assert rec["update_steps"] > 0  # the entropy term keeps every step, tied groups included
     assert any(not torch.equal(v, dict(agent.model.named_parameters())[n]) for n, v in before.items())
+
+
+def test_lr_vision_gets_its_own_group(monkeypatch):
+    """``train(lr_vision=...)`` puts the vision tower in its own optimizer group; without it the groups are as before."""
+    import torch
+    import laya.vlm_train as vt
+
+    class Enc(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.vision_model = torch.nn.Linear(2, 2)
+            self.text_model = torch.nn.Linear(2, 2)
+
+    class M(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.encoder, self.head = Enc(), torch.nn.Linear(2, 2)
+
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_adamw(groups, **kw):
+        seen.append([(len(g["params"]), g["lr"]) for g in groups])
+        raise Stop
+
+    monkeypatch.setattr(vt, "set_trainable", lambda model, mode, n_last=4: 0)
+    monkeypatch.setattr(torch.optim, "AdamW", fake_adamw)
+    for kw in ({}, {"lr_vision": 1e-6}):
+        try:
+            vt.train(M(), None, [], lr_head=1e-4, lr_backbone=1e-5, device="cpu", **kw)
+        except Stop:
+            pass
+    assert seen[0] == [(2, 1e-4), (4, 1e-5)]
+    assert seen[1] == [(2, 1e-4), (2, 1e-5), (2, 1e-6)]

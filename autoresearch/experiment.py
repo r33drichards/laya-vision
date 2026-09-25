@@ -44,7 +44,8 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-TRAIN_VISION = False      # with "full": train the vision tower too (at LR_BACKBONE)
+TRAIN_VISION = False      # with "full": train the vision tower too (at LR_VISION)
+LR_VISION = None          # the vision tower's LR when it trains; None = LR_BACKBONE
 LR_HEAD = 5e-5
 LR_BACKBONE = 1e-5
 BATCH_SIZE = 64
@@ -142,8 +143,11 @@ def train(agent, ctx):
     extra = {}
     if RL_GAMES:
         extra["step_hook"] = rl_trainer(agent).hook
+    if TRAIN_VISION and LR_VISION is not None:
+        extra["lr_vision"] = LR_VISION
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
-               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
+               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS,
+               mix_weights=ctx.mix,
                w_next=W_NEXT if NEXT_HEAD else 0.0, max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device,
                **extra)
 

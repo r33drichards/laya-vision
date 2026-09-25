@@ -356,6 +356,7 @@ def train(
     w_value: float = 1.0,
     w_next: float = 0.15,
     step_hook: Optional[Callable[[int, Dict], object]] = None,
+    lr_vision: Optional[float] = None,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -394,6 +395,9 @@ def train(
     ``save_state_every_min`` is clamped to ``MIN_STATE_MINUTES`` and backed off further when writes are slow
     (``STATE_SAVE_OVERHEAD``), so no caller can spend most of its GPU time checkpointing.
 
+    ``lr_vision`` (with a trainable vision tower) gives the vision tower's parameters their own optimizer group at
+    that LR, on the same schedule; ``None`` keeps them in the backbone group at ``lr_backbone``.
+
     ``step_hook(step, ctx)`` (e.g. ``laya.game_rl.GameRL.hook``, RL from game rewards) is called after every step
     with ``ctx = {"lr_scale", "progress", "elapsed_s", "deadline", "device"}``: the LR schedule's current factor, the
     progress the schedule used, the training time so far, the wall-clock deadline (``None`` without ``max_minutes``)
@@ -404,9 +408,14 @@ def train(
     device = torch.device(device or next(model.parameters()).device)
     torch.manual_seed(seed)
     n_train = set_trainable(model, freeze, n_last=n_last)
-    enc = [p for n, p in model.named_parameters() if p.requires_grad and n.startswith("encoder.")]
+    vis_split = lr_vision is not None
+    enc = [p for n, p in model.named_parameters() if p.requires_grad and n.startswith("encoder.")
+           and not (vis_split and n.startswith("encoder.vision_model."))]
+    vis = [p for n, p in model.named_parameters() if p.requires_grad and vis_split
+           and n.startswith("encoder.vision_model.")]
     head = [p for n, p in model.named_parameters() if p.requires_grad and not n.startswith("encoder.")]
-    groups = [{"params": head, "lr": lr_head}] + ([{"params": enc, "lr": lr_backbone}] if enc else [])
+    groups = ([{"params": head, "lr": lr_head}] + ([{"params": enc, "lr": lr_backbone}] if enc else [])
+              + ([{"params": vis, "lr": lr_vision}] if vis else []))
     base_lrs = [g["lr"] for g in groups]
     opt = torch.optim.AdamW(groups, weight_decay=0.01)
     if resume:
