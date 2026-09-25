@@ -1,0 +1,31 @@
+{
+ "benchmark": "Image JevBench, reproducible subset (benchmarks/image_jevbench)",
+ "model": "thaitea/laya-vision",
+ "revision": "8b318c99d7ad3ce19c24369263463882eada9d1e",
+ "n": 88,
+ "items_sha256": "cc0942fa8f25c7f289cf5c6c0c20a9f43d494ec6e90c21680d62426e749dd4ed",
+ "median_latency_s": 1.0209,
+ "provenance": {
+  "prompt_format_version": "1",
+  "checkpoint": {
+   "id": "thaitea/laya-vision",
+   "revision": "8b318c99d7ad3ce19c24369263463882eada9d1e"
+  },
+  "backbone": {
+   "id": "HuggingFaceTB/SmolVLM-256M-Instruct",
+   "revision": null
+  },
+  "dtype": "float32",
+  "device": "cpu",
+  "torch": "2.14.0+cpu",
+  "transformers": "5.17.0",
+  "readout": "terminator",
+  "option_attention": "block",
+  "input_ids_sha256": "97b975f597821f0102e289d55af01298eff5da57a4f5c9a06a8c1319ee172116",
+  "n_rows": 1,
+  "n_permutations": 1,
+  "temperatures": {
+   "q": 3.8573756217956543
+  }
+ }
+}
