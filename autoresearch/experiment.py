@@ -31,7 +31,7 @@ from typing import Dict, Optional
 
 # -- the recipe ---------------------------------------------------------------------------------------------------
 
-INIT = "autoresearch/full/long-sep24-b64-stack2/best"   # start from this checkpoint (= thaitea/laya-vision); "" = fresh BACKBONE
+INIT = "cauldron-score-2ep-bidir-full/best"   # start from this checkpoint (= thaitea/laya-vision); "" = fresh BACKBONE
 BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 OPTION_ATTENTION = "bidirectional"            # for a fresh BACKBONE only; a checkpoint keeps its own
 
@@ -44,8 +44,8 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-TRAIN_VISION = False      # with "full": train the vision tower too (at LR_VISION)
-LR_VISION = None          # the vision tower's LR when it trains; None = LR_BACKBONE
+TRAIN_VISION = True       # with "full": train the vision tower too (at LR_VISION)
+LR_VISION = 1e-6          # the vision tower's LR when it trains; None = LR_BACKBONE
 LR_HEAD = 5e-5
 LR_BACKBONE = 1e-5
 BATCH_SIZE = 64
@@ -63,8 +63,8 @@ CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 # RL from game rewards (laya.game_rl: GRPO, the game's own score as the reward, rollouts on training seeds < 100,000),
 # interleaved with the supervised batches through train()'s step_hook. RL_GAMES = () is off: the recipe is unchanged.
 # Games: CartPole, Acrobot, MountainCar, LunarLander, Maze4, Maze6, Snake10 (Atari needs ale-py, not in this image).
-RL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
-RL_EVERY = 0.5            # supervised steps between RL phases; a value in (0, 1) is RL's share of the wall clock
+RL_GAMES = ()
+RL_EVERY = 200             # supervised steps between RL phases; a value in (0, 1) is RL's share of the wall clock
 RL_GROUP = 8               # G: episodes per seed (the group the advantage is normalised over)
 RL_EPISODES_PER_PHASE = 16  # per game per phase (whole groups)
 RL_TEMPERATURE = 1.0       # sampling temperature on top of the checkpoint's calibrated one
@@ -139,6 +139,9 @@ def train(agent, ctx):
     if TRAIN_VISION:
         base = vt.set_trainable
         vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
+        # recompute the vision tower's activations in backward: at batch 64 with stack-2 its stored activations
+        # overflow the H100's 80 GB (the language layers are unaffected)
+        agent.model.encoder.vision_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
     extra = {}
     if RL_GAMES:
