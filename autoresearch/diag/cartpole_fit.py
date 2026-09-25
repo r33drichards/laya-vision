@@ -42,6 +42,38 @@ def margin(obs) -> float:
     return theta + 0.5 * theta_dot + 0.01 * x + 0.1 * x_dot
 
 
+def set_render(w: int, h: int) -> None:
+    """Render every CartPole episode at ``w`` x ``h`` (Gymnasium's CartPole reads ``screen_width`` / ``screen_height``
+    at render time; its scale follows the width, so the pole gets longer while the cart, pole width and track
+    height stay in pixels). Patched on the class, so the toolkit's forked workers inherit it."""
+    from laya import controlgames as CG
+
+    orig = getattr(CG.ControlGame, "_orig_init", None) or CG.ControlGame.__init__
+    CG.ControlGame._orig_init = orig
+
+    def init(self, game, seed=0):
+        orig(self, game, seed)
+        u = self.env.unwrapped
+        u.screen_width, u.screen_height = w, h
+
+    CG.ControlGame.__init__ = init
+
+
+def set_split(agent, edge: int, images: int) -> None:
+    """Turn on the processor's image splitting (``edge`` = longest side before 512 px tiling) on a loaded agent,
+    with the sequence cap raised so ``images`` split images per state fit (``laya.vlm.default_max_len`` per image)."""
+    import math
+
+    from laya.preprocess import ImagePrep
+
+    prep = ImagePrep.from_config(dict(agent.cfg, image_split_edge=edge, preprocess="processor"))
+    prep.apply(agent.processor)
+    agent.prep = agent.model.prep = prep
+    agent.cfg.update(prep.to_config())
+    need = 1024 + images * (prep.max_tiles * (prep.image_seq_len + 8) - prep.image_seq_len)
+    agent.cfg["max_len"] = agent.processor.laya_max_len = int(math.ceil(need / 256) * 256)
+
+
 @app.function(image=img, cpu=4, memory=8192, timeout=1200)
 def format_check() -> dict:
     """Toolkit examples (eps=0, keep=1, no flip, so every step is kept and labelled) against a benchmark-style
@@ -100,7 +132,7 @@ def format_check() -> dict:
     return out
 
 
-@app.function(image=img, gpu="H100", cpu=16, memory=131072, timeout=7200, volumes=vols)
+@app.function(image=img, gpu="H100", cpu=16, memory=131072, timeout=4 * 3600, volumes=vols)
 def fit(arm: dict) -> dict:
     import time
 
@@ -118,6 +150,10 @@ def fit(arm: dict) -> dict:
     torch.manual_seed(0)
     agent = VLMAgent(CKPTS[arm["ckpt"]], device="cuda")
     mode = F.mode_for(agent.cfg, "control")
+    if arm.get("render"):
+        set_render(*arm["render"])
+    if arm.get("split"):
+        set_split(agent, arm["split"], F.images_per_state(mode, "control"))
     q = control_question("CartPole", mode)["action"]
     train_ex = toolkit.control_examples("CartPole", arm.get("n_train", N_TRAIN), seed=TRAIN_SEED, frames=mode, workers=16)
     probe_src = train_ex
@@ -164,7 +200,7 @@ def fit(arm: dict) -> dict:
         vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
     stats, t0 = {}, time.time()
     extra = {"lr_vision": arm["lr_vision"]} if arm.get("lr_vision") is not None else {}
-    losses = vt.train(agent.model, agent.processor, train_ex, steps=10**9, batch_size=BATCH, freeze="full", **extra,
+    losses = vt.train(agent.model, agent.processor, train_ex, steps=10**9, batch_size=arm.get("batch", BATCH), freeze="full", **extra,
                       lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=20, max_minutes=arm.get("minutes", MINUTES), num_workers=12,
                       log_every=100, device="cuda", stats=stats)
     after = measure()
@@ -176,11 +212,21 @@ def fit(arm: dict) -> dict:
 
 
 @app.local_entrypoint()
-def main(lowlr: bool = False, big: bool = False):
+def main(lowlr: bool = False, big: bool = False, split: bool = False):
     """``--lowlr``: the vision tower trained at its own low LR (``train(lr_vision=...)``), CartPole alone or with the
     other control games; writes ``cartpole-fit-lowlr.json``."""
     import json
 
+    if split:  # more pixels on the pole: image splitting, on the stock render and on larger renders
+        base = {"ckpt": "stack-2", "vision": False, "n_train": 20_000, "minutes": 40, "batch": 16}
+        arms = [dict(base),                                                   # control: 600x400, one 512 view
+                dict(base, split=1024),                                       # 600x400 upscaled, 2x2 tiles + global
+                dict(base, render=(1200, 800), split=1024),                   # 2x the render, 2x2 tiles + global
+                dict(base, render=(2400, 1600), split=2048)]                  # 4x the render, 4x3 tiles + global
+        res = {"fit": list(fit.map(arms))}
+        print(json.dumps(res, indent=1))
+        json.dump(res, open(REPO + "/autoresearch/runs/full/cartpole-fit-split.json", "x"), indent=1)
+        return
     if big:  # ~17x the frames (50,000, ~3,300 episodes) and 30 minutes: data-limited or perception-limited?
         arms = [{"ckpt": "stack-2", "vision": False, "n_train": 50_000, "minutes": 30},
                 {"ckpt": "stack-2", "vision": True, "lr_vision": 1e-6, "n_train": 50_000, "minutes": 30}]
