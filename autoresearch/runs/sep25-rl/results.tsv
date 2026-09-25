@@ -1,0 +1,6 @@
+commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
+3be0271	0.6801	0.7072	0.0271	0.1741	201.1613	0.8389	keep	baseline: stack-2 recipe (published recipe, stack-2 frames), RL off, vision frozen
+4508488	0.6830	0.7074	0.0244	0.1675	201.1613	0.8476	discard	exp: GRPO on the 4 control games, 25% of wall time, sampling T 0.5, RL LR 2e-6
+4ede286	0.6819	0.7089	0.0269	0.1571	201.1613	0.8393	discard	exp: GRPO on the 4 control games, 50% of wall time, sampling T 0.5, RL LR 2e-6
+0b08588	0.0000	0.0000	0.0000	0.0000	0.0000	0.0000	crash	exp: train the vision tower at its own LR 1e-6 (backbone 1e-5), RL off
+5787039	0.6817	0.7106	0.0290	0.2081	201.1613	0.8427	discard	exp: vision tower at LR 1e-6 with gradient checkpointing on the vision tower (0b08588 ran out of memory)
