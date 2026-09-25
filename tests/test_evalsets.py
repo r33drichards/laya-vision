@@ -7,7 +7,7 @@ import pytest
 
 from laya.evalsets import (CIFAR10_CLASSES, FERPLUS_CRITERIA, MultiPartZip, cifar10h_record, evalmuse_record,
                            ferplus_agreement, ferplus_record, histogram, koniq_record, mode_level, pope_record,
-                           stable_split, vizwiz_record)
+                           rf100vl_records, stable_split, vizwiz_record)
 from laya.rubric import CRITERIA
 from laya.vlm_train import jsonl_example
 
@@ -122,6 +122,21 @@ def test_pope_record():
     assert "target" not in rec and pope_record(dict(row, answer="maybe")) is None
 
 
+def test_rf100vl_records():
+    # shaped like a probicheaux/rf100-vl test row: annotations are a struct of lists, category ids per dataset
+    row = {"image_id": "78_344", "dataset_id": "78", "dataset_name": "x-ray-id",
+           "annotations": {"id": ["78_1", "78_2", "78_3"], "category_id": [0, 0, 2], "bbox": [[1, 2, 3, 4]] * 3}}
+    recs = rf100vl_records(row, ["DIP", "MCP", "PIP"], "x-ray-id")
+    assert [r["id"] for r in recs] == ["rf100vl-x-ray-id-78_344-c0", "rf100vl-x-ray-id-78_344-c1",
+                                       "rf100vl-x-ray-id-78_344-c2"]
+    assert [r["label"] for r in recs] == [1, 0, 1] and {r["question"]["type"] for r in recs} == {"noul"}
+    assert recs[1]["question"]["instructions"] == 'Is there at least one "MCP" in the image?'
+    assert recs[0]["state_text"] == "An image from the x-ray-id dataset, labelled for: DIP, MCP, PIP."
+    assert [r["label"] for r in rf100vl_records(dict(row, annotations={"category_id": []}), ["a", "b"], "d")] == [0, 0]
+    assert rf100vl_records(dict(row, annotations={"category_id": [5]}), ["a", "b"], "d") == []  # id out of range
+    assert rf100vl_records(row, [], "d") == []
+
+
 @pytest.mark.parametrize("rec", [
     koniq_record({"image_name": "1.jpg", "c1": 0.1, "c2": 0.2, "c3": 0.4, "c4": 0.2, "c5": 0.1, "set": "test"})[1],
     evalmuse_record({"prompt_id": "1", "prompt": "a cat", "img_path": "M/1.png", "total_score": [5, 5, 4]}),
@@ -129,6 +144,7 @@ def test_pope_record():
     ferplus_record(_fer_row(happiness=10), 0)[1],
     vizwiz_record({"question_id": "q", "question": "what?", "answers": ["a"] * 10, "category": "other"}),
     pope_record({"question_id": "1", "question": "Is there a dog in the image?", "answer": "yes", "category": "random"}),
+    rf100vl_records({"image_id": "1_2", "annotations": {"category_id": [1]}}, ["cat", "dog"], "pets")[1],
 ])
 def test_records_load_as_examples_with_their_targets(rec):
     rec = dict(rec, image="images/x.jpg")

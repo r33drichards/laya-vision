@@ -117,6 +117,8 @@ SCORE_DATASETS = tuple("score_" + s for s in SCORE_SOURCES)  # rubric-scored set
 EVAL_SOURCES = ("koniq", "evalmuse", "cifar10h", "ferplus", "vizwiz", "pope_random", "pope_popular",
                 "pope_adversarial")  # see laya/evalsets.py
 EVAL_DATASETS = tuple("eval_" + s for s in EVAL_SOURCES)  # held-out sets written by prepare_eval
+RF100VL_DOMAIN_SETS = ("flora_fauna", "industrial", "misc", "lab_imaging", "aerial", "document", "sport")
+RF100VL_DATASETS = tuple("rf100vl_" + s for s in RF100VL_DOMAIN_SETS)  # test-split presence sets, prepare_rf100vl
 DATASETS = CAULDRON_DATASETS
 CKPT_ROOTS = {BACKBONE: "/ckpt/smolvlm", SMOLVLM2: "/ckpt/smolvlm2", MODERNVBERT: "/ckpt/modernvbert"}
 CKPT_ROOT = CKPT_ROOTS[BACKBONE]
@@ -208,7 +210,7 @@ def _load_split(name: str, split: str, limit):
 
 
 DATASET_GROUPS = {"vqa": VQA_DATASETS, "cauldron": CAULDRON_DATASETS, "cauldronfull": CAULDRON_FULL_DATASETS,
-                  "score": SCORE_DATASETS, "eval": EVAL_DATASETS}
+                  "score": SCORE_DATASETS, "eval": EVAL_DATASETS, "rf100vl": RF100VL_DATASETS}
 
 
 def _expand_datasets(names: str) -> list:
@@ -728,7 +730,7 @@ def _file_sha256(path: str) -> str:
     return h.hexdigest()
 
 
-@app.function(image=image, gpu="L4", cpu=8, memory=32768, timeout=40 * 60,
+@app.function(image=image, gpu="L4", cpu=8, memory=32768, timeout=2 * 60 * 60,
               volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
 def row_evidence(run_name: str, datasets: str = "vqa", val_split: str = "val", max_val: int = 0, batch_size: int = 32,
                  code_commit: str = "") -> dict:
@@ -1910,6 +1912,124 @@ def prepare_eval(names: str = ",".join(EVAL_SOURCES), max_rows: int = 10000, max
             print("FAILED:", repr(meta)[:300])
             continue
         print("%-18s %-40s %s" % (meta["source"], meta["records"], meta["labels"].get("val")))
+
+
+@app.function(image=eval_image, cpu=8, memory=32768, timeout=3 * 60 * 60, volumes={"/cache/hf": hf_vol, "/data": data_vol},
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def prepare_rf100vl_datasets(max_images: int = 0, seed: int = 0, prefix: str = "rf100vl_") -> dict:
+    """Write RF100-VL's test split as ``noul`` presence questions (``laya.evalsets.rf100vl_records``), one prepared
+    dataset per domain: /data/vqa/<prefix><domain>/{train,test}.jsonl (train empty) + images/ + manifest.json.
+
+    Reads ``evalsets.RF100VL_REPO`` at ``RF100VL_REVISION`` and the domain map at ``RF100VL_CODE_COMMIT``, both
+    recorded in the manifest with the sha256 of every file read. ``max_images`` keeps at most that many test images
+    per source dataset (0: all), chosen by a seeded hash of the image id. Create-only: refuses an existing set.
+    """
+    import hashlib
+    import shutil
+    from collections import Counter, defaultdict
+
+    import pyarrow.parquet as pq
+    import requests
+    from huggingface_hub import HfApi, hf_hub_download
+
+    from laya import evalsets as E
+
+    finals = {d: os.path.join("/data/vqa", prefix + d) for d in RF100VL_DOMAIN_SETS}
+    for path in finals.values():
+        if os.path.exists(path):
+            raise SystemExit("%s exists; prepared datasets are create-only, pass a new --prefix" % path)
+    t0 = time.time()
+    repo, rev = E.RF100VL_REPO, E.RF100VL_REVISION
+    resp = requests.get(E.RF100VL_DOMAINS_URL, timeout=60)
+    resp.raise_for_status()
+    domain_of = resp.json()
+    with open(hf_hub_download(repo, "dataset_metadata.json", repo_type="dataset", revision=rev)) as f:
+        md = json.load(f)
+    names = {k: v["name"] for k, v in md["datasets"].items()}
+    did_of = {v: k for k, v in names.items()}
+    classes = {k: [c["name"] for c in sorted(v["test"]["categories"], key=lambda c: c["id"])]
+               for k, v in md["categories"].items() if "test" in v}
+    missing = sorted(names[k] for k in classes if names[k] not in domain_of)
+    if missing:
+        raise RuntimeError("RF100-VL datasets without a domain: %s" % missing)
+    shards = sorted(f for f in HfApi().list_repo_files(repo, repo_type="dataset", revision=rev)
+                    if f.startswith("data/test-") and f.endswith(".parquet"))
+    tmp = {d: p + ".tmp" for d, p in finals.items()}
+    for path in tmp.values():
+        shutil.rmtree(path, ignore_errors=True)
+        os.makedirs(os.path.join(path, "images"))
+
+    # choose images first (ids only) so the cap does not depend on shard order
+    ids = defaultdict(list)
+    files = {}
+    for sh in shards:
+        local = hf_hub_download(repo, sh, repo_type="dataset", revision=rev)
+        files[sh] = local
+        for b in pq.ParquetFile(local).iter_batches(columns=["image_id", "dataset_id"]):
+            for iid, did in zip(b.column("image_id").to_pylist(), b.column("dataset_id").to_pylist()):
+                ids[did].append(iid)
+    chosen = set()
+    for did, lst in ids.items():
+        rank = sorted(lst, key=lambda i: hashlib.sha256(("%d:%s" % (seed, i)).encode()).hexdigest())
+        chosen.update(rank[:max_images] if max_images else rank)
+    recs = defaultdict(list)
+    per_ds = defaultdict(Counter)
+    for sh in shards:
+        for b in pq.ParquetFile(files[sh]).iter_batches(batch_size=64, columns=["image", "image_id", "file_name",
+                                                                                "dataset_id", "annotations"]):
+            for row in b.to_pylist():
+                if row["image_id"] not in chosen or row["dataset_id"] not in classes:
+                    continue
+                ds = names[row["dataset_id"]]
+                dom = E.RF100VL_DOMAINS[domain_of[ds]]
+                rows = E.rf100vl_records(row, classes[row["dataset_id"]], ds)
+                if not rows:
+                    per_ds[ds]["dropped"] += 1
+                    continue
+                ext = os.path.splitext(row["file_name"] or "")[1].lower() or ".jpg"
+                rel = _save_eval_image((row["image"]["bytes"], ext), tmp[dom], "%s-%s" % (ds, row["image_id"]), 0)
+                for r in rows:
+                    r["image"] = rel
+                recs[dom] += rows
+                per_ds[ds]["images"] += 1
+                per_ds[ds]["questions"] += len(rows)
+                per_ds[ds]["positive"] += sum(r["label"] for r in rows)
+        print("%s done: %d questions so far, %.1f min" % (sh, sum(map(len, recs.values())), (time.time() - t0) / 60),
+              flush=True)
+    sources = {"repo": repo, "revision": rev, "domains_url": E.RF100VL_DOMAINS_URL,
+               "domains_sha256": hashlib.sha256(resp.content).hexdigest(),
+               "files_sha256": {sh: _file_sha256(p) for sh, p in files.items()}}
+    out = {}
+    for dom, path in tmp.items():
+        with open(os.path.join(path, "train.jsonl"), "w"):
+            pass
+        with open(os.path.join(path, "test.jsonl"), "w") as f:
+            for r in recs[dom]:
+                f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        mine = sorted(d for d in per_ds if E.RF100VL_DOMAINS[domain_of[d]] == dom)
+        meta = {"source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+                "domain": [k for k, v in E.RF100VL_DOMAINS.items() if v == dom][0],
+                "records": {"train": 0, "test": len(recs[dom])},
+                "labels": {"test": dict(sorted(Counter(r["label"] for r in recs[dom]).items()))},
+                "datasets": {d: dict(per_ds[d], classes=len(classes[did_of[d]])) for d in mine},
+                "max_images": max_images, "seed": seed, "minutes": round((time.time() - t0) / 60, 1)}
+        with open(os.path.join(path, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+        with open(os.path.join(path, "manifest.json"), "w") as f:
+            json.dump(sources, f, indent=2)
+        os.rename(path, finals[dom])
+        open(os.path.join(finals[dom], "_READY"), "w").close()
+        out[prefix + dom] = {k: meta[k] for k in ("records", "labels")} | {"datasets": len(mine)}
+    data_vol.commit()
+    print(json.dumps(out, indent=1))
+    return out
+
+
+@app.local_entrypoint()
+def prepare_rf100vl(max_images: int = 0, seed: int = 0, prefix: str = "rf100vl_"):
+    """modal run modal_app.py::prepare_rf100vl [--max-images 100] -- RF100-VL test split -> 7 presence sets."""
+    for name, m in prepare_rf100vl_datasets.remote(max_images=max_images, seed=seed, prefix=prefix).items():
+        print("%-22s %3d datasets  %s" % (name, m["datasets"], m["labels"]["test"]))
 
 
 # ---------------------------------------------------------------------------------------------------------

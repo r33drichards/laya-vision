@@ -272,6 +272,44 @@ def pope_record(row: Dict) -> Optional[Dict]:
             "label": int(answer == "yes"), "source": "POPE/%s" % row.get("category")}
 
 
+# -- RF100-VL -----------------------------------------------------------------------------------------------------
+#
+# RF100-VL (Robicheaux et al. 2025, arXiv 2505.20612; https://github.com/roboflow/rf100-vl) is 100 object-detection
+# datasets in 7 domains, scored by COCO box mAP. Laya Vision answers typed questions and draws no boxes, so its
+# mAP is undefined; what it can be asked is the image-level half of detection: for every class of the image's
+# dataset, is at least one instance of it in the image? The label is 1 when a ground-truth box of that class is
+# there. ``benchmarks/rf100vl_presence.py`` scores the rows per dataset (presence AP, AUROC, balanced accuracy).
+
+RF100VL_REPO = "probicheaux/rf100-vl"  # the paper's first author's parquet mirror; ids already 0-based per dataset
+RF100VL_REVISION = "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9"
+RF100VL_CODE_COMMIT = "451c6ddbf0cd94528c36526d4e1bf1897ab5af38"  # roboflow/rf100-vl, for the domain map
+RF100VL_DOMAINS_URL = ("https://raw.githubusercontent.com/roboflow/rf100-vl/%s/rf100vl/assets/"
+                       "dataset_name_to_category.json" % RF100VL_CODE_COMMIT)
+#: RF100-VL domain -> the suffix of its prepared dataset (``rf100vl_<suffix>``)
+RF100VL_DOMAINS = {"Flora/Fauna": "flora_fauna", "Industrial": "industrial", "Misc": "misc",
+                   "Lab Imaging": "lab_imaging", "Aerial": "aerial", "Document": "document", "Sport": "sport"}
+RF100VL_INSTRUCTIONS = 'Is there at least one "%s" in the image?'
+
+
+def rf100vl_records(row: Dict, class_names: Sequence[str], dataset: str, max_chars: int = 400) -> List[Dict]:
+    """One RF100-VL image row (``image_id``, ``annotations.category_id``) -> a ``noul`` presence question per class
+    of its dataset, in class-id order. The state text names the dataset and its label set, since many class names
+    ("DIP", "0", "Bamboo 1") mean nothing on their own; the paper's zero-shot setting also gives the class names."""
+    anns = row.get("annotations") or {}
+    cats = anns.get("category_id") if isinstance(anns, dict) else [a.get("category_id") for a in anns]
+    present = {int(c) for c in (cats or []) if c is not None}
+    names = [str(n).strip() for n in class_names]
+    if not names or not row.get("image_id") or not present <= set(range(len(names))):
+        return []
+    state = clip_text("An image from the %s dataset, labelled for: %s." % (dataset, ", ".join(names)), max_chars)
+    return [{"id": "rf100vl-%s-%s-c%d" % (dataset, row["image_id"], k), "state_text": state,
+             "question": {"type": "noul", "instructions": RF100VL_INSTRUCTIONS % name, "criteria": None},
+             "label": int(k in present), "source": "RF100-VL/%s" % dataset}
+            for k, name in enumerate(names)]
+
+
 __all__ = ["SOURCES", "FERPLUS_VOTES_URL", "histogram", "mode_level", "stable_split", "koniq_record", "evalmuse_record",
            "MultiPartZip", "CIFAR10_CLASSES", "cifar10h_record", "FERPLUS_EMOTIONS", "FERPLUS_CRITERIA",
-           "ferplus_record", "ferplus_agreement", "vizwiz_record", "pope_record"]
+           "ferplus_record", "ferplus_agreement", "vizwiz_record", "pope_record", "RF100VL_REPO",
+           "RF100VL_REVISION", "RF100VL_CODE_COMMIT", "RF100VL_DOMAINS_URL", "RF100VL_DOMAINS", "RF100VL_INSTRUCTIONS",
+           "rf100vl_records"]
