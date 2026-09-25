@@ -1,6 +1,6 @@
 # Laya Vision
 
-[![Docs](https://img.shields.io/badge/docs-mkdocs-blue)](https://r33drichards.github.io/laya-vision/)
+[![Docs](https://img.shields.io/badge/docs-mkdocs-blue)](https://r33drichards.github.io/laya-vision/) [![Discord](https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white)](https://discord.gg/HMmYn62pmK)
 
 Typed, calibrated decisions about an **image plus optional text**, in one forward pass with no text generation. You give it a picture, some context and a set of questions. It answers each one as a multiple choice (`choice`), a yes/no probability (`noul`) or a level on a rubric you write (`score`), with probabilities you can act on at face value. The same model plays simple games from pixels: the screen is the image and the buttons are the options.
 
@@ -30,6 +30,7 @@ Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/la
 - **Try it:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU, about 3 s per image. Source in `space/`.
 - **Install:** `pip install -e .` plus `torchvision`, which the image processor needs. ModernVBERT needs `transformers >= 5.3`.
 - **Documentation:** <https://r33drichards.github.io/laya-vision/>, built from [`site-docs/`](site-docs/).
+- **Community:** join the [Discord](https://discord.gg/HMmYn62pmK) for questions, results and discussion.
 
 ## Checkpoints
 
