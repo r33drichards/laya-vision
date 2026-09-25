@@ -355,6 +355,7 @@ def train(
     mix_alpha: float = 0.0,
     w_value: float = 1.0,
     w_next: float = 0.15,
+    step_hook: Optional[Callable[[int, Dict], object]] = None,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -392,6 +393,13 @@ def train(
     is an endless random stream, so a resumed run re-seeds it rather than replaying the same order.
     ``save_state_every_min`` is clamped to ``MIN_STATE_MINUTES`` and backed off further when writes are slow
     (``STATE_SAVE_OVERHEAD``), so no caller can spend most of its GPU time checkpointing.
+
+    ``step_hook(step, ctx)`` (e.g. ``laya.game_rl.GameRL.hook``, RL from game rewards) is called after every step
+    with ``ctx = {"lr_scale", "progress", "elapsed_s", "deadline", "device"}``: the LR schedule's current factor, the
+    progress the schedule used, the training time so far, the wall-clock deadline (``None`` without ``max_minutes``)
+    and the device. It may train the model with its own optimizer; its time counts against the budget like
+    training's, and it returns truthy when it did something (``stats["hook_minutes"]`` sums those calls). Without it
+    nothing about a step changes.
     """
     device = torch.device(device or next(model.parameters()).device)
     torch.manual_seed(seed)
@@ -423,7 +431,7 @@ def train(
         prefetch_factor=prefetch_factor if num_workers > 0 else None,
     )
     print("training %d params (freeze=%s) on %s, batch %d, amp=%s" % (n_train, freeze, device, batch_size, amp))
-    losses, t0, step, wait, t_eval = [], time.time(), 0, 0.0, 0.0
+    losses, t0, step, wait, t_eval, t_hook = [], time.time(), 0, 0.0, 0.0, 0.0
     seen: Dict[str, int] = {}
     if resume:
         losses, step, seen, t_eval = list(resume["losses"]), resume["step"], dict(resume["seen"]), resume["eval_s"]
@@ -511,6 +519,12 @@ def train(
             # state.pt costs seconds of GPU time.
             if save_state_fn is not None and ran:
                 do_save(step)
+        if step_hook is not None:
+            th = time.time()
+            if step_hook(step, {"lr_scale": f, "progress": progress, "elapsed_s": th - t0, "device": device,
+                                "deadline": t0 + budget if budget else None}):
+                t_hook += time.time() - th
+            model.train()
         if save_state_fn is not None and min_state_gap and save_due():
             do_save(step)
         t_fetch = time.time()
@@ -519,6 +533,8 @@ def train(
         train_s = max(1e-6, time.time() - t0 - t_eval)
         stats.update(steps=step, samples_per_dataset=seen, train_minutes=train_s / 60, eval_minutes=t_eval / 60,
                      steps_per_s=step / train_s, data_wait_frac=wait / train_s)
+        if step_hook is not None:
+            stats["hook_minutes"] = t_hook / 60
     return losses
 
 

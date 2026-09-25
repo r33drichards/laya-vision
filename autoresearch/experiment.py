@@ -59,6 +59,19 @@ NEXT_HEAD = False
 W_NEXT = 0.5
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
+# RL from game rewards (laya.game_rl: GRPO, the game's own score as the reward, rollouts on training seeds < 100,000),
+# interleaved with the supervised batches through train()'s step_hook. RL_GAMES = () is off: the recipe is unchanged.
+# Games: CartPole, Acrobot, MountainCar, LunarLander, Maze4, Maze6, Snake10 (Atari needs ale-py, not in this image).
+RL_GAMES = ()
+RL_EVERY = 200             # supervised steps between RL phases; a value in (0, 1) is RL's share of the wall clock
+RL_GROUP = 8               # G: episodes per seed (the group the advantage is normalised over)
+RL_EPISODES_PER_PHASE = 16  # per game per phase (whole groups)
+RL_TEMPERATURE = 1.0       # sampling temperature on top of the checkpoint's calibrated one
+RL_LR = 2e-6               # RL optimizer LR, times the supervised schedule's factor
+RL_KL = 0.0                # KL toward the starting policy (keeps a frozen copy of the model on the GPU when > 0)
+RL_RETURN = "episode"      # "episode" (GRPO outcome advantage) or "togo" (discounted return-to-go)
+RL_GAMMA = 0.99
+
 
 # -- helpers ------------------------------------------------------------------------------------------------------
 
@@ -126,6 +139,25 @@ def train(agent, ctx):
         base = vt.set_trainable
         vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
 
+    extra = {}
+    if RL_GAMES:
+        extra["step_hook"] = rl_trainer(agent).hook
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
-               w_next=W_NEXT if NEXT_HEAD else 0.0, max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device)
+               w_next=W_NEXT if NEXT_HEAD else 0.0, max_minutes=ctx.time_budget_s / 60, num_workers=12, log_every=50, device=ctx.device,
+               **extra)
+
+
+def rl_trainer(agent):
+    """The ``laya.game_rl.GameRL`` the RL_* knobs describe (the benchmark's baselines only label its log)."""
+    from laya.game_rl import GameRL, RLConfig
+
+    try:
+        import games_eval
+
+        baselines = games_eval.load_baselines()
+    except Exception:  # noqa: BLE001 - logging only
+        baselines = None
+    cfg = RLConfig(games=tuple(RL_GAMES), group=RL_GROUP, episodes_per_phase=RL_EPISODES_PER_PHASE,
+                   temperature=RL_TEMPERATURE, lr=RL_LR, kl=RL_KL, returns=RL_RETURN, gamma=RL_GAMMA, every=RL_EVERY)
+    return GameRL(agent, cfg, baselines=baselines)
