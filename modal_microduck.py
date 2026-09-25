@@ -14,7 +14,11 @@ generates) alongside the duck frames, from both simulators:
 
 Draws: the duck sets ``duck_frac`` of the time (split ``duck_3d_share`` to the 3D set), the game sets ``game_frac``,
 and the recipe's sets the rest in the recipe's proportions. Temperatures are refitted on the pool's calibration tail
-plus the last ``n_calib`` frames of each duck set, which are held out of training. The checkpoint goes to
+only, as the recipe's are. The last ``n_calib`` frames of each duck set are held out of training all the same and
+scored afterwards. ``microduck-kick-ft2`` fitted them on the duck frames too: the duck question has four options,
+the same temperature bucket as A-OKVQA's, and frames the model answers almost surely right pulled the choice
+temperature from 3.86 to 2.27, which left A-OKVQA's calibrated ECE at 0.24. ``recalibrate`` refits a saved run on
+the pool alone. The checkpoint goes to
 ``/ckpt/smolvlm/<run_name>/best`` with ``metrics.json`` beside it, so every ``modal_app.py`` job that takes a run name
 (``evaluate``, ``games_eval``, ``publish``) takes this one.
 """
@@ -76,6 +80,7 @@ def finetune(
     pool = H.load_pool(("train", "calib", "games"))
     recipe = [ex for exs in pool["train"].values() for ex in exs]
     calib = [ex for name in H.CALIB_DATASETS for ex in pool["calib"][name]]
+    duck_calib = []
     games = [ex for exs in pool["games"].values() for ex in exs]
     games += toolkit.maze_examples(20000) + toolkit.snake_examples(20000)
     for g in CONTROL_GAMES:
@@ -88,7 +93,7 @@ def finetune(
     for name in DUCK_SETS:
         tr = load_jsonl_examples("/data/vqa", name, "train")
         duck_train += tr[:-n_calib]
-        calib += tr[-n_calib:]
+        duck_calib += tr[-n_calib:]
         duck_val[name] = load_jsonl_examples("/data/vqa", name, "val")
         print("%s: %d train, %d calib, %d val" % (name, len(tr) - n_calib, n_calib, len(duck_val[name])), flush=True)
 
@@ -143,6 +148,8 @@ def finetune(
 
     temps = fit_temperatures_from(collect_logits(model, proc, calib, batch_size=32, num_workers=8))
     agent.temperature, agent.temperature_by_options = list(temps), {}
+    held = metrics_from(collect_logits(model, proc, duck_calib, batch_size=64, num_workers=8), temps)["all"]
+    log["duck_calib_calibrated"] = {k: round(float(held[k]), 4) for k in ("acc", "ece", "nll")}
     agent.save(os.path.join(out_dir, "best"))
     chunk = max(1, len(losses) // 10)
     log.update(temperature=temps, train_stats=stats,
@@ -153,3 +160,39 @@ def finetune(
     print("temperatures (choice, score, noul):", [round(t, 3) for t in temps])
     print("saved %s/best (%.1f min)" % (out_dir, (time.time() - t0) / 60), flush=True)
     return {k: log[k] for k in ("run", "evals", "temperature", "draw_shares")}
+
+
+@app.function(image=image, gpu=["A10G", "L4", "A100"], cpu=16, memory=32768, timeout=60 * 60, volumes=H.VOLUMES)
+def recalibrate(run: str = "microduck-kick-ft2/best", out_run: str = "microduck-kick-ft2-cal"):
+    """Refit ``run``'s temperatures on the autoresearch pool's calibration tail alone and save the result as a new run
+    (``/ckpt/smolvlm/<out_run>/best``, same weights): checkpoints are create-only. Only the probabilities move; every
+    answer, and so every accuracy and every game, stays as it was."""
+    import shutil
+
+    from laya.vlm import VLMAgent
+    from laya.vlm_train import collect_logits, fit_temperatures_from, load_jsonl_examples, metrics_from
+
+    out_dir = os.path.join("/ckpt/smolvlm", out_run)
+    if os.path.exists(out_dir):
+        raise SystemExit("%s exists; pick a new --out-run" % out_dir)
+    src = H.ckpt_path(run)
+    agent = VLMAgent(src, device="cuda")
+    pool = H.load_pool(("calib",))
+    calib = [ex for name in H.CALIB_DATASETS for ex in pool["calib"][name]]
+    before = list(agent.temperature)
+    temps = fit_temperatures_from(collect_logits(agent.model, agent.processor, calib, batch_size=32, num_workers=8))
+    agent.temperature, agent.temperature_by_options = list(temps), {}
+    agent.save(os.path.join(out_dir, "best"))
+    log = {"run": out_run, "from": run, "temperature_before": before, "temperature": temps, "duck_val_calibrated": {}}
+    src_metrics = os.path.join(os.path.dirname(src), "metrics.json")
+    if os.path.exists(src_metrics):
+        shutil.copy(src_metrics, os.path.join(out_dir, "training_metrics.json"))
+    for name in DUCK_SETS:
+        m = metrics_from(collect_logits(agent.model, agent.processor, load_jsonl_examples("/data/vqa", name, "val"),
+                                        batch_size=64, num_workers=8), temps)["all"]
+        log["duck_val_calibrated"][name] = {k: round(float(m[k]), 4) for k in ("acc", "ece", "nll")}
+    with open(os.path.join(out_dir, "metrics.json"), "w") as f:
+        json.dump(log, f, indent=2)
+    H.ckpt_vol.commit()
+    print(json.dumps(log, indent=1))
+    return log
