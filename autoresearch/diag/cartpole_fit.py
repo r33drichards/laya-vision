@@ -100,7 +100,7 @@ def format_check() -> dict:
     return out
 
 
-@app.function(image=img, gpu="H100", cpu=12, memory=65536, timeout=3600, volumes=vols)
+@app.function(image=img, gpu="H100", cpu=16, memory=131072, timeout=7200, volumes=vols)
 def fit(arm: dict) -> dict:
     import time
 
@@ -119,7 +119,7 @@ def fit(arm: dict) -> dict:
     agent = VLMAgent(CKPTS[arm["ckpt"]], device="cuda")
     mode = F.mode_for(agent.cfg, "control")
     q = control_question("CartPole", mode)["action"]
-    train_ex = toolkit.control_examples("CartPole", N_TRAIN, seed=TRAIN_SEED, frames=mode, workers=8)
+    train_ex = toolkit.control_examples("CartPole", arm.get("n_train", N_TRAIN), seed=TRAIN_SEED, frames=mode, workers=16)
     probe_src = train_ex
     if arm.get("mix"):  # the other control games alongside, as in the recipe's mix (probe stays CartPole)
         for g in ("Acrobot", "MountainCar", "LunarLander"):
@@ -165,7 +165,7 @@ def fit(arm: dict) -> dict:
     stats, t0 = {}, time.time()
     extra = {"lr_vision": arm["lr_vision"]} if arm.get("lr_vision") is not None else {}
     losses = vt.train(agent.model, agent.processor, train_ex, steps=10**9, batch_size=BATCH, freeze="full", **extra,
-                      lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=20, max_minutes=MINUTES, num_workers=12,
+                      lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=20, max_minutes=arm.get("minutes", MINUTES), num_workers=12,
                       log_every=100, device="cuda", stats=stats)
     after = measure()
     print(arm, "after", after, flush=True)
@@ -176,11 +176,18 @@ def fit(arm: dict) -> dict:
 
 
 @app.local_entrypoint()
-def main(lowlr: bool = False):
+def main(lowlr: bool = False, big: bool = False):
     """``--lowlr``: the vision tower trained at its own low LR (``train(lr_vision=...)``), CartPole alone or with the
     other control games; writes ``cartpole-fit-lowlr.json``."""
     import json
 
+    if big:  # ~17x the frames (50,000, ~3,300 episodes) and 30 minutes: data-limited or perception-limited?
+        arms = [{"ckpt": "stack-2", "vision": False, "n_train": 50_000, "minutes": 30},
+                {"ckpt": "stack-2", "vision": True, "lr_vision": 1e-6, "n_train": 50_000, "minutes": 30}]
+        res = {"fit": list(fit.map(arms))}
+        print(json.dumps(res, indent=1))
+        json.dump(res, open(REPO + "/autoresearch/runs/full/cartpole-fit-50k.json", "x"), indent=1)
+        return
     if lowlr:
         arms = [{"ckpt": "stack-2", "vision": True, "lr_vision": 1e-6},
                 {"ckpt": "stack-2", "vision": True, "lr_vision": 2e-7},
