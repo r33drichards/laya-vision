@@ -13,7 +13,9 @@ and every class of its dataset, whether at least one instance is there. Per sour
 * ``auroc`` over all of the dataset's questions, ``acc`` at P >= 0.5, ``balanced_acc`` (mean of the recall on present
   and absent), and ``prevalence`` (share of questions whose answer is yes).
 
-Domains and the overall ``macro`` average datasets without weights, as the paper averages mAP. The row id
+Domains and the overall ``macro`` average datasets without weights, as the paper averages mAP. ``macro_mixed`` is
+the same over the datasets whose questions have both answers: in a single-class dataset where every test image
+has the object, every answer is yes and presence AP is 1 for any model. The row id
 (``rf100vl-<dataset>-<image_id>-c<class>``) and the row's ``dataset`` (``rf100vl_<domain>``) carry everything needed.
 Standard library only.
 """
@@ -107,7 +109,8 @@ def summarize(rows_path):
     datasets = {ds: dict(score_dataset(rows), domain=domain_of[ds]) for ds, rows in sorted(per_ds.items())}
     domains = {dom: macro([d for d in datasets.values() if d["domain"] == dom])
                for dom in sorted(set(domain_of.values()))}
-    return {"rows": os.path.basename(rows_path), "macro": macro(list(datasets.values())), "domains": domains,
+    return {"rows": os.path.basename(rows_path), "macro": macro(list(datasets.values())),
+            "macro_mixed": macro([d for d in datasets.values() if d["auroc"] is not None]), "domains": domains,
             "datasets": datasets}
 
 
@@ -118,7 +121,9 @@ def _fmt(v):
 def markdown(res):
     lines = ["| Domain | Datasets | Presence AP | Chance AP | AUROC | Balanced acc | Acc | Prevalence |",
              "|---|---:|---:|---:|---:|---:|---:|---:|"]
-    for name, m in list(res["domains"].items()) + [("**all (macro)**", res["macro"])]:
+    rows = list(res["domains"].items()) + [("**all (macro)**", res["macro"]),
+                                           ("**both answers (macro)**", res["macro_mixed"])]
+    for name, m in rows:
         lines.append("| %s | %d | %s | %s | %s | %s | %s | %s |" % (name, m["datasets"], *(_fmt(m[k]) for k in (
             "presence_ap", "chance_ap", "auroc", "balanced_acc", "acc", "prevalence"))))
     return "\n".join(lines)

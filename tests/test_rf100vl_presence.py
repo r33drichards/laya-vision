@@ -33,6 +33,7 @@ def test_summarize(tmp_path):
     rows = [row("x-ray-id", "lab_imaging", "78_1", 0, 0.9, 1), row("x-ray-id", "lab_imaging", "78_1", 1, 0.2, 0),
             row("x-ray-id", "lab_imaging", "78_2", 0, 0.4, 0), row("x-ray-id", "lab_imaging", "78_2", 1, 0.7, 1),
             row("2024-frc", "industrial", "87_0", 0, 0.6, 0), row("2024-frc", "industrial", "87_1", 0, 0.3, 1),
+            row("xray", "lab_imaging", "90_1", 0, 0.2, 1),  # single class, always present: no AUROC
             {"dataset": "aokvqa", "id": "q", "qtype": "choice", "label": 0, "probs_calibrated": [1, 0]}]
     path = tmp_path / "r.predictions.jsonl.gz"
     with gzip.open(path, "wt") as f:
@@ -42,6 +43,8 @@ def test_summarize(tmp_path):
     assert xr["domain"] == "lab_imaging" and xr["images"] == 2 and xr["questions"] == 4
     assert xr["presence_ap"] == 1.0 and xr["auroc"] == 1.0 and xr["acc"] == 1.0 and xr["chance_ap"] == 0.5
     assert frc["presence_ap"] == 0.5 and frc["auroc"] == 0.0 and frc["balanced_acc"] == 0.0
-    assert res["macro"]["datasets"] == 2 and res["macro"]["presence_ap"] == 0.75
+    assert res["datasets"]["xray"]["auroc"] is None and res["datasets"]["xray"]["presence_ap"] == 1.0
+    assert res["macro"]["datasets"] == 3 and res["macro_mixed"]["datasets"] == 2
+    assert res["macro_mixed"]["presence_ap"] == 0.75
     assert set(res["domains"]) == {"lab_imaging", "industrial"}
     assert "**all (macro)**" in P.markdown(res)

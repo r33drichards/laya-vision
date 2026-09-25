@@ -1,0 +1,1045 @@
+{
+  "run": "autoresearch/full/long-sep24-b64/best",
+  "checkpoint_path": "/ckpt/autoresearch/full/long-sep24-b64/best",
+  "created_utc": "2026-09-25T19:03:34+00:00",
+  "code_commit": "5727f6ad3a29498a1c18f861f804cee4f1abcf1c",
+  "prompt_format_version": "1",
+  "weights_sha256": "31220803f38b44b8b1649b207c632612c9a35dee0da2ef1ea35d21e4b424be68",
+  "config_sha256": "543c08bb241ef67a6ef3795cbd2dd34313bea7e94ad200ee1f8798b3e09aa798",
+  "backbone": "HuggingFaceTB/SmolVLM-256M-Instruct",
+  "backbone_revision": null,
+  "readout": "terminator",
+  "option_attention": "block",
+  "temperature": [
+    3.8573756217956543,
+    2.099752902984619,
+    3.0531070232391357
+  ],
+  "calibration": "probs_calibrated = softmax(logits / temperature[qtype]), qtype order (choice, score, noul)",
+  "scoring": {
+    "orders": "identity",
+    "n_permutations": 1,
+    "autocast": "bf16",
+    "batch_size": 32,
+    "weights_dtype": "float32"
+  },
+  "gpu": "NVIDIA L4",
+  "torch": "2.14.0+cu130",
+  "transformers": "5.17.0",
+  "datasets": {
+    "rf100vl_flora_fauna": {
+      "n": 11442,
+      "max_val": 0,
+      "file": "test.jsonl",
+      "file_sha256": "94561ad83e8d13c40120bf9d8b8a977d8b23278eafd3d6de9a81d8d7894268d5",
+      "manifest.json": {
+        "repo": "probicheaux/rf100-vl",
+        "revision": "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9",
+        "domains_url": "https://raw.githubusercontent.com/roboflow/rf100-vl/451c6ddbf0cd94528c36526d4e1bf1897ab5af38/rf100vl/assets/dataset_name_to_category.json",
+        "domains_sha256": "faa5d8dc4c0270d8f2bc55af4bbfaa6ed4cd36f5a60703040243ff01a8893f0d",
+        "files_sha256": {
+          "data/test-00000-of-00011.parquet": "3ebd6cb2c5639c68145c79dcde0595f85b233923234b5904a5d40151bb4ad068",
+          "data/test-00001-of-00011.parquet": "dafb33a2fa438eb49d344f198c3611c1d7474a7fc42beb25151157196a3326e9",
+          "data/test-00002-of-00011.parquet": "d567de0b38a24322e6df8c5e13f08e21325822fc25d65964409ba4a3587e9b73",
+          "data/test-00003-of-00011.parquet": "8d02a7fb77419ef21382048f124091d87722f726fd70dabacc26dc76e2a209b5",
+          "data/test-00004-of-00011.parquet": "9f2f4cf1a4e91238f55e00523dc07d9d5dfbec0fc63c279589cf84d484aa7c6d",
+          "data/test-00005-of-00011.parquet": "2605b8ec0b57b512272808993b93ee434244312ca6693666b1b78ddab047154c",
+          "data/test-00006-of-00011.parquet": "4d2920ce218db778f0d1ad459c96d36a616ef9c196bf222271014878e376b730",
+          "data/test-00007-of-00011.parquet": "48056772a3b177bb39c8e1be7676d132be744fff6e30b612d0a02679461fd661",
+          "data/test-00008-of-00011.parquet": "a66d89bc19599a4ddc90b969f09a24a2d0c0ebb48b1a5fd99a62c7eaab3d7c21",
+          "data/test-00009-of-00011.parquet": "e6f18c41b19170746a2cae47be917ca58df683aaf4c428e86752ba41f3af5d1c",
+          "data/test-00010-of-00011.parquet": "7374938a530f1674327239df7cd4c7bafd6d014ea6f1cf17ec8a1dc85d8d7641"
+        }
+      },
+      "meta.json": {
+        "source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+        "domain": "Flora/Fauna",
+        "records": {
+          "train": 0,
+          "test": 11442
+        },
+        "labels": {
+          "test": {
+            "0": 5122,
+            "1": 6320
+          }
+        },
+        "datasets": {
+          "aquarium-combined": {
+            "images": 65,
+            "questions": 455,
+            "positive": 92,
+            "classes": 7
+          },
+          "bees": {
+            "images": 500,
+            "questions": 500,
+            "positive": 500,
+            "classes": 1
+          },
+          "deepfruits": {
+            "images": 18,
+            "questions": 18,
+            "positive": 18,
+            "classes": 1
+          },
+          "exploratorium-daphnia": {
+            "images": 34,
+            "questions": 442,
+            "positive": 175,
+            "classes": 13
+          },
+          "grapes-5": {
+            "images": 32,
+            "questions": 64,
+            "positive": 46,
+            "classes": 2
+          },
+          "grass-weeds": {
+            "images": 249,
+            "questions": 249,
+            "positive": 249,
+            "classes": 1
+          },
+          "gwhd2021": {
+            "images": 500,
+            "questions": 500,
+            "positive": 500,
+            "classes": 1
+          },
+          "into-the-vale": {
+            "images": 127,
+            "questions": 762,
+            "positive": 141,
+            "classes": 6
+          },
+          "jellyfish": {
+            "images": 64,
+            "questions": 64,
+            "positive": 64,
+            "classes": 1
+          },
+          "marine-sharks": {
+            "images": 337,
+            "questions": 1348,
+            "positive": 421,
+            "classes": 4
+          },
+          "orgharvest": {
+            "images": 26,
+            "questions": 52,
+            "positive": 36,
+            "classes": 2
+          },
+          "peixos-fish": {
+            "images": 119,
+            "questions": 238,
+            "positive": 143,
+            "classes": 2
+          },
+          "penguin-finder-seg": {
+            "images": 57,
+            "questions": 57,
+            "positive": 57,
+            "classes": 1
+          },
+          "pig-detection": {
+            "images": 500,
+            "questions": 2000,
+            "positive": 1878,
+            "classes": 4
+          },
+          "roboflow-trained-dataset": {
+            "images": 196,
+            "questions": 784,
+            "positive": 196,
+            "classes": 4
+          },
+          "sea-cucumbers-new-tiles": {
+            "images": 203,
+            "questions": 203,
+            "positive": 203,
+            "classes": 1
+          },
+          "thermal-cheetah": {
+            "images": 13,
+            "questions": 13,
+            "positive": 13,
+            "classes": 1
+          },
+          "tomatoes-2": {
+            "images": 103,
+            "questions": 206,
+            "positive": 156,
+            "classes": 2
+          },
+          "trail-camera": {
+            "images": 132,
+            "questions": 264,
+            "positive": 132,
+            "classes": 2
+          },
+          "underwater-objects": {
+            "images": 500,
+            "questions": 2500,
+            "positive": 999,
+            "classes": 5
+          },
+          "varroa-mites-detection--test-set": {
+            "images": 95,
+            "questions": 95,
+            "positive": 95,
+            "classes": 1
+          },
+          "wb-prova": {
+            "images": 146,
+            "questions": 438,
+            "positive": 165,
+            "classes": 3
+          },
+          "weeds4": {
+            "images": 38,
+            "questions": 190,
+            "positive": 41,
+            "classes": 5
+          }
+        },
+        "max_images": 0,
+        "seed": 0,
+        "minutes": 1.6
+      }
+    },
+    "rf100vl_industrial": {
+      "n": 17416,
+      "max_val": 0,
+      "file": "test.jsonl",
+      "file_sha256": "1a62f99c57f214173e4e65acc89547d8015dafdbf8783aa8b24d332976803259",
+      "manifest.json": {
+        "repo": "probicheaux/rf100-vl",
+        "revision": "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9",
+        "domains_url": "https://raw.githubusercontent.com/roboflow/rf100-vl/451c6ddbf0cd94528c36526d4e1bf1897ab5af38/rf100vl/assets/dataset_name_to_category.json",
+        "domains_sha256": "faa5d8dc4c0270d8f2bc55af4bbfaa6ed4cd36f5a60703040243ff01a8893f0d",
+        "files_sha256": {
+          "data/test-00000-of-00011.parquet": "3ebd6cb2c5639c68145c79dcde0595f85b233923234b5904a5d40151bb4ad068",
+          "data/test-00001-of-00011.parquet": "dafb33a2fa438eb49d344f198c3611c1d7474a7fc42beb25151157196a3326e9",
+          "data/test-00002-of-00011.parquet": "d567de0b38a24322e6df8c5e13f08e21325822fc25d65964409ba4a3587e9b73",
+          "data/test-00003-of-00011.parquet": "8d02a7fb77419ef21382048f124091d87722f726fd70dabacc26dc76e2a209b5",
+          "data/test-00004-of-00011.parquet": "9f2f4cf1a4e91238f55e00523dc07d9d5dfbec0fc63c279589cf84d484aa7c6d",
+          "data/test-00005-of-00011.parquet": "2605b8ec0b57b512272808993b93ee434244312ca6693666b1b78ddab047154c",
+          "data/test-00006-of-00011.parquet": "4d2920ce218db778f0d1ad459c96d36a616ef9c196bf222271014878e376b730",
+          "data/test-00007-of-00011.parquet": "48056772a3b177bb39c8e1be7676d132be744fff6e30b612d0a02679461fd661",
+          "data/test-00008-of-00011.parquet": "a66d89bc19599a4ddc90b969f09a24a2d0c0ebb48b1a5fd99a62c7eaab3d7c21",
+          "data/test-00009-of-00011.parquet": "e6f18c41b19170746a2cae47be917ca58df683aaf4c428e86752ba41f3af5d1c",
+          "data/test-00010-of-00011.parquet": "7374938a530f1674327239df7cd4c7bafd6d014ea6f1cf17ec8a1dc85d8d7641"
+        }
+      },
+      "meta.json": {
+        "source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+        "domain": "Industrial",
+        "records": {
+          "train": 0,
+          "test": 17416
+        },
+        "labels": {
+          "test": {
+            "0": 10174,
+            "1": 7242
+          }
+        },
+        "datasets": {
+          "-grccs": {
+            "images": 119,
+            "questions": 833,
+            "positive": 537,
+            "classes": 7
+          },
+          "13-lkc01": {
+            "images": 34,
+            "questions": 34,
+            "positive": 34,
+            "classes": 1
+          },
+          "2024-frc": {
+            "images": 141,
+            "questions": 1551,
+            "positive": 323,
+            "classes": 11
+          },
+          "aircraft-turnaround-dataset": {
+            "images": 101,
+            "questions": 505,
+            "positive": 245,
+            "classes": 5
+          },
+          "asphaltdistressdetection": {
+            "images": 316,
+            "questions": 1896,
+            "positive": 387,
+            "classes": 6
+          },
+          "cable-damage": {
+            "images": 133,
+            "questions": 266,
+            "positive": 135,
+            "classes": 2
+          },
+          "conveyor-t-shirts": {
+            "images": 45,
+            "questions": 45,
+            "positive": 45,
+            "classes": 1
+          },
+          "dataconvert": {
+            "images": 19,
+            "questions": 19,
+            "positive": 19,
+            "classes": 1
+          },
+          "deeppcb": {
+            "images": 150,
+            "questions": 900,
+            "positive": 740,
+            "classes": 6
+          },
+          "defect-detection": {
+            "images": 188,
+            "questions": 752,
+            "positive": 318,
+            "classes": 4
+          },
+          "fruitjes": {
+            "images": 341,
+            "questions": 2387,
+            "positive": 482,
+            "classes": 7
+          },
+          "infraredimageofpowerequipment": {
+            "images": 75,
+            "questions": 675,
+            "positive": 94,
+            "classes": 9
+          },
+          "ism-band-packet-detection": {
+            "images": 38,
+            "questions": 114,
+            "positive": 61,
+            "classes": 3
+          },
+          "l10ul502": {
+            "images": 150,
+            "questions": 1200,
+            "positive": 165,
+            "classes": 8
+          },
+          "needle-base-tip-min-max": {
+            "images": 151,
+            "questions": 755,
+            "positive": 755,
+            "classes": 5
+          },
+          "recode-waste": {
+            "images": 251,
+            "questions": 1506,
+            "positive": 1421,
+            "classes": 6
+          },
+          "screwdetectclassification": {
+            "images": 37,
+            "questions": 185,
+            "positive": 51,
+            "classes": 5
+          },
+          "smd-components": {
+            "images": 205,
+            "questions": 2255,
+            "positive": 568,
+            "classes": 11
+          },
+          "truck-movement": {
+            "images": 104,
+            "questions": 520,
+            "positive": 388,
+            "classes": 5
+          },
+          "tube": {
+            "images": 38,
+            "questions": 190,
+            "positive": 56,
+            "classes": 5
+          },
+          "water-meter": {
+            "images": 70,
+            "questions": 700,
+            "positive": 332,
+            "classes": 10
+          },
+          "wheel-defect-detection": {
+            "images": 32,
+            "questions": 128,
+            "positive": 86,
+            "classes": 4
+          }
+        },
+        "max_images": 0,
+        "seed": 0,
+        "minutes": 1.6
+      }
+    },
+    "rf100vl_misc": {
+      "n": 21853,
+      "max_val": 0,
+      "file": "test.jsonl",
+      "file_sha256": "ad8a798276b9e74987f92a139d37a7cc238274da0b5c4f6e4a8a58124d92c9e6",
+      "manifest.json": {
+        "repo": "probicheaux/rf100-vl",
+        "revision": "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9",
+        "domains_url": "https://raw.githubusercontent.com/roboflow/rf100-vl/451c6ddbf0cd94528c36526d4e1bf1897ab5af38/rf100vl/assets/dataset_name_to_category.json",
+        "domains_sha256": "faa5d8dc4c0270d8f2bc55af4bbfaa6ed4cd36f5a60703040243ff01a8893f0d",
+        "files_sha256": {
+          "data/test-00000-of-00011.parquet": "3ebd6cb2c5639c68145c79dcde0595f85b233923234b5904a5d40151bb4ad068",
+          "data/test-00001-of-00011.parquet": "dafb33a2fa438eb49d344f198c3611c1d7474a7fc42beb25151157196a3326e9",
+          "data/test-00002-of-00011.parquet": "d567de0b38a24322e6df8c5e13f08e21325822fc25d65964409ba4a3587e9b73",
+          "data/test-00003-of-00011.parquet": "8d02a7fb77419ef21382048f124091d87722f726fd70dabacc26dc76e2a209b5",
+          "data/test-00004-of-00011.parquet": "9f2f4cf1a4e91238f55e00523dc07d9d5dfbec0fc63c279589cf84d484aa7c6d",
+          "data/test-00005-of-00011.parquet": "2605b8ec0b57b512272808993b93ee434244312ca6693666b1b78ddab047154c",
+          "data/test-00006-of-00011.parquet": "4d2920ce218db778f0d1ad459c96d36a616ef9c196bf222271014878e376b730",
+          "data/test-00007-of-00011.parquet": "48056772a3b177bb39c8e1be7676d132be744fff6e30b612d0a02679461fd661",
+          "data/test-00008-of-00011.parquet": "a66d89bc19599a4ddc90b969f09a24a2d0c0ebb48b1a5fd99a62c7eaab3d7c21",
+          "data/test-00009-of-00011.parquet": "e6f18c41b19170746a2cae47be917ca58df683aaf4c428e86752ba41f3af5d1c",
+          "data/test-00010-of-00011.parquet": "7374938a530f1674327239df7cd4c7bafd6d014ea6f1cf17ec8a1dc85d8d7641"
+        }
+      },
+      "meta.json": {
+        "source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+        "domain": "Misc",
+        "records": {
+          "train": 0,
+          "test": 21853
+        },
+        "labels": {
+          "test": {
+            "0": 16556,
+            "1": 5297
+          }
+        },
+        "datasets": {
+          "buoy-onboarding": {
+            "images": 58,
+            "questions": 406,
+            "positive": 197,
+            "classes": 7
+          },
+          "car-logo-detection": {
+            "images": 17,
+            "questions": 34,
+            "positive": 17,
+            "classes": 2
+          },
+          "clashroyalechardetector": {
+            "images": 148,
+            "questions": 5032,
+            "positive": 307,
+            "classes": 34
+          },
+          "cod-mw-warzone": {
+            "images": 316,
+            "questions": 632,
+            "positive": 612,
+            "classes": 2
+          },
+          "countingpills": {
+            "images": 200,
+            "questions": 200,
+            "positive": 200,
+            "classes": 1
+          },
+          "everdaynew": {
+            "images": 37,
+            "questions": 185,
+            "positive": 103,
+            "classes": 5
+          },
+          "flir-camera-objects": {
+            "images": 500,
+            "questions": 2000,
+            "positive": 851,
+            "classes": 4
+          },
+          "halo-infinite-angel-videogame": {
+            "images": 54,
+            "questions": 216,
+            "positive": 107,
+            "classes": 4
+          },
+          "mahjong": {
+            "images": 214,
+            "questions": 7276,
+            "positive": 1236,
+            "classes": 34
+          },
+          "new-defects-in-wood": {
+            "images": 128,
+            "questions": 640,
+            "positive": 167,
+            "classes": 5
+          },
+          "orionproducts": {
+            "images": 59,
+            "questions": 472,
+            "positive": 123,
+            "classes": 8
+          },
+          "pill": {
+            "images": 140,
+            "questions": 700,
+            "positive": 329,
+            "classes": 5
+          },
+          "soda-bottles": {
+            "images": 226,
+            "questions": 678,
+            "positive": 662,
+            "classes": 3
+          },
+          "taco-trash-annotations-in-context": {
+            "images": 139,
+            "questions": 3058,
+            "positive": 274,
+            "classes": 22
+          },
+          "the-dreidel-project": {
+            "images": 54,
+            "questions": 324,
+            "positive": 112,
+            "classes": 6
+          }
+        },
+        "max_images": 0,
+        "seed": 0,
+        "minutes": 1.6
+      }
+    },
+    "rf100vl_lab_imaging": {
+      "n": 8358,
+      "max_val": 0,
+      "file": "test.jsonl",
+      "file_sha256": "c35d86acb9962c36a4117880e2f0f98dd76fce06c6a690eefb765cf61acf0691",
+      "manifest.json": {
+        "repo": "probicheaux/rf100-vl",
+        "revision": "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9",
+        "domains_url": "https://raw.githubusercontent.com/roboflow/rf100-vl/451c6ddbf0cd94528c36526d4e1bf1897ab5af38/rf100vl/assets/dataset_name_to_category.json",
+        "domains_sha256": "faa5d8dc4c0270d8f2bc55af4bbfaa6ed4cd36f5a60703040243ff01a8893f0d",
+        "files_sha256": {
+          "data/test-00000-of-00011.parquet": "3ebd6cb2c5639c68145c79dcde0595f85b233923234b5904a5d40151bb4ad068",
+          "data/test-00001-of-00011.parquet": "dafb33a2fa438eb49d344f198c3611c1d7474a7fc42beb25151157196a3326e9",
+          "data/test-00002-of-00011.parquet": "d567de0b38a24322e6df8c5e13f08e21325822fc25d65964409ba4a3587e9b73",
+          "data/test-00003-of-00011.parquet": "8d02a7fb77419ef21382048f124091d87722f726fd70dabacc26dc76e2a209b5",
+          "data/test-00004-of-00011.parquet": "9f2f4cf1a4e91238f55e00523dc07d9d5dfbec0fc63c279589cf84d484aa7c6d",
+          "data/test-00005-of-00011.parquet": "2605b8ec0b57b512272808993b93ee434244312ca6693666b1b78ddab047154c",
+          "data/test-00006-of-00011.parquet": "4d2920ce218db778f0d1ad459c96d36a616ef9c196bf222271014878e376b730",
+          "data/test-00007-of-00011.parquet": "48056772a3b177bb39c8e1be7676d132be744fff6e30b612d0a02679461fd661",
+          "data/test-00008-of-00011.parquet": "a66d89bc19599a4ddc90b969f09a24a2d0c0ebb48b1a5fd99a62c7eaab3d7c21",
+          "data/test-00009-of-00011.parquet": "e6f18c41b19170746a2cae47be917ca58df683aaf4c428e86752ba41f3af5d1c",
+          "data/test-00010-of-00011.parquet": "7374938a530f1674327239df7cd4c7bafd6d014ea6f1cf17ec8a1dc85d8d7641"
+        }
+      },
+      "meta.json": {
+        "source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+        "domain": "Lab Imaging",
+        "records": {
+          "train": 0,
+          "test": 8358
+        },
+        "labels": {
+          "test": {
+            "0": 2947,
+            "1": 5411
+          }
+        },
+        "datasets": {
+          "canalstenosis": {
+            "images": 50,
+            "questions": 250,
+            "positive": 125,
+            "classes": 5
+          },
+          "crystal-clean-brain-tumors-mri-dataset": {
+            "images": 24,
+            "questions": 96,
+            "positive": 43,
+            "classes": 4
+          },
+          "dentalai": {
+            "images": 128,
+            "questions": 512,
+            "positive": 231,
+            "classes": 4
+          },
+          "inbreast": {
+            "images": 65,
+            "questions": 65,
+            "positive": 65,
+            "classes": 1
+          },
+          "liver-disease": {
+            "images": 398,
+            "questions": 1592,
+            "positive": 398,
+            "classes": 4
+          },
+          "nih-xray": {
+            "images": 88,
+            "questions": 704,
+            "positive": 95,
+            "classes": 8
+          },
+          "spinefrxnormalvindr": {
+            "images": 22,
+            "questions": 66,
+            "positive": 49,
+            "classes": 3
+          },
+          "stomata-cells": {
+            "images": 211,
+            "questions": 422,
+            "positive": 314,
+            "classes": 2
+          },
+          "train": {
+            "images": 63,
+            "questions": 126,
+            "positive": 65,
+            "classes": 2
+          },
+          "ufba-425": {
+            "images": 58,
+            "questions": 1856,
+            "positive": 1563,
+            "classes": 32
+          },
+          "urine-analysis1": {
+            "images": 51,
+            "questions": 255,
+            "positive": 69,
+            "classes": 5
+          },
+          "x-ray-id": {
+            "images": 385,
+            "questions": 2310,
+            "positive": 2290,
+            "classes": 6
+          },
+          "xray": {
+            "images": 104,
+            "questions": 104,
+            "positive": 104,
+            "classes": 1
+          }
+        },
+        "max_images": 0,
+        "seed": 0,
+        "minutes": 1.6
+      }
+    },
+    "rf100vl_aerial": {
+      "n": 3507,
+      "max_val": 0,
+      "file": "test.jsonl",
+      "file_sha256": "361e417d63e74d7486d205b9a70fa035745070cd4b31cad88dc2629bd6ff3fcc",
+      "manifest.json": {
+        "repo": "probicheaux/rf100-vl",
+        "revision": "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9",
+        "domains_url": "https://raw.githubusercontent.com/roboflow/rf100-vl/451c6ddbf0cd94528c36526d4e1bf1897ab5af38/rf100vl/assets/dataset_name_to_category.json",
+        "domains_sha256": "faa5d8dc4c0270d8f2bc55af4bbfaa6ed4cd36f5a60703040243ff01a8893f0d",
+        "files_sha256": {
+          "data/test-00000-of-00011.parquet": "3ebd6cb2c5639c68145c79dcde0595f85b233923234b5904a5d40151bb4ad068",
+          "data/test-00001-of-00011.parquet": "dafb33a2fa438eb49d344f198c3611c1d7474a7fc42beb25151157196a3326e9",
+          "data/test-00002-of-00011.parquet": "d567de0b38a24322e6df8c5e13f08e21325822fc25d65964409ba4a3587e9b73",
+          "data/test-00003-of-00011.parquet": "8d02a7fb77419ef21382048f124091d87722f726fd70dabacc26dc76e2a209b5",
+          "data/test-00004-of-00011.parquet": "9f2f4cf1a4e91238f55e00523dc07d9d5dfbec0fc63c279589cf84d484aa7c6d",
+          "data/test-00005-of-00011.parquet": "2605b8ec0b57b512272808993b93ee434244312ca6693666b1b78ddab047154c",
+          "data/test-00006-of-00011.parquet": "4d2920ce218db778f0d1ad459c96d36a616ef9c196bf222271014878e376b730",
+          "data/test-00007-of-00011.parquet": "48056772a3b177bb39c8e1be7676d132be744fff6e30b612d0a02679461fd661",
+          "data/test-00008-of-00011.parquet": "a66d89bc19599a4ddc90b969f09a24a2d0c0ebb48b1a5fd99a62c7eaab3d7c21",
+          "data/test-00009-of-00011.parquet": "e6f18c41b19170746a2cae47be917ca58df683aaf4c428e86752ba41f3af5d1c",
+          "data/test-00010-of-00011.parquet": "7374938a530f1674327239df7cd4c7bafd6d014ea6f1cf17ec8a1dc85d8d7641"
+        }
+      },
+      "meta.json": {
+        "source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+        "domain": "Aerial",
+        "records": {
+          "train": 0,
+          "test": 3507
+        },
+        "labels": {
+          "test": {
+            "0": 1772,
+            "1": 1735
+          }
+        },
+        "datasets": {
+          "aerial-airport": {
+            "images": 34,
+            "questions": 34,
+            "positive": 34,
+            "classes": 1
+          },
+          "aerial-cows": {
+            "images": 112,
+            "questions": 112,
+            "positive": 112,
+            "classes": 1
+          },
+          "aerial-sheep": {
+            "images": 173,
+            "questions": 173,
+            "positive": 173,
+            "classes": 1
+          },
+          "apoce-aerial-photographs-for-object-detection-of-construction-equipment": {
+            "images": 94,
+            "questions": 658,
+            "positive": 155,
+            "classes": 7
+          },
+          "electric-pylon-detection-in-rsi": {
+            "images": 151,
+            "questions": 151,
+            "positive": 151,
+            "classes": 1
+          },
+          "floating-waste": {
+            "images": 277,
+            "questions": 1385,
+            "positive": 426,
+            "classes": 5
+          },
+          "human-detection-in-floods": {
+            "images": 45,
+            "questions": 90,
+            "positive": 80,
+            "classes": 2
+          },
+          "sssod": {
+            "images": 45,
+            "questions": 90,
+            "positive": 45,
+            "classes": 2
+          },
+          "uavdet-small": {
+            "images": 100,
+            "questions": 700,
+            "positive": 445,
+            "classes": 7
+          },
+          "wildfire-smoke": {
+            "images": 75,
+            "questions": 75,
+            "positive": 75,
+            "classes": 1
+          },
+          "zebrasatasturias": {
+            "images": 39,
+            "questions": 39,
+            "positive": 39,
+            "classes": 1
+          }
+        },
+        "max_images": 0,
+        "seed": 0,
+        "minutes": 1.6
+      }
+    },
+    "rf100vl_document": {
+      "n": 19103,
+      "max_val": 0,
+      "file": "test.jsonl",
+      "file_sha256": "465271460b804ce067bcadd9c6d589cde9c11ba810a7fc667287511b8dbdee5f",
+      "manifest.json": {
+        "repo": "probicheaux/rf100-vl",
+        "revision": "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9",
+        "domains_url": "https://raw.githubusercontent.com/roboflow/rf100-vl/451c6ddbf0cd94528c36526d4e1bf1897ab5af38/rf100vl/assets/dataset_name_to_category.json",
+        "domains_sha256": "faa5d8dc4c0270d8f2bc55af4bbfaa6ed4cd36f5a60703040243ff01a8893f0d",
+        "files_sha256": {
+          "data/test-00000-of-00011.parquet": "3ebd6cb2c5639c68145c79dcde0595f85b233923234b5904a5d40151bb4ad068",
+          "data/test-00001-of-00011.parquet": "dafb33a2fa438eb49d344f198c3611c1d7474a7fc42beb25151157196a3326e9",
+          "data/test-00002-of-00011.parquet": "d567de0b38a24322e6df8c5e13f08e21325822fc25d65964409ba4a3587e9b73",
+          "data/test-00003-of-00011.parquet": "8d02a7fb77419ef21382048f124091d87722f726fd70dabacc26dc76e2a209b5",
+          "data/test-00004-of-00011.parquet": "9f2f4cf1a4e91238f55e00523dc07d9d5dfbec0fc63c279589cf84d484aa7c6d",
+          "data/test-00005-of-00011.parquet": "2605b8ec0b57b512272808993b93ee434244312ca6693666b1b78ddab047154c",
+          "data/test-00006-of-00011.parquet": "4d2920ce218db778f0d1ad459c96d36a616ef9c196bf222271014878e376b730",
+          "data/test-00007-of-00011.parquet": "48056772a3b177bb39c8e1be7676d132be744fff6e30b612d0a02679461fd661",
+          "data/test-00008-of-00011.parquet": "a66d89bc19599a4ddc90b969f09a24a2d0c0ebb48b1a5fd99a62c7eaab3d7c21",
+          "data/test-00009-of-00011.parquet": "e6f18c41b19170746a2cae47be917ca58df683aaf4c428e86752ba41f3af5d1c",
+          "data/test-00010-of-00011.parquet": "7374938a530f1674327239df7cd4c7bafd6d014ea6f1cf17ec8a1dc85d8d7641"
+        }
+      },
+      "meta.json": {
+        "source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+        "domain": "Document",
+        "records": {
+          "train": 0,
+          "test": 19103
+        },
+        "labels": {
+          "test": {
+            "0": 14029,
+            "1": 5074
+          }
+        },
+        "datasets": {
+          "activity-diagrams": {
+            "images": 39,
+            "questions": 468,
+            "positive": 260,
+            "classes": 12
+          },
+          "all-elements": {
+            "images": 70,
+            "questions": 700,
+            "positive": 237,
+            "classes": 10
+          },
+          "circuit-voltages": {
+            "images": 14,
+            "questions": 42,
+            "positive": 28,
+            "classes": 3
+          },
+          "invoice-processing": {
+            "images": 12,
+            "questions": 96,
+            "positive": 83,
+            "classes": 8
+          },
+          "label-printing-defect-version-2": {
+            "images": 80,
+            "questions": 160,
+            "positive": 80,
+            "classes": 2
+          },
+          "macro-segmentation": {
+            "images": 120,
+            "questions": 1920,
+            "positive": 354,
+            "classes": 16
+          },
+          "paper-parts": {
+            "images": 499,
+            "questions": 9481,
+            "positive": 1518,
+            "classes": 19
+          },
+          "signatures": {
+            "images": 35,
+            "questions": 35,
+            "positive": 35,
+            "classes": 1
+          },
+          "speech-bubbles-detection": {
+            "images": 181,
+            "questions": 1086,
+            "positive": 296,
+            "classes": 6
+          },
+          "wine-labels": {
+            "images": 465,
+            "questions": 5115,
+            "positive": 2183,
+            "classes": 11
+          }
+        },
+        "max_images": 0,
+        "seed": 0,
+        "minutes": 1.6
+      }
+    },
+    "rf100vl_sport": {
+      "n": 4312,
+      "max_val": 0,
+      "file": "test.jsonl",
+      "file_sha256": "29dd0a30b1ab4d00e0640c67035aab1933715734d2ae6b8987cfeac422d5a678",
+      "manifest.json": {
+        "repo": "probicheaux/rf100-vl",
+        "revision": "6b59bae252b2e68e5bf2fe1b9e1962df167f06f9",
+        "domains_url": "https://raw.githubusercontent.com/roboflow/rf100-vl/451c6ddbf0cd94528c36526d4e1bf1897ab5af38/rf100vl/assets/dataset_name_to_category.json",
+        "domains_sha256": "faa5d8dc4c0270d8f2bc55af4bbfaa6ed4cd36f5a60703040243ff01a8893f0d",
+        "files_sha256": {
+          "data/test-00000-of-00011.parquet": "3ebd6cb2c5639c68145c79dcde0595f85b233923234b5904a5d40151bb4ad068",
+          "data/test-00001-of-00011.parquet": "dafb33a2fa438eb49d344f198c3611c1d7474a7fc42beb25151157196a3326e9",
+          "data/test-00002-of-00011.parquet": "d567de0b38a24322e6df8c5e13f08e21325822fc25d65964409ba4a3587e9b73",
+          "data/test-00003-of-00011.parquet": "8d02a7fb77419ef21382048f124091d87722f726fd70dabacc26dc76e2a209b5",
+          "data/test-00004-of-00011.parquet": "9f2f4cf1a4e91238f55e00523dc07d9d5dfbec0fc63c279589cf84d484aa7c6d",
+          "data/test-00005-of-00011.parquet": "2605b8ec0b57b512272808993b93ee434244312ca6693666b1b78ddab047154c",
+          "data/test-00006-of-00011.parquet": "4d2920ce218db778f0d1ad459c96d36a616ef9c196bf222271014878e376b730",
+          "data/test-00007-of-00011.parquet": "48056772a3b177bb39c8e1be7676d132be744fff6e30b612d0a02679461fd661",
+          "data/test-00008-of-00011.parquet": "a66d89bc19599a4ddc90b969f09a24a2d0c0ebb48b1a5fd99a62c7eaab3d7c21",
+          "data/test-00009-of-00011.parquet": "e6f18c41b19170746a2cae47be917ca58df683aaf4c428e86752ba41f3af5d1c",
+          "data/test-00010-of-00011.parquet": "7374938a530f1674327239df7cd4c7bafd6d014ea6f1cf17ec8a1dc85d8d7641"
+        }
+      },
+      "meta.json": {
+        "source": "RF100-VL test split as per-class presence questions (laya.evalsets.rf100vl_records)",
+        "domain": "Sport",
+        "records": {
+          "train": 0,
+          "test": 4312
+        },
+        "labels": {
+          "test": {
+            "0": 2201,
+            "1": 2111
+          }
+        },
+        "datasets": {
+          "actions": {
+            "images": 409,
+            "questions": 2454,
+            "positive": 726,
+            "classes": 6
+          },
+          "aerial-pool": {
+            "images": 95,
+            "questions": 475,
+            "positive": 338,
+            "classes": 5
+          },
+          "ball": {
+            "images": 45,
+            "questions": 810,
+            "positive": 555,
+            "classes": 18
+          },
+          "bibdetection": {
+            "images": 125,
+            "questions": 125,
+            "positive": 125,
+            "classes": 1
+          },
+          "football-player-detection": {
+            "images": 124,
+            "questions": 248,
+            "positive": 224,
+            "classes": 2
+          },
+          "lacrosse-object-detection": {
+            "images": 50,
+            "questions": 200,
+            "positive": 143,
+            "classes": 4
+          }
+        },
+        "max_images": 0,
+        "seed": 0,
+        "minutes": 1.6
+      }
+    }
+  },
+  "val_split": "test",
+  "n_rows": 85991,
+  "minutes": 40.51,
+  "metrics": {
+    "val_raw": {
+      "all": {
+        "n": 85991,
+        "acc": 0.6252747380539824,
+        "ece": 0.3166032625387555,
+        "nll": 1.6154346446373073
+      },
+      "rf100vl_flora_fauna": {
+        "n": 11442,
+        "acc": 0.5077783604264988,
+        "ece": 0.424298405011745,
+        "nll": 1.9116382503479477
+      },
+      "rf100vl_industrial": {
+        "n": 17416,
+        "acc": 0.6121956821313734,
+        "ece": 0.3376478419139071,
+        "nll": 1.6830527817999026
+      },
+      "rf100vl_misc": {
+        "n": 21853,
+        "acc": 0.7378391982794125,
+        "ece": 0.21583588634023673,
+        "nll": 1.0467743224266113
+      },
+      "rf100vl_lab_imaging": {
+        "n": 8358,
+        "acc": 0.39842067480258436,
+        "ece": 0.5235852475484668,
+        "nll": 3.0958187074397117
+      },
+      "rf100vl_aerial": {
+        "n": 3507,
+        "acc": 0.5568862275449101,
+        "ece": 0.4003872290478835,
+        "nll": 2.037015213070965
+      },
+      "rf100vl_document": {
+        "n": 19103,
+        "acc": 0.7241271004554258,
+        "ece": 0.2215555262073874,
+        "nll": 1.2091950832285852
+      },
+      "rf100vl_sport": {
+        "n": 4312,
+        "acc": 0.47680890538033394,
+        "ece": 0.41412799488856755,
+        "nll": 2.02568422234995
+      }
+    },
+    "val_calibrated": {
+      "all": {
+        "n": 85991,
+        "acc": 0.6252747380539824,
+        "ece": 0.16886008158365137,
+        "nll": 0.7496304829683867
+      },
+      "rf100vl_flora_fauna": {
+        "n": 11442,
+        "acc": 0.5077783604264988,
+        "ece": 0.26556528491316256,
+        "nll": 0.8689569600316842
+      },
+      "rf100vl_industrial": {
+        "n": 17416,
+        "acc": 0.6121956821313734,
+        "ece": 0.1862955579776308,
+        "nll": 0.7675927771834189
+      },
+      "rf100vl_misc": {
+        "n": 21853,
+        "acc": 0.7378391982794125,
+        "ece": 0.0743724798324839,
+        "nll": 0.5439714860001973
+      },
+      "rf100vl_lab_imaging": {
+        "n": 8358,
+        "acc": 0.39842067480258436,
+        "ece": 0.3760489017434541,
+        "nll": 1.2551382727910758
+      },
+      "rf100vl_aerial": {
+        "n": 3507,
+        "acc": 0.5568862275449101,
+        "ece": 0.2453993868209169,
+        "nll": 0.8800806356102678
+      },
+      "rf100vl_document": {
+        "n": 19103,
+        "acc": 0.7241271004554258,
+        "ece": 0.08129807735546556,
+        "nll": 0.6056963846494833
+      },
+      "rf100vl_sport": {
+        "n": 4312,
+        "acc": 0.47680890538033394,
+        "ece": 0.25618921572788306,
+        "nll": 0.9544429787178048
+      }
+    }
+  },
+  "rows_file": "smolvlm-autoresearch-full-long-sep24-b64-best.rf100vl-test.predictions.jsonl.gz"
+}

@@ -39,3 +39,15 @@ validation sets". That range is the ECE pooled over all of a checkpoint's valida
 per set, for the recommended checkpoint, both the committed metrics JSON and these rows give 0.16 (A-OKVQA),
 0.035-0.038 (ScienceQA) and 0.076-0.077 (VQAv2 yes/no), as the model card (`hf_model_card_score.md`) says. The
 README sentence now states both.
+
+## smolvlm-autoresearch-full-long-sep24-b64-best.rf100vl-test
+
+`modal run modal_app.py::evidence --run autoresearch/full/long-sep24-b64/best --datasets rf100vl --val-split test`,
+code commit `5727f6a`, one L4, 40.5 min. 85,991 rows: every test image of RF100-VL's 100 datasets (14,237 images)
+asked, for every class of its dataset, whether at least one instance is in it (`laya.evalsets.rf100vl_records`,
+prepared by `modal run modal_app.py::prepare_rf100vl` from `probicheaux/rf100-vl` at `6b59bae`; the manifest with
+the sha256 of every file read is in the meta). The weights are those of `thaitea/laya-vision-201m` (sha256
+`31220803...`). Not a headline number and not in `results/claims.json`: RF100-VL's own metric is box mAP, which
+this model cannot produce. `python benchmarks/rf100vl_presence.py <rows>` scores the rows; the summary is
+`eval-results/autoresearch-full-long-sep24-b64-rf100vl.json` and the write-up
+`site-docs/reference/results/rf100vl.md`.

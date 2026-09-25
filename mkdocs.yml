@@ -53,6 +53,7 @@ nav:
           - ModernVBERT on The Cauldron: reference/results/modernvbert-cauldron.md
           - Image splitting on SmolVLM2: reference/results/split-bench.md
           - Robustness: reference/results/robustness.md
+          - RF100-VL (object presence): reference/results/rf100vl.md
           - Game training: reference/results/game-training.md
           - Typed answers vs generated JSON: reference/results/decision-vs-generation.md
           - What didn't work: reference/results/what-didnt-work.md
