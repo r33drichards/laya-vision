@@ -35,7 +35,7 @@ display is present; ``libegl1``) or OSMesa (``MUJOCO_GL=osmesa``, ``libosmesa6``
 import os
 import random
 import sys
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -147,6 +147,10 @@ class MujocoGame(ControlGame):
     def _make(self, spec: Dict):
         if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
             os.environ.setdefault("MUJOCO_GL", "egl")  # read when mujoco is first imported
+        try:  # triton's bundled LLVM must load before OSMesa's: the other order segfaults (e.g. loading an expert)
+            import torch._dynamo  # noqa: F401
+        except ImportError:
+            pass
         import gymnasium as gym
 
         kw = {"default_camera_config": spec["camera"]} if spec["camera"] else {}
@@ -243,6 +247,75 @@ def has_expert(game: str) -> bool:
 def play_episodes(game: str, policy, episodes: int, seed: int = 0, max_steps: int = 0) -> Dict:
     """``laya.controlgames.play_episodes`` over ``MujocoGame``."""
     return _play_episodes(game, policy, episodes, seed, max_steps, make=MujocoGame)
+
+
+def soft_levels(a: float) -> List[float]:
+    """A distribution over ``LEVELS`` for a continuous action ``a`` (share of the range): its weight split between the
+    two nearest levels, in proportion to closeness, so 0.3 gives NONE 0.4 and POS 0.6."""
+    a = float(np.clip(a, -1.0, 1.0))
+    k = min(int(np.searchsorted(LEVEL_VALUES, a, side="right")) - 1, len(LEVELS) - 2)
+    w = (a - LEVEL_VALUES[k]) / (LEVEL_VALUES[k + 1] - LEVEL_VALUES[k])
+    out = [0.0] * len(LEVELS)
+    out[k], out[k + 1] = round(float(1.0 - w), 4), round(float(w), 4)
+    return out
+
+
+def jitter(env: MujocoGame, action, rng: random.Random, p: float):
+    """``action`` with each joint's level (or the push) moved one notch up or down with probability ``p``."""
+    def nudge(names, name):
+        i = names.index(name)
+        if rng.random() < p:
+            i = min(max(i + rng.choice((-1, 1)), 0), len(names) - 1)
+        return names[i]
+    if env.joints is None:
+        return nudge(env.actions, action)
+    return {j: nudge(LEVELS, v) for j, v in action.items()}
+
+
+def expert_frames(game: str, n: int, seed: int = 0, noise: float = 0.1, stride: int = 4, smooth: float = 0.1):
+    """Training frames labelled by the expert: yields ``{"episode", "step", "image", "records"}`` until ``n`` frames.
+
+    Episodes run from seeds ``seed, seed + 1, ...``. The behaviour policy is the expert with each joint's level
+    moved one notch with probability ``noise`` (``jitter``; DART-style), so the frames include states the expert has
+    to recover from; the labels are always the noise-free expert's action in the state actually reached. Uniformly
+    random actions are too violent for this: held for a few steps even 5% of the time, they topple the walkers and
+    pendulums within 100-250 steps, while 10% jitter leaves episodes of hundreds of steps.
+    Every ``stride``-th step is kept, rendered exactly as in play (the step before is rendered too, so the ghosted
+    previous frame matches). ``records`` holds one ``{"key", "question", "label", "target"}`` per question asked
+    about the frame: one per joint for a torque game, whose ``target`` is ``soft_levels`` of the expert's continuous
+    action and ``label`` its argmax; the pendulum's one question has the expert's push, smoothed by ``smooth``.
+    """
+    rng = random.Random(seed)
+    qs = questions(game)
+    made, ep = 0, 0
+    while made < n:
+        env = MujocoGame(game, seed + ep)
+        while not env.done and made < n:
+            keep = env.steps % stride == 0
+            if (env.steps + 1) % stride == 0:
+                env.frame()  # the next kept frame ghosts this one
+            if keep:
+                if env.joints is None:
+                    act = env.expert()
+                    k = len(env.actions)
+                    target = [(1 - smooth) * (a == act) + smooth / k for a in env.actions]
+                    records = [{"key": "action", "question": qs["action"], "label": env.actions.index(act),
+                                "target": target}]
+                else:
+                    cont = env.expert_action()
+                    records = []
+                    for i, j in enumerate(env.joints):
+                        target = [float(t) for t in soft_levels(cont[i])]
+                        records.append({"key": j, "question": qs[j], "label": int(np.argmax(target)),
+                                        "target": target})
+                    act = {j: LEVELS[r["label"]] for j, r in zip(env.joints, records)}
+                yield {"episode": seed + ep, "step": env.steps, "image": env.render(), "records": records}
+                made += 1
+            else:
+                act = env.expert()
+            env.step(jitter(env, act, rng, noise))
+        env.close()
+        ep += 1
 
 
 PANEL_W = 300
@@ -342,4 +415,4 @@ def baseline_table(rows) -> str:
 
 __all__ = ["GAMES", "LEVELS", "HUB_EXPERTS", "MujocoGame", "play_episodes", "normalized", "expert_policy",
            "random_policy", "still_policy", "has_expert", "is_torque_game", "questions", "model_policy", "model_chooser",
-           "record", "baseline", "baseline_table"]
+           "record", "baseline", "baseline_table", "soft_levels", "jitter", "expert_frames"]

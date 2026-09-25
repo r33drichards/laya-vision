@@ -33,6 +33,8 @@
     modal run modal_app.py::maze_eval --models <run>/best     # Maze at 4x4 / 6x6 / 8x8 cells: BFS expert, random, models
     modal run modal_app.py::snake_eval --models <run>/best    # Snake on a 10x10 board: greedy expert, random, models
     modal run modal_app.py::control_eval --models <run>/best  # CartPole / Acrobot / MountainCar / LunarLander: expert, random, models
+    modal run modal_app.py::prepare_mujoco_all [--games Hopper,Walker2d]  # MuJoCo frames labelled per joint by the
+                                                     # Hub experts -> /data/vqa/mujoco_<game> (create-only)
     modal run modal_app.py::mujoco_eval --model thaitea/laya-vision --revision <commit> [--games Hopper,Ant]
                                                      # the 11 Gymnasium MuJoCo games, one GPU each: the model's first
                                                      # episode as .webm, and its return against random / still / expert
@@ -2305,7 +2307,74 @@ SUITE_MUJOCO_GAMES = ("InvertedPendulum", "InvertedDoublePendulum", "Reacher", "
 mujoco_image = _with_local_code(base_image.apt_install("libosmesa6", "libgl1")
                                 .pip_install("gymnasium[mujoco]==1.3.0", "imageio[ffmpeg]",
                                              "stable-baselines3==2.9.0", "sb3-contrib==2.9.0")  # the Hub experts
-                                .env({"MUJOCO_GL": "osmesa", "PYOPENGL_PLATFORM": "osmesa"}))
+                                .env({"MUJOCO_GL": "osmesa", "PYOPENGL_PLATFORM": "osmesa", "PYTHONFAULTHANDLER": "1"}))
+
+
+@app.function(image=mujoco_image, cpu=2, memory=8192, timeout=3 * 60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol})
+def prepare_mujoco(game: str, n_train: int = 4000, n_val: int = 400, noise: float = 0.1, stride: int = 4,
+                   seed: int = 0, name: str = "") -> dict:
+    """Write /data/vqa/<name or mujoco_<game>>/{train,val}.jsonl + images/ from ``laya.mujocogames.expert_frames``:
+    frames of the expert's play with per-joint jitter, rendered as in play, one record per question asked about each
+    frame (one per joint for a torque game, all pointing at the same PNG), with the expert's soft target. Train and
+    val use disjoint episode seeds (``seed``, ``seed + 1_000_000``), both off the eval seeds (200_000+, 780_000+).
+    Create-only: refuses a name that exists."""
+    import shutil
+    from collections import Counter
+
+    from laya import mujocogames as mg  # imports no GL: MujocoGame loads torch before OSMesa (see its _make)
+
+    name = name or "mujoco_" + game.lower()
+    final_dir = "/data/vqa/" + name
+    if os.path.exists(final_dir):
+        raise SystemExit("%s exists; datasets are create-only, pass a new --name" % final_dir)
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    meta = {"source": "laya.mujocogames.expert_frames", "game": game, "noise": noise, "stride": stride,
+            "expert": mg.HUB_EXPERTS.get(game, mg.GAMES[game]["expert"][0])}
+    t0 = time.time()
+    for split, n, seed0 in (("train", n_train, seed), ("val", n_val, seed + 1_000_000)):
+        labels, frames, episodes = Counter(), 0, set()
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as f:
+            for fr in mg.expert_frames(game, n, seed0, noise, stride):
+                fid = "%s-%06d-%04d" % (split, fr["episode"], fr["step"])
+                fr["image"].save(os.path.join(tmp_dir, "images", fid + ".png"))
+                for r in fr["records"]:
+                    f.write(json.dumps({"id": fid + "-" + r["key"], "image": "images/%s.png" % fid, "state_text": None,
+                                        "question": r["question"], "label": r["label"], "target": r["target"]}) + "\n")
+                    labels[r["label"]] += 1
+                frames += 1
+                episodes.add(fr["episode"])
+        meta[split] = {"frames": frames, "records": sum(labels.values()), "episodes": len(episodes),
+                       "labels": dict(sorted(labels.items()))}
+        print("%s %s: %d frames, %d records from %d episodes, labels %s (%.0f s)"
+              % (game, split, frames, sum(labels.values()), len(episodes), dict(sorted(labels.items())), time.time() - t0))
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    import gymnasium
+    import mujoco
+
+    _write_manifest(tmp_dir, {"gymnasium": gymnasium.__version__, "mujoco": mujoco.__version__,
+                              **({mg.HUB_EXPERTS[game][0]: mg.HUB_EXPERTS[game][2]} if game in mg.HUB_EXPERTS else {})},
+                    dict(game=game, n_train=n_train, n_val=n_val, noise=noise, stride=stride, seed=seed))
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    return meta
+
+
+@app.local_entrypoint()
+def prepare_mujoco_all(games: str = ",".join(SUITE_MUJOCO_GAMES), n_train: int = 4000, n_val: int = 400,
+                       noise: float = 0.1, stride: int = 4):
+    """modal run modal_app.py::prepare_mujoco_all [--games Hopper,Walker2d] [--n-train 4000]  -- one CPU container
+    per game, writing /data/vqa/mujoco_<game> (create-only)."""
+    calls = [(g, prepare_mujoco.spawn(g, n_train, n_val, noise, stride)) for g in games.split(",") if g]
+    for g, c in calls:
+        m = _get(c, "prepare_mujoco " + g)
+        if m:
+            print("%-22s train %6d records (%d frames), val %5d records" % (g, m["train"]["records"],
+                                                                        m["train"]["frames"], m["val"]["records"]))
 
 
 @app.function(image=mujoco_image, gpu=["L4", "A10G"], cpu=4, timeout=60 * 60,

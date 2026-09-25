@@ -110,3 +110,57 @@ def test_questions_fit_the_budget_without_merging_options():
             head = tok(q["instructions"], add_special_tokens=False)["input_ids"]
             assert len(head) + sum(len(o) + 1 for o in opts) + 16 <= 256, game
             assert len(set(map(tuple, opts))) == len(opts)
+
+
+def test_soft_levels_split_between_the_two_nearest_levels():
+    from laya.mujocogames import soft_levels
+
+    assert soft_levels(0.3) == [0.0, 0.0, 0.4, 0.6, 0.0]
+    assert soft_levels(-1.0) == [1.0, 0.0, 0.0, 0.0, 0.0] and soft_levels(1.7) == [0.0, 0.0, 0.0, 0.0, 1.0]
+    assert soft_levels(0.5) == [0.0, 0.0, 0.0, 1.0, 0.0]
+    for a in np.linspace(-1, 1, 41):
+        t = soft_levels(a)
+        assert sum(t) == pytest.approx(1.0) and sum(v > 0 for v in t) <= 2
+        assert np.dot(t, [-1, -0.5, 0, 0.5, 1]) == pytest.approx(a, abs=1e-3)  # the mean is the action
+
+
+def test_jitter_moves_levels_at_most_one_notch():
+    import random
+
+    from laya.mujocogames import jitter
+
+    env = MujocoGame("Hopper", seed=0)
+    rng = random.Random(0)
+    base = {j: "NONE" for j in env.joints}
+    moved = [jitter(env, base, rng, 0.5) for _ in range(200)]
+    assert {v for m in moved for v in m.values()} == {"NEG", "NONE", "POS"}
+    assert all(m == base for m in (jitter(env, base, rng, 0.0) for _ in range(20)))
+    assert jitter(env, {j: "STRONG_POS" for j in env.joints}, random.Random(1), 1.0)["thigh"] in ("POS", "STRONG_POS")
+    env.close()
+
+
+@pytest.mark.parametrize("game", ("InvertedPendulum", "Hopper"))
+def test_expert_frames_match_play_and_label_every_question(game):
+    pytest.importorskip("stable_baselines3")
+    from laya.mujocogames import expert_frames
+
+    frames = list(expert_frames(game, 6, seed=7, noise=0.0, stride=2))
+    assert len(frames) == 6
+    qs = questions(game)
+    for fr in frames:
+        assert [r["key"] for r in fr["records"]] == list(qs)
+        for r in fr["records"]:
+            assert r["question"] == qs[r["key"]] and len(r["target"]) == len(r["question"]["criteria"])
+            assert sum(r["target"]) == pytest.approx(1.0, abs=1e-3)  # training renormalizes
+            assert r["label"] == int(np.argmax(r["target"]))
+    # with no noise the behaviour is the expert, so replaying its actions renders the same kept frames
+    first = [f for f in frames if f["episode"] == 7]
+    env, kept = MujocoGame(game, seed=7), {}
+    while not env.done and env.steps <= first[-1]["step"]:
+        env.frame()
+        if env.steps % 2 == 0:
+            kept[env.steps] = np.asarray(env.render())
+        env.step(env.expert())
+    for fr in first:
+        assert np.array_equal(np.asarray(fr["image"]), kept[fr["step"]])
+    env.close()
