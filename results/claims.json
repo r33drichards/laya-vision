@@ -87,6 +87,11 @@
      "scienceqa": "ScienceQA",
      "vqav2_yesno": "VQAv2 yes/no"
     }
+   },
+   "published_as": {
+    "repo": "thaitea/laya-vision-microduck-kick",
+    "revision": "7505ee2f2cf211cdff7faa2c66ef0c1472088e0b",
+    "note": "model.safetensors LFS sha256 on the Hub equals weights_sha256"
    }
   }
  ]

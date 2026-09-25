@@ -25,5 +25,5 @@ MuJoCo physics with upstream's Microduck model walking on upstream's trained pol
 
 The action space, timings and question are the ones quackd's `scripts/eval_microduck.py` scores. Replaying an eval
 episode's actions through this Space's loop lands the duck and the ball in the same place in both simulators.
-`LAYA_MODEL` and `LAYA_REVISION` override the checkpoint. The code is in
+The checkpoint is pinned at revision `7505ee2` in `app.py`; `LAYA_MODEL` and `LAYA_REVISION` override it. The code is in
 [r33drichards/laya-vision](https://github.com/r33drichards/laya-vision) under `space_microduck/`.

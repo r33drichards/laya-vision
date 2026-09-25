@@ -28,7 +28,8 @@ from quackd.sim2d.world import DT as DT_2D  # noqa: E402
 from quackd.sim2d.world import KICK_CONE_DEG, KICK_RANGE_M, World  # noqa: E402
 
 MODEL_ID = os.environ.get("LAYA_MODEL", "thaitea/laya-vision-microduck-kick")
-REVISION = os.environ.get("LAYA_REVISION", "") or None
+# Pinned: the Hub id can later name another checkpoint, and the Space only loads at startup. "" follows the id.
+REVISION = os.environ.get("LAYA_REVISION", "7505ee2f2cf211cdff7faa2c66ef0c1472088e0b") or None
 torch.set_num_threads(max(1, os.cpu_count() or 1))
 agent = laya.load_vlm(MODEL_ID, device="cpu", revision=REVISION)
 
