@@ -28,9 +28,11 @@ def main():
     ap.add_argument("--seed", type=int, default=200_000)
     ap.add_argument("--max-steps", type=int, default=300, help="stop the recording here (0 = the episode's end)")
     ap.add_argument("--out", default="mujoco.webm")
+    ap.add_argument("--views", default=None,
+                    help="cameras from laya.mujocogames.VIEWS, comma-separated, or 'all' (default: the single view)")
     args = ap.parse_args()
 
-    env = MujocoGame(args.game, args.seed)
+    env = MujocoGame(args.game, args.seed, views=args.views)
     if args.policy == "model":
         from laya.vlm import load_vlm
 

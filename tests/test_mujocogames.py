@@ -164,3 +164,126 @@ def test_expert_frames_match_play_and_label_every_question(game):
     for fr in first:
         assert np.array_equal(np.asarray(fr["image"]), kept[fr["step"]])
     env.close()
+
+
+# ---- several camera views (opt-in ``views``) ----
+
+def test_default_view_is_the_single_view_as_before():
+    """No ``views``: one camera, a PIL image, ``{"image"}`` state and the old question text; naming the game's first
+    view is the same thing."""
+    from laya.mujocogames import VIEWS
+
+    for game in ("Walker2d", "Reacher", "InvertedPendulum"):
+        env, named = MujocoGame(game, seed=0), MujocoGame(game, seed=0, views=next(iter(VIEWS[game])))
+        assert env.views == named.views and not env.multiview
+        assert set(env.state()) == {"image"} and np.array_equal(np.asarray(env.render()), np.asarray(named.render()))
+        assert env.frame().shape == (256, 256, 3) and np.array_equal(env.frame(), env.env.render())
+        assert env.questions() == questions(game) == questions(game, None)
+        env.close()
+        named.close()
+    for game in GAMES:
+        assert all("cameras" not in q["instructions"] for q in questions(game).values())
+
+
+@pytest.mark.parametrize("game", ("Walker2d", "Humanoid", "Ant", "Reacher", "Pusher", "Swimmer"))
+def test_every_view_renders_distinct_ghosted_images(game):
+    from laya.mujocogames import VIEWS
+
+    env = MujocoGame(game, seed=0, views="all")
+    n = len(VIEWS[game])
+    assert env.views == tuple(VIEWS[game]) and n >= 2 and env.multiview
+    first = env.frame()
+    assert first.shape == (n, 256, 256, 3) and first.dtype == np.uint8
+    assert np.array_equal(first[0], env.env.render())  # the first view is the environment's own camera
+    assert len({v.tobytes() for v in first}) == n  # every camera sees something different
+    imgs = env.render()
+    assert isinstance(imgs, list) and [np.asarray(i).shape for i in imgs] == [(256, 256, 3)] * n
+    assert set(env.state()) == {"images"} and len(env.state()["images"]) == n
+    for _ in range(3):
+        env.frame()
+        env.step(random_policy(0)(env))
+    cur, ghosted = env.frame(), np.stack([np.asarray(i) for i in env.render()])
+    assert all((g != c).any() for g, c in zip(ghosted, cur))  # the previous frame shows through in every view
+    env.close()
+
+
+def test_views_are_deterministic_and_do_not_depend_on_render_history():
+    """Each view depends on the state only: rendering every step or only at the end gives the same pixels, and the
+    extra cameras leave the environment's own camera untouched."""
+    a, b, c = (MujocoGame("Walker2d", seed=3, views="all"), MujocoGame("Walker2d", seed=3, views="all"),
+               MujocoGame("Walker2d", seed=3))
+    pick = random_policy(1)
+    for _ in range(12):
+        act = pick(a)
+        a.frame()
+        c.frame()
+        for e in (a, b, c):
+            e.step(act)
+    assert np.array_equal(a.frame(), b.frame())
+    assert np.array_equal(a.frame()[0], c.frame())
+    for e in (a, b, c):
+        e.close()
+
+
+def test_view_names_are_checked_and_ordered():
+    from laya.mujocogames import resolve_views
+
+    assert resolve_views("Walker2d") == ("side",)
+    assert resolve_views("Walker2d", "top,side") == ("top", "side") == resolve_views("Walker2d", ["top", "side"])
+    for bad in ("nope", "side,side", []):
+        with pytest.raises(ValueError):
+            resolve_views("Walker2d", bad)
+    env, one = MujocoGame("Walker2d", seed=0, views=("top", "side")), MujocoGame("Walker2d", seed=0)
+    assert np.array_equal(env.frame()[1], one.frame())
+    env.close()
+    one.close()
+
+
+def test_multiview_questions_name_the_cameras_and_keep_their_shared_prefix():
+    qs, base = questions("Humanoid", "all"), questions("Humanoid")
+    assert list(qs) == list(base)
+    for k, q in qs.items():
+        assert "from 4 cameras, one image each, in this order: side, front, top, three-quarter." in q["instructions"]
+        assert q["instructions"].endswith(base[k]["instructions"].split(" A faint copy")[1])
+        assert q["criteria"] == base[k]["criteria"]
+    assert len({q["instructions"].rsplit("torque the", 1)[0] for q in qs.values()}) == 1  # the joint still comes last
+
+
+def test_multiview_expert_frames_point_records_at_every_view():
+    pytest.importorskip("stable_baselines3")
+    from laya.mujocogames import expert_frames
+    from laya.vlm_train import jsonl_example
+
+    frames = list(expert_frames("Walker2d", 3, seed=7, noise=0.0, stride=2, views="side,three_quarter"))
+    assert len(frames) == 3
+    for fr in frames:
+        assert "image" not in fr and len(fr["images"]) == 2
+        assert all(np.asarray(i).shape == (256, 256, 3) for i in fr["images"])
+        assert all("2 cameras" in r["question"]["instructions"] for r in fr["records"])
+        r = fr["records"][0]
+        rec = {"id": "x", "images": ["a.png", "b.png"], "question": r["question"], "label": r["label"],
+               "target": r["target"]}
+        assert jsonl_example(rec, "/root")["state"] == {"images": ["/root/a.png", "/root/b.png"]}
+    env, kept = MujocoGame("Walker2d", seed=7, views="side,three_quarter"), {}
+    while env.steps <= frames[-1]["step"]:
+        env.frame()
+        if env.steps % 2 == 0:
+            kept[env.steps] = [np.asarray(i) for i in env.render()]
+        env.step(env.expert())
+    for fr in frames:
+        assert all(np.array_equal(np.asarray(i), k) for i, k in zip(fr["images"], kept[fr["step"]]))
+    env.close()
+
+
+def test_record_tiles_the_views(tmp_path):
+    pytest.importorskip("imageio")
+    from laya.mujocogames import draw, record
+
+    env, one = MujocoGame("Walker2d", seed=0, views="all"), MujocoGame("Walker2d", seed=0)
+    assert draw(env.render(), env, still_policy(env), None, "still").shape == (512, 812, 3)  # 2x2 grid of 256 px
+    assert draw(one.render(), one, still_policy(one), None, "still").shape == (512, 812, 3)  # one view at 2x
+    out = tmp_path / "v.mp4"
+    record(env, lambda e: (still_policy(e), None), "still", str(out), max_steps=3)
+    assert out.stat().st_size > 0 and env.steps == 3
+    env.close()
+    one.close()

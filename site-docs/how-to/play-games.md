@@ -59,6 +59,21 @@ modal run modal_app.py::mujoco_eval --model thaitea/laya-vision \
 On a machine with no display it renders through EGL (`apt-get install libegl1`), or set `MUJOCO_GL=osmesa`
 (`libosmesa6`, which the Modal image uses). The MuJoCo games are not in the games suite yet, and no checkpoint has been trained on them.
 
+### Several cameras at once
+
+A real robot usually has more than one camera. `MujocoGame(game, seed, views=...)` renders several fixed views
+from `laya.mujocogames.VIEWS`: for the robots `side` (the environment's own camera, the single view), `front`, `top`
+and `three_quarter`, which follow the robot's root body; for Reacher and Pusher `top` and `side`. `views="all"` takes
+every view, a comma-separated string or a list picks some, in that order. With several views `render()` returns a
+list of ghosted images, `state()` is `{"images": [...]}` (all go to `predict` in one call, 64 image tokens each),
+and every question names the cameras in the order the images come. Without `views` nothing changes. `record` tiles
+the views in the video, and `expert_frames` and `modal_app.py::prepare_mujoco --views` write one PNG per view and
+`"images"` in the records:
+
+```bash
+python examples/mujoco_video.py --game Walker2d --policy expert --views all --out walker2d-4-views.webm
+```
+
 ## Score a checkpoint on the games suite
 
 ```bash

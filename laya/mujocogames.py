@@ -17,6 +17,11 @@ Why five levels per joint: mapping a strong expert's actions onto candidate disc
 step kept at most 6% of its return on the walking robots, and 8-128 fixed multi-joint presets at most 53%, while five
 levels per joint kept 78-100% (Walker2d .98, HumanoidStandup 1.00, Humanoid and Hopper .86).
 
+Several cameras (opt-in): ``MujocoGame(..., views=...)`` renders named fixed views from ``VIEWS`` (the robots:
+side, front, top, three-quarter, following the body; Reacher and Pusher: top and side) and the model gets them all in
+one ``predict`` (``{"images": [...]}``, 64 image tokens each), with each question naming the cameras. Without
+``views`` everything is as described above.
+
 Episodes end when the environment terminates (a fallen pole or robot) or at its own time limit (50 steps for Reacher,
 100 for Pusher, 1000 for the rest); the score is the environment's summed reward, ``normalized`` = (model - random)
 / (expert - random) as for classic control.
@@ -39,7 +44,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
-from laya.controlgames import ControlGame, normalized
+from laya.controlgames import GHOST, ControlGame, normalized
 from laya.controlgames import play_episodes as _play_episodes
 from laya.games import CONTROL_ACTIONS, TORQUE_JOINTS, TORQUE_LEVELS, joint_key
 
@@ -104,6 +109,57 @@ GAMES = {
     "HumanoidStandup": _torque_game("HumanoidStandup"),
 }
 
+
+def _track(distance: float, azimuth: float, elevation: float, body: int = 1) -> Dict:
+    """A camera that follows ``body``'s subtree centre of mass (body 1 is every robot's root: torso or its like)."""
+    return {"trackbodyid": body, "distance": distance, "azimuth": azimuth, "elevation": elevation}
+
+
+def _fixed(lookat, distance: float, azimuth: float, elevation: float) -> Dict:
+    """A camera fixed in the world, looking at ``lookat``."""
+    return {"lookat": np.array(lookat, dtype=float), "distance": distance, "azimuth": azimuth, "elevation": elevation}
+
+
+def _body_views(distance: float, first: str = "side") -> Dict:
+    """The robots' views: the environment's own camera (``first``, a side view that follows the robot) and three
+    that follow its root body from ``distance``: from ahead (the robot walks toward +x, so toward it), straight
+    down (+x to the right, as in the side view), and a three-quarter view from front-left and above."""
+    return {first: None, "front": _track(distance, 180.0, -10.0), "top": _track(distance, 90.0, -89.0),
+            "three_quarter": _track(distance, 135.0, -25.0)}
+
+
+# game -> {view name: camera}, the first being the game's single view (None = the environment's own camera, exactly
+# as rendered without ``views``). Azimuth 90 looks along +y, so +x is screen right; 180 looks along -x.
+VIEWS = {
+    "InvertedPendulum": {"side": None},
+    "InvertedDoublePendulum": {"side": None},
+    "Reacher": {"top": None, "side": _fixed((0, 0, 0.02), 0.5, 90.0, -30.0)},
+    "Pusher": {"top": None, "side": _fixed((0.2, -0.3, -0.2), 2.0, 180.0, -15.0)},
+    "Swimmer": {"oblique": None, "top": _track(3.0, 90.0, -89.0)},
+    "Hopper": _body_views(3.0),
+    "Walker2d": _body_views(4.0),
+    "HalfCheetah": _body_views(4.0),
+    "Ant": _body_views(4.0),
+    "Humanoid": _body_views(4.0),
+    "HumanoidStandup": _body_views(4.0),
+}
+
+
+def resolve_views(game: str, views=None) -> tuple:
+    """``views`` as a tuple of ``VIEWS[game]`` names: None -> the game's single view, ``"all"`` -> every view, a
+    name or comma-separated names -> those views."""
+    names = VIEWS[game]
+    if views is None:
+        return (next(iter(names)),)
+    if isinstance(views, str):
+        views = tuple(names) if views == "all" else tuple(v for v in views.split(",") if v)
+    views = tuple(views)
+    bad = [v for v in views if v not in names]
+    if bad or not views or len(set(views)) != len(views):
+        raise ValueError("%s views must be distinct names from %s, got %r" % (game, ", ".join(names), views))
+    return views
+
+
 # InvertedDoublePendulum-v5 LQR gain on (x, angle1, angle2, x', angle1', angle2'): the environment step (5 RK4 steps
 # of 0.01 s) finite-differenced about upright rest, Q = diag(1, 10, 10, .1, .1, .1), R = 1, Riccati iterated to
 # convergence. The control is -K @ state, in actuator units.
@@ -140,9 +196,77 @@ def is_torque_game(game: str) -> bool:
 
 class MujocoGame(ControlGame):
     """One seeded episode of a ``GAMES`` environment. Pendulums step by action name; torque games step by a dict
-    ``{joint key: level}`` (``joints`` lists the keys)."""
+    ``{joint key: level}`` (``joints`` lists the keys).
+
+    ``views`` (opt-in, see ``resolve_views``) picks cameras from ``VIEWS[game]``. With one view (the default: the
+    game's own camera, as ever) ``render()`` is one ghosted PIL image and ``state()`` ``{"image": ...}``; with
+    several, ``render()`` is a list of them in ``views`` order, ``state()`` ``{"images": [...]}`` and
+    ``questions()`` names the cameras. Extra views render through the environment's own offscreen viewer (same GL
+    context, scene options and lighting) with a camera of their own swapped in for the shot, so each view depends
+    only on the simulation state."""
 
     SPECS = GAMES
+
+    def __init__(self, game: str, seed: int = 0, views=None):
+        if game not in self.SPECS:
+            raise ValueError("unknown control game %r (%s)" % (game, ", ".join(self.SPECS)))
+        self.views = resolve_views(game, views)
+        self._cams: Dict = {}
+        super().__init__(game, seed)
+
+    @property
+    def multiview(self) -> bool:
+        return len(self.views) > 1
+
+    def _shot(self, name: str) -> np.ndarray:
+        spec = VIEWS[self.game][name]
+        if spec is None:
+            return self.env.render()
+        import mujoco
+
+        cam = self._cams.get(name)
+        if cam is None:
+            cam = self._cams[name] = mujoco.MjvCamera()
+            if "trackbodyid" in spec:
+                cam.type, cam.trackbodyid = mujoco.mjtCamera.mjCAMERA_TRACKING, spec["trackbodyid"]
+            else:
+                cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+                cam.lookat[:] = spec["lookat"]
+            cam.distance, cam.azimuth, cam.elevation = spec["distance"], spec["azimuth"], spec["elevation"]
+        viewer = self.env.unwrapped.mujoco_renderer._get_viewer("rgb_array")
+        saved, viewer.cam = viewer.cam, cam
+        try:
+            return viewer.render(render_mode="rgb_array")  # no camera_id: the swapped-in camera is used as set
+        finally:
+            viewer.cam = saved
+
+    def frame(self) -> np.ndarray:
+        """The current RGB frame (rendered once per step): ``[H, W, 3]`` for one view, ``[views, H, W, 3]`` for
+        several."""
+        if self._frame is None:
+            shots = [self._shot(v) for v in self.views]
+            self._frame = shots[0] if len(shots) == 1 else np.stack(shots)
+        return self._frame
+
+    def render(self):
+        """The current frame with the previous one ghosted underneath: a PIL image, or a list, one per view."""
+        if not self.multiview:
+            return super().render()
+        from PIL import Image
+
+        cur = self.frame()
+        if self._prev is not None:
+            mix = (1 - GHOST) * cur.astype(np.float32) + GHOST * self._prev.astype(np.float32)
+            cur = mix.round().astype(np.uint8)
+        return [Image.fromarray(v) for v in cur]
+
+    def state(self) -> Dict:
+        """What the model is shown: ``{"image": ...}``, or ``{"images": [...]}`` with several views."""
+        return {"images": self.render()} if self.multiview else {"image": self.render()}
+
+    def questions(self) -> Dict[str, Dict]:
+        """``questions(game, views)`` for this episode's views."""
+        return questions(self.game, self.views)
 
     def _make(self, spec: Dict):
         if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
@@ -214,20 +338,37 @@ def still_policy(env):
     return "NONE" if env.joints is None else {j: "NONE" for j in env.joints}
 
 
-def questions(game: str) -> Dict[str, Dict]:
-    """What the model is asked each step: ``{"action": ...}`` for a pendulum, one question per joint otherwise."""
+_FAINT = " A faint copy"
+
+
+def questions(game: str, views=None) -> Dict[str, Dict]:
+    """What the model is asked each step: ``{"action": ...}`` for a pendulum, one question per joint otherwise.
+    With several ``views`` each question also names the cameras, in the order the images come; one view (the
+    default) leaves the text as it always was."""
     from laya.games import control_question, mujoco_questions
 
-    return mujoco_questions(game) if is_torque_game(game) else control_question(game)
+    qs = mujoco_questions(game) if is_torque_game(game) else control_question(game)
+    views = resolve_views(game, views)
+    if len(views) > 1:
+        note = " You see the %s from %d cameras, one image each, in this order: %s." % (
+            "robot" if is_torque_game(game) else "scene", len(views), ", ".join(v.replace("_", "-") for v in views))
+        for q in qs.values():
+            assert _FAINT in q["instructions"]
+            q["instructions"] = q["instructions"].replace(_FAINT, note + _FAINT, 1)
+    return qs
 
 
 def model_chooser(agent, game: str):
-    """``choose(env) -> (action, probabilities)`` from the model's answers on the ghosted screen. For a torque game
-    the action is ``{joint: level}`` and the probabilities ``{joint: {level: p}}``."""
-    qs = questions(game)
+    """``choose(env) -> (action, probabilities)`` from the model's answers on the ghosted screen (every view of a
+    multi-view episode, ``MujocoGame.state``). For a torque game the action is ``{joint: level}`` and the
+    probabilities ``{joint: {level: p}}``."""
+    cache: Dict[tuple, Dict] = {}
 
     def choose(env):
-        ans = agent.predict({"image": env.render()}, qs)["answers"]
+        qs = cache.get(env.views)
+        if qs is None:
+            qs = cache[env.views] = questions(game, env.views)
+        ans = agent.predict(env.state(), qs)["answers"]
         if env.joints is None:
             return ans["action"]["choice"], ans["action"].get("probabilities")
         return {j: ans[j]["choice"] for j in env.joints}, {j: ans[j].get("probabilities") for j in env.joints}
@@ -272,8 +413,11 @@ def jitter(env: MujocoGame, action, rng: random.Random, p: float):
     return {j: nudge(LEVELS, v) for j, v in action.items()}
 
 
-def expert_frames(game: str, n: int, seed: int = 0, noise: float = 0.1, stride: int = 4, smooth: float = 0.1):
-    """Training frames labelled by the expert: yields ``{"episode", "step", "image", "records"}`` until ``n`` frames.
+def expert_frames(game: str, n: int, seed: int = 0, noise: float = 0.1, stride: int = 4, smooth: float = 0.1,
+                  views=None):
+    """Training frames labelled by the expert: yields ``{"episode", "step", "image", "records"}`` until ``n`` frames
+    (``"images"``, one per view, in place of ``"image"`` when several ``views`` are set; the questions then name the
+    cameras).
 
     Episodes run from seeds ``seed, seed + 1, ...``. The behaviour policy is the expert with each joint's level
     moved one notch with probability ``noise`` (``jitter``; DART-style), so the frames include states the expert has
@@ -286,10 +430,10 @@ def expert_frames(game: str, n: int, seed: int = 0, noise: float = 0.1, stride: 
     action and ``label`` its argmax; the pendulum's one question has the expert's push, smoothed by ``smooth``.
     """
     rng = random.Random(seed)
-    qs = questions(game)
+    qs = questions(game, views)
     made, ep = 0, 0
     while made < n:
-        env = MujocoGame(game, seed + ep)
+        env = MujocoGame(game, seed + ep, views)
         while not env.done and made < n:
             keep = env.steps % stride == 0
             if (env.steps + 1) % stride == 0:
@@ -309,7 +453,8 @@ def expert_frames(game: str, n: int, seed: int = 0, noise: float = 0.1, stride: 
                         records.append({"key": j, "question": qs[j], "label": int(np.argmax(target)),
                                         "target": target})
                     act = {j: LEVELS[r["label"]] for j, r in zip(env.joints, records)}
-                yield {"episode": seed + ep, "step": env.steps, "image": env.render(), "records": records}
+                yield {"episode": seed + ep, "step": env.steps, "images" if env.multiview else "image": env.render(),
+                       "records": records}
                 made += 1
             else:
                 act = env.expert()
@@ -322,15 +467,37 @@ PANEL_W = 300
 _CHOSEN, _OTHER = (255, 200, 80), (90, 90, 110)
 
 
-def draw(frame, env: MujocoGame, action, probs, label: str) -> np.ndarray:
-    """A video frame: the screen at 2x, and a panel with the step, the return and the action: each push (the chosen
-    one highlighted, with the model's probabilities when given), or for a torque game one row per joint with its five
-    levels, shaded by probability, the chosen one outlined."""
+def tile(frames, names=None):
+    """Several views in one image: a grid ``ceil(sqrt(n))`` wide, each view captioned with its name."""
     from PIL import Image, ImageDraw
 
-    w, h = frame.width * 2, frame.height * 2
+    cols = int(np.ceil(np.sqrt(len(frames))))
+    rows = int(np.ceil(len(frames) / cols))
+    fw, fh = frames[0].width, frames[0].height
+    out = Image.new("RGB", (cols * fw, rows * fh), (24, 24, 28))
+    d = ImageDraw.Draw(out)
+    for i, f in enumerate(frames):
+        x, y = (i % cols) * fw, (i // cols) * fh
+        out.paste(f, (x, y))
+        if names:
+            d.rectangle((x, y, x + 8 + 6 * len(names[i]), y + 14), fill=(0, 0, 0))
+            d.text((x + 4, y + 2), names[i], fill=(255, 255, 255))
+    return out
+
+
+def draw(frame, env: MujocoGame, action, probs, label: str) -> np.ndarray:
+    """A video frame: the screen at 2x (several views tiled at 1x, ``tile``), and a panel with the step, the return
+    and the action: each push (the chosen one highlighted, with the model's probabilities when given), or for a
+    torque game one row per joint with its five levels, shaded by probability, the chosen one outlined."""
+    from PIL import Image, ImageDraw
+
+    if isinstance(frame, (list, tuple)):
+        screen = tile(frame, list(env.views))
+    else:
+        screen = frame.resize((frame.width * 2, frame.height * 2), Image.NEAREST)
+    w, h = screen.width, max(screen.height, 2 * SIZE)
     img = Image.new("RGB", (w + PANEL_W, h), (24, 24, 28))
-    img.paste(frame.resize((w, h), Image.NEAREST), (0, 0))
+    img.paste(screen, (0, 0))
     d = ImageDraw.Draw(img)
     x = w + 12
     d.text((x, 12), "%s  (%s)" % (env.game, label), fill=(230, 230, 230))
@@ -415,4 +582,5 @@ def baseline_table(rows) -> str:
 
 __all__ = ["GAMES", "LEVELS", "HUB_EXPERTS", "MujocoGame", "play_episodes", "normalized", "expert_policy",
            "random_policy", "still_policy", "has_expert", "is_torque_game", "questions", "model_policy", "model_chooser",
-           "record", "baseline", "baseline_table", "soft_levels", "jitter", "expert_frames"]
+           "record", "baseline", "baseline_table", "soft_levels", "jitter", "expert_frames", "VIEWS", "resolve_views",
+           "tile"]

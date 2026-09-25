@@ -2313,12 +2313,13 @@ mujoco_image = _with_local_code(base_image.apt_install("libosmesa6", "libgl1")
 @app.function(image=mujoco_image, cpu=2, memory=8192, timeout=3 * 60 * 60,
               volumes={"/cache/hf": hf_vol, "/data": data_vol})
 def prepare_mujoco(game: str, n_train: int = 4000, n_val: int = 400, noise: float = 0.1, stride: int = 4,
-                   seed: int = 0, name: str = "") -> dict:
+                   seed: int = 0, name: str = "", views: str = "") -> dict:
     """Write /data/vqa/<name or mujoco_<game>>/{train,val}.jsonl + images/ from ``laya.mujocogames.expert_frames``:
     frames of the expert's play with per-joint jitter, rendered as in play, one record per question asked about each
     frame (one per joint for a torque game, all pointing at the same PNG), with the expert's soft target. Train and
     val use disjoint episode seeds (``seed``, ``seed + 1_000_000``), both off the eval seeds (200_000+, 780_000+).
-    Create-only: refuses a name that exists."""
+    ``views`` (``laya.mujocogames.VIEWS`` names, comma-separated, or ``all``; empty = the single view) renders
+    several cameras: one PNG per view and ``"images"`` in the records. Create-only: refuses a name that exists."""
     import shutil
     from collections import Counter
 
@@ -2331,17 +2332,25 @@ def prepare_mujoco(game: str, n_train: int = 4000, n_val: int = 400, noise: floa
     tmp_dir = final_dir + ".tmp"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     os.makedirs(os.path.join(tmp_dir, "images"))
+    view_names = list(mg.resolve_views(game, views or None))
     meta = {"source": "laya.mujocogames.expert_frames", "game": game, "noise": noise, "stride": stride,
-            "expert": mg.HUB_EXPERTS.get(game, mg.GAMES[game]["expert"][0])}
+            "views": view_names, "expert": mg.HUB_EXPERTS.get(game, mg.GAMES[game]["expert"][0])}
     t0 = time.time()
     for split, n, seed0 in (("train", n_train, seed), ("val", n_val, seed + 1_000_000)):
         labels, frames, episodes = Counter(), 0, set()
         with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as f:
-            for fr in mg.expert_frames(game, n, seed0, noise, stride):
+            for fr in mg.expert_frames(game, n, seed0, noise, stride, views=views or None):
                 fid = "%s-%06d-%04d" % (split, fr["episode"], fr["step"])
-                fr["image"].save(os.path.join(tmp_dir, "images", fid + ".png"))
+                if "images" in fr:  # several views: one PNG each, the records list them in view order
+                    paths = ["images/%s-%s.png" % (fid, v) for v in view_names]
+                    for im, p in zip(fr["images"], paths):
+                        im.save(os.path.join(tmp_dir, p))
+                    where = {"images": paths}
+                else:
+                    fr["image"].save(os.path.join(tmp_dir, "images", fid + ".png"))
+                    where = {"image": "images/%s.png" % fid}
                 for r in fr["records"]:
-                    f.write(json.dumps({"id": fid + "-" + r["key"], "image": "images/%s.png" % fid, "state_text": None,
+                    f.write(json.dumps({"id": fid + "-" + r["key"], **where, "state_text": None,
                                         "question": r["question"], "label": r["label"], "target": r["target"]}) + "\n")
                     labels[r["label"]] += 1
                 frames += 1
@@ -2357,7 +2366,8 @@ def prepare_mujoco(game: str, n_train: int = 4000, n_val: int = 400, noise: floa
 
     _write_manifest(tmp_dir, {"gymnasium": gymnasium.__version__, "mujoco": mujoco.__version__,
                               **({mg.HUB_EXPERTS[game][0]: mg.HUB_EXPERTS[game][2]} if game in mg.HUB_EXPERTS else {})},
-                    dict(game=game, n_train=n_train, n_val=n_val, noise=noise, stride=stride, seed=seed))
+                    dict(game=game, n_train=n_train, n_val=n_val, noise=noise, stride=stride, seed=seed,
+                         views=view_names))
     os.rename(tmp_dir, final_dir)
     open(os.path.join(final_dir, "_READY"), "w").close()
     data_vol.commit()
