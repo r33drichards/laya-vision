@@ -5,3 +5,5 @@ eb668a6af261a60b2a276abcb7c48a228bfde0bd0629e5e7e1d7be2c34e29d7e  smolvlm-autore
 b824b2677f813c5a74acfbb77953d0d097c867888508af2fcc6183ca89518353  smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.predictions.jsonl.gz
 09bd54c38abe8c6524cce81382f223ac8f4bca761ab112be56c88bbf7d3f94b1  smolvlm-microduck-kick-ft2-best.vqa-val.meta.json
 068247b5e6ac63773eb77dd9332f3995eeb6e2311fa9485135e5cd7ea3147fd2  smolvlm-microduck-kick-ft2-best.vqa-val.predictions.jsonl.gz
+9de88059484b2e5c60880c3451fbe45180bf2fe396f51bab98f5ff4926afc5fc  smolvlm-microduck-kick-ft2-cal-best.vqa-val.meta.json
+27a2eacec912a881fbb4efc08c62ad45142aa5f0b2de9c808272c74a6c7ff336  smolvlm-microduck-kick-ft2-cal-best.vqa-val.predictions.jsonl.gz

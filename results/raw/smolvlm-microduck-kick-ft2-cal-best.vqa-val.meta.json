@@ -1,0 +1,195 @@
+{
+  "run": "microduck-kick-ft2-cal/best",
+  "checkpoint_path": "/ckpt/smolvlm/microduck-kick-ft2-cal/best",
+  "created_utc": "2026-09-25T22:04:26+00:00",
+  "code_commit": "2dde9639faaaa12ed1e0d786b43418859ac731d9",
+  "prompt_format_version": "1",
+  "weights_sha256": "2992e2694ab85d32d4559d617d00e6d6ff56023949fb8d7937aecd2732b390f3",
+  "config_sha256": "0e7ea32d624cbe08c874abf7add048e146348d873ce87c65343c0f69a8d8ba19",
+  "backbone": "HuggingFaceTB/SmolVLM-256M-Instruct",
+  "backbone_revision": null,
+  "readout": "terminator",
+  "option_attention": "block",
+  "temperature": [
+    3.308541774749756,
+    2.1620657444000244,
+    2.898714303970337
+  ],
+  "calibration": "probs_calibrated = softmax(logits / temperature[qtype]), qtype order (choice, score, noul)",
+  "scoring": {
+    "orders": "identity",
+    "n_permutations": 1,
+    "autocast": "bf16",
+    "batch_size": 32,
+    "weights_dtype": "float32"
+  },
+  "gpu": "NVIDIA L4",
+  "torch": "2.14.0+cu130",
+  "transformers": "5.17.0",
+  "datasets": {
+    "aokvqa": {
+      "n": 1138,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "27b06a99788837cfe0bb5c48cb9ee12c446028abc5558652a0d8c16d2042523b",
+      "meta.json": {
+        "dataset": "aokvqa",
+        "source": "HuggingFaceM4/A-OKVQA",
+        "counts": {
+          "train": 17026,
+          "val": 1138
+        },
+        "label_counts": {
+          "train": {
+            "3": 4381,
+            "0": 4112,
+            "1": 4218,
+            "2": 4315
+          },
+          "val": {
+            "3": 287,
+            "2": 294,
+            "1": 279,
+            "0": 278
+          }
+        },
+        "images": 18164,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 116.0
+      }
+    },
+    "scienceqa": {
+      "n": 2097,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "34eb99b352f00d7ccd9f7540658ddf931986afe8d38e506f0dc1a2d5579305e3",
+      "meta.json": {
+        "dataset": "scienceqa",
+        "source": "derek-thomas/ScienceQA",
+        "counts": {
+          "train": 6218,
+          "val": 2097
+        },
+        "label_counts": {
+          "train": {
+            "0": 2273,
+            "1": 2179,
+            "2": 1167,
+            "3": 583,
+            "4": 16
+          },
+          "val": {
+            "1": 764,
+            "2": 389,
+            "3": 209,
+            "0": 728,
+            "4": 7
+          }
+        },
+        "images": 8315,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 38.0
+      }
+    },
+    "vqav2_yesno": {
+      "n": 5000,
+      "max_val": 0,
+      "file": "val.jsonl",
+      "file_sha256": "2005732643ac1475f298e29b0a0877fbbee066420ad5330e47d020f926e7a42f",
+      "meta.json": {
+        "dataset": "vqav2_yesno",
+        "source": "lmms-lab-encoder/VQAv2",
+        "counts": {
+          "train": 50000,
+          "val": 5000
+        },
+        "label_counts": {
+          "train": {
+            "0": 24774,
+            "1": 25226
+          },
+          "val": {
+            "0": 2445,
+            "1": 2555
+          }
+        },
+        "images": 23330,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 512.3
+      }
+    }
+  },
+  "val_split": "val",
+  "n_rows": 8235,
+  "minutes": 1.81,
+  "metrics": {
+    "val_raw": {
+      "all": {
+        "n": 8235,
+        "acc": 0.723618700667881,
+        "ece": 0.21876288465680538,
+        "nll": 1.2114117732191547
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.5887521968365553,
+        "ece": 0.3446270939754895,
+        "nll": 2.4764529002639635
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8283261802575107,
+        "ece": 0.11629623959163396,
+        "nll": 0.8107962453325491
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7104,
+        "ece": 0.23431863887310034,
+        "nll": 1.0915065650993987
+      }
+    },
+    "val_calibrated": {
+      "all": {
+        "n": 8235,
+        "acc": 0.723618700667881,
+        "ece": 0.07641553183577607,
+        "nll": 0.6161551475342822
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.5887521968365553,
+        "ece": 0.1529526163435988,
+        "nll": 1.0642958448263562
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8283261802575107,
+        "ece": 0.021153778932068372,
+        "nll": 0.4444309902916146
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7104,
+        "ece": 0.09185362035036092,
+        "nll": 0.5861794363781809
+      }
+    }
+  },
+  "rows_file": "smolvlm-microduck-kick-ft2-cal-best.vqa-val.predictions.jsonl.gz"
+}
