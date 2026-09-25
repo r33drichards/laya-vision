@@ -95,12 +95,15 @@ Closed-loop, graded by the simulator's ground truth: success is a kick that conn
 
 | Policy | 3D, seeds 0–9 | 3D, seeds 20–119 | 2D, seeds 20–119 |
 |---|---:|---:|---:|
-| **this model** | **8/10** | **{D3}** | **{D2}** |
-| the teacher it imitates | 10/10 | {T3} | {T2} |
+| **this model** | **8/10** | **86/100** | **95/100** |
+| the teacher it imitates | 10/10 | 95/100 | 95/100 |
 | `thaitea/laya-vision` (before) | 0/10 | | 0/10 (seeds 0–9) |
-| random actions | 0/10 | {R3} | {R2} |
+| random actions | 0/10 | 9/100 | 6/100 |
 
-{FELL}
+In 3D the model never fell (random actions fell in 72 of 100 episodes). Of its 14 misses on seeds 20–119, 8 ran out
+of steps without connecting a kick and 6 kicked but moved the ball less than 0.3 m. In 2D it matches its teacher.
+Episodes were played with this checkpoint's weights before the temperatures were refitted, which changes
+probabilities but never the chosen action. Each decision takes about 0.6 s on 4 CPU cores.
 
 ### Question answering
 
