@@ -14,6 +14,8 @@ These are **task-oriented** recipes for getting specific things done. They assum
   a scorecard.
 - [Play games with a checkpoint](play-games.md): watch a checkpoint play in a local window, and score it on the games
   suite.
+- [Drive through the DrivingBench harness](drivingbench.md): let a checkpoint drive a real car at parking-lot
+  speed through the harness's MCP tools, and score it offline on the published DrivingBench v1 runs.
 
 ## See also
 
