@@ -44,8 +44,8 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-TRAIN_VISION = False      # with "full": train the vision tower too (at LR_VISION)
-LR_VISION = None          # the vision tower's LR when it trains; None = LR_BACKBONE
+TRAIN_VISION = True       # with "full": train the vision tower too (at LR_VISION)
+LR_VISION = 1e-6          # the vision tower's LR when it trains; None = LR_BACKBONE
 LR_HEAD = 5e-5
 LR_BACKBONE = 1e-5
 BATCH_SIZE = 64
@@ -139,6 +139,9 @@ def train(agent, ctx):
     if TRAIN_VISION:
         base = vt.set_trainable
         vt.set_trainable = lambda model, mode="head", n_last=4: base(model, mode, n_last=n_last, train_vision=True)
+        # recompute the vision tower's activations in backward: at batch 64 with stack-2 its stored activations
+        # overflow the H100's 80 GB (the language layers are unaffected)
+        agent.model.encoder.vision_model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
     extra = {}
     if RL_GAMES:
