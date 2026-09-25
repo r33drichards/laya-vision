@@ -28,38 +28,7 @@ import json
 import time
 from datetime import datetime, timezone
 
-# maneuver -> (direction, steering_percent); None means stop_now
-MANEUVERS = {
-    "stop: a cone, person, vehicle or wall is close ahead, or the way is unclear": None,
-    "go straight": ("straight", 0),
-    "turn gently left": ("left", 25),
-    "turn sharply left": ("left", 60),
-    "turn gently right": ("right", 25),
-    "turn sharply right": ("right", 60),
-}
-
-
-def question(objective: str):
-    return {
-        "action": {
-            "type": "choice",
-            "instructions": "You are driving a car at walking pace in an empty parking lot, seen from its "
-                            "windshield camera. Objective: %s What should the car do next?" % objective,
-            "criteria": list(MANEUVERS),
-        }
-    }
-
-
-def decide(answer, min_prob: float):
-    """The model's answer -> ("stop", None, reason) or ("motion", (direction, steering_percent), reason)."""
-    choice = answer["choice"]
-    p = answer["probabilities"][choice]
-    reason = "laya: %s (p=%.2f)" % (choice.split(":")[0], p)
-    if MANEUVERS[choice] is None:
-        return "stop", None, reason
-    if p < min_prob:
-        return "stop", None, "laya: unsure, best %s (p=%.2f < %.2f)" % (choice, p, min_prob)
-    return "motion", MANEUVERS[choice], reason
+from laya.driving import decide, question, state
 
 
 def unready(summary) -> str:
@@ -120,12 +89,8 @@ async def run(args):
                 if why:
                     kind, target, reason = "stop", None, "laya: not acting, " + why
                 else:
-                    state = {"images": images, "note": {
-                        "speed_mps": summary.get("speed_mps"),
-                        "steering_percent_positive_left": summary.get("steering_percent"),
-                        "command_state": summary.get("state"),
-                    }}
-                    answer = agent.predict(state, qs)["answers"]["action"]
+                    answer = agent.predict(state(images, summary.get("speed_mps"), summary.get("steering_percent"),
+                                                 summary.get("state")), qs)["answers"]["action"]
                     kind, target, reason = decide(answer, args.min_prob)
                 ms = (time.perf_counter() - t0) * 1000
                 if kind == "stop":
