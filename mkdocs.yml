@@ -31,6 +31,7 @@ nav:
       - Run jobs on Modal: how-to/run-on-modal.md
       - Evaluate a checkpoint: how-to/evaluate.md
       - Play games with a checkpoint: how-to/play-games.md
+      - Drive through the DrivingBench harness: how-to/drivingbench.md
 
   - Concepts:
       - Overview: concepts/overview.md
