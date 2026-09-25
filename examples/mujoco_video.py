@@ -1,7 +1,7 @@
 """Record a MuJoCo episode (``laya.mujocogames``) to a video: the screen, the chosen push and, for a model, its
 probabilities over the pushes.
 
-    pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]"
+    pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]" stable-baselines3 sb3-contrib
     python examples/mujoco_video.py --policy expert --out expert.webm
     python examples/mujoco_video.py --game Hopper --policy random --out random.webm
     python examples/mujoco_video.py --game HalfCheetah --policy model --model thaitea/laya-vision \\

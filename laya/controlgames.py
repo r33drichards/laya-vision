@@ -78,14 +78,13 @@ class ControlGame:
 
         return gym.make(spec["env_id"], render_mode="rgb_array")
 
-    def _env_action(self, index: int):
-        """What ``env.step`` takes for the ``index``-th action name."""
-        return index
+    def _env_action(self, action):
+        """What ``env.step`` takes for an action name (a subclass may take other action forms)."""
+        return self.actions.index(action)
 
     def step(self, action: str) -> float:
         self._prev, self._frame = self._frame, None
-        self.obs, reward, self.terminated, self.truncated, _ = self.env.step(
-            self._env_action(self.actions.index(action)))
+        self.obs, reward, self.terminated, self.truncated, _ = self.env.step(self._env_action(action))
         self.score += float(reward)
         self.steps += 1
         return float(reward)
@@ -121,7 +120,7 @@ def play_episodes(game: str, policy, episodes: int, seed: int = 0, max_steps: in
         env = make(game, seed + i)
         while not env.done and not (max_steps and env.steps >= max_steps):
             a = policy(env)
-            counts[a] += 1
+            counts.update(a.values() if isinstance(a, dict) else [a])  # per-joint actions: count each joint's level
             env.step(a)
         eps.append({"score": round(env.score, 3), "steps": env.steps, "terminated": env.terminated})
         env.close()

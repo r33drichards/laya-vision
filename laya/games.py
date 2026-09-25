@@ -101,8 +101,8 @@ CONTROL_GOALS = {
     "HumanoidStandup": "A humanoid robot lies on the ground; get up and raise your head as high as you can.",
 }
 
-# MuJoCo joint-torque games: the actuated joints in the environment's actuator order. Each gets a push each way
-# (``<JOINT>_POS``, ``<JOINT>_NEG``), after ``NONE``; ``laya.mujocogames`` maps them onto the action vector.
+# MuJoCo joint-torque games (``laya.mujocogames``): the actuated joints in the environment's actuator order. Each
+# joint gets its own ``choice`` every step (``mujoco_questions``), over ``TORQUE_LEVELS``.
 TORQUE_JOINTS = {
     "Reacher": ("shoulder", "elbow"),
     "Pusher": ("shoulder pan", "shoulder lift", "upper arm roll", "elbow flex", "forearm roll", "wrist flex",
@@ -118,16 +118,25 @@ TORQUE_JOINTS = {
                  "right elbow", "left shoulder 1", "left shoulder 2", "left elbow"),
 }
 TORQUE_JOINTS["HumanoidStandup"] = TORQUE_JOINTS["Humanoid"]
+TORQUE_LEVELS = {"STRONG_NEG": "full torque the negative way", "NEG": "half torque the negative way",
+                 "NONE": "no torque", "POS": "half torque the positive way",
+                 "STRONG_POS": "full torque the positive way"}
 
 
-def torque_actions(joints: Sequence[str]) -> Dict[str, str]:
-    """``NONE``, then ``<JOINT>_POS`` / ``<JOINT>_NEG`` per joint, with what each does."""
-    out = {"NONE": "apply no torque"}
-    for j in joints:
-        key = j.upper().replace(" ", "_")
-        out[key + "_POS"] = "torque the %s one way (positive)" % j
-        out[key + "_NEG"] = "torque the %s the other way (negative)" % j
-    return out
+def joint_key(joint: str) -> str:
+    """The answer key for a joint: ``"right knee"`` -> ``"right_knee"``."""
+    return joint.replace(" ", "_")
+
+
+def mujoco_questions(game: str) -> Dict[str, Dict]:
+    """One ``choice`` per joint of a ``TORQUE_JOINTS`` game, all asked about the same frame. The game and its goal come
+    first and the joint last, so the questions share a prefix (``laya.vlm`` computes it once)."""
+    return {joint_key(j): {
+        "type": "choice",
+        "instructions": "You are playing the control task %s. %s A faint copy shows where things were one step "
+                        "earlier. How should you torque the %s now?" % (game, CONTROL_GOALS[game], j),
+        "criteria": dict(TORQUE_LEVELS),
+    } for j in TORQUE_JOINTS[game]}
 
 
 CONTROL_ACTIONS = {
@@ -141,13 +150,12 @@ CONTROL_ACTIONS = {
     "InvertedDoublePendulum": {"HARD_LEFT": "push the cart left hard", "LEFT": "push the cart left gently",
                                "NONE": "do not push", "RIGHT": "push the cart right gently",
                                "HARD_RIGHT": "push the cart right hard"},
-    **{game: torque_actions(joints) for game, joints in TORQUE_JOINTS.items()},
 }
 
 
 def control_question(game: str) -> Dict:
-    """The question for a ``laya.controlgames`` or ``laya.mujocogames`` game; the screen ghosts the previous frame
-    to show motion."""
+    """The question for a ``laya.controlgames`` game or a MuJoCo pendulum; the screen ghosts the previous frame to show
+    motion. The MuJoCo torque games ask one question per joint instead (``mujoco_questions``)."""
     return {"action": {
         "type": "choice",
         "instructions": "You are playing the control task %s. %s A faint copy shows where things were one step "

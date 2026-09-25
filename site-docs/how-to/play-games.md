@@ -28,10 +28,13 @@ among named pushes:
 
 - InvertedPendulum and InvertedDoublePendulum push the cart, seen from a fixed side view: `LEFT`, `NONE`, `RIGHT`,
   plus gentle and hard pushes for the double pole. A scripted controller keeps each pole up for all 1000 steps.
-- Reacher, Pusher, Swimmer, Hopper, Walker2d, HalfCheetah, Ant, Humanoid and HumanoidStandup torque one joint at a
-  time: `NONE`, then `<JOINT>_POS` and `<JOINT>_NEG` for each actuated joint (`laya.games.TORQUE_JOINTS`), from 5
-  options for Reacher to 35 for Humanoid. The expert is a lookahead planner that tries each push in the simulator.
-  It beats random play and doing nothing everywhere except Pusher and Humanoid, which have no expert.
+- Reacher, Pusher, Swimmer, Hopper, Walker2d, HalfCheetah, Ant, Humanoid and HumanoidStandup set every joint at
+  once: one question per joint (`laya.games.mujoco_questions`), each over five torque levels from `STRONG_NEG` to
+  `STRONG_POS`, all answered in one `predict`, which encodes the frame once. Squeezing a strong expert's actions into
+  one joint per step kept at most 6% of its return on the walking robots; five levels per joint kept 78-100%.
+  The experts are the Farama Foundation's pretrained Stable-Baselines3 policies on the Hugging Face Hub
+  (`laya.mujocogames.HUB_EXPERTS`, pinned by commit), rounded to the nearest level on each joint; they need
+  `stable-baselines3` and `sb3-contrib`.
 
 [`examples/mujoco_video.py`](https://github.com/r33drichards/laya-vision/blob/main/examples/mujoco_video.py) records
 one episode, with the chosen push and the model's probabilities beside the screen, and
@@ -39,7 +42,7 @@ one episode, with the chosen push and the model's probabilities beside the scree
 records and scores a checkpoint on every game against random play, doing nothing and the expert:
 
 ```bash
-pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]"
+pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]" stable-baselines3 sb3-contrib
 python examples/mujoco_video.py --game Hopper --policy expert --out hopper-expert.webm
 python examples/mujoco_baseline.py --model thaitea/laya-vision \
     --revision 8b318c99d7ad3ce19c24369263463882eada9d1e --out mujoco-baseline/

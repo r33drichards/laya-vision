@@ -2303,7 +2303,8 @@ SUITE_MUJOCO_GAMES = ("InvertedPendulum", "InvertedDoublePendulum", "Reacher", "
                       "Walker2d", "HalfCheetah", "Ant", "Humanoid", "HumanoidStandup")  # laya.mujocogames.GAMES
 # OSMesa renders in software, so it needs nothing from the GPU driver
 mujoco_image = _with_local_code(base_image.apt_install("libosmesa6", "libgl1")
-                                .pip_install("gymnasium[mujoco]==1.3.0", "imageio[ffmpeg]")
+                                .pip_install("gymnasium[mujoco]==1.3.0", "imageio[ffmpeg]",
+                                             "stable-baselines3==2.9.0", "sb3-contrib==2.9.0")  # the Hub experts
                                 .env({"MUJOCO_GL": "osmesa", "PYOPENGL_PLATFORM": "osmesa"}))
 
 

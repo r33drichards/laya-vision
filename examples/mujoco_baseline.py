@@ -1,7 +1,7 @@
 """A model's baseline on every MuJoCo game (``laya.mujocogames``): a video of its first episode per game, and its
 mean return against random play, doing nothing (always ``NONE``) and the expert, on the same seeded episodes.
 
-    pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]"
+    pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]" stable-baselines3 sb3-contrib
     python examples/mujoco_baseline.py --model thaitea/laya-vision \\
         --revision 8b318c99d7ad3ce19c24369263463882eada9d1e --out mujoco-baseline/
 
