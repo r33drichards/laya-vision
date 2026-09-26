@@ -338,7 +338,10 @@ def take_turn(game, override=None):
         yield draw(game, caption), panel(game)
     world = game["world"]
     game["done"] = won(world) or fallen(world) or game["steps"] >= MAX_STEPS
-    yield draw(game, caption), panel(game)
+    if game["done"]:
+        # the final state. Between actions there is no extra frame: the next action's first frame follows within
+        # FRAME_EVERY_S, and a 3D redraw on a ZeroGPU host's CPU cost ~0.4 s a step, most of the lag behind real time
+        yield draw(game, caption), panel(game)
 
 
 # ── the page ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -363,14 +366,22 @@ def play_episode(seed, sim):
         # a forked GPU worker: torch's CPU thread pool (used here while the model loaded) did not survive the fork,
         # and the image preprocessing's first parallel op would wait on it forever. One thread never touches it.
         torch.set_num_threads(1)
+    start, handed, frames = time.perf_counter(), 0.0, 0
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="episode-gl") as ex:
         game = new_game(seed, sim, gl=lambda fn, *args: ex.submit(fn, *args).result())
         try:
             yield draw(game, "starting"), panel(game)
             while not game["done"]:
                 for img, md in take_turn(game):
+                    t = time.perf_counter()
                     yield img, md
+                    handed += time.perf_counter() - t  # waiting for the frame to be taken
+                    frames += 1
         finally:
+            # one line in the Space's log per episode: where the wall time went
+            print("[episode] %s seed %s: %d steps, sim %.1f s, wall %.1f s, %d frames, %.1f s waiting on hand-off"
+                  % (sim, game["seed"], game["steps"], game["world"].t, time.perf_counter() - start, frames, handed),
+                  flush=True)
             close_game(game)
 
 
