@@ -77,6 +77,30 @@ def snake_question() -> Dict:
     }}
 
 
+PAINT_ACTIONS = {
+    "UP": "move the cursor up", "DOWN": "move the cursor down", "LEFT": "move the cursor left",
+    "RIGHT": "move the cursor right", "UP_LEFT": "move the cursor diagonally up and to the left",
+    "UP_RIGHT": "move the cursor diagonally up and to the right",
+    "DOWN_LEFT": "move the cursor diagonally down and to the left",
+    "DOWN_RIGHT": "move the cursor diagonally down and to the right",
+    "PEN_DOWN": "press the mouse button to start drawing", "PEN_UP": "release the mouse button to stop drawing",
+    "DONE": "the drawing is finished",
+}
+PAINT_GOALS = {"circle": "draw one round, closed circle, about as big as a third of the canvas height"}
+
+
+def paint_question(task: str = "circle") -> Dict:
+    """The question for ``laya.paintenv.JSPaintEnv``: a paint canvas, a red cursor, and mouse-only actions."""
+    return {"action": {
+        "type": "choice",
+        "instructions": "You are using a paint program with only the mouse. The white area is the canvas and the "
+                        "red mark is the mouse cursor: a hollow ring with a cross means the button is up, a filled "
+                        "dot means it is held down and moving draws a black line. Your task: %s. Which mouse action "
+                        "should you take now?" % PAINT_GOALS[task],
+        "criteria": dict(PAINT_ACTIONS),
+    }}
+
+
 CONTROL_GOALS = {
     "CartPole": "A pole is hinged on a cart; push the cart left or right to keep the pole upright and the cart "
                 "on screen.",
