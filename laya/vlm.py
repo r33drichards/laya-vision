@@ -65,9 +65,10 @@ import torch
 import torch.nn as nn
 
 from .calibration import Calibration, calibrate_records, checkpoint_identity, resolve_temperature
-from .common import QTYPES, confidence_from_probs, render_options, serialize_state, temp_bucket
+from .common import QTYPES, confidence_from_probs, render_options, temp_bucket
 from .common import truncation_answer, truncation_error, truncation_report
 from .preprocess import ImagePrep, as_uint8_chw, prefix_ids
+from .prompt import check_state_format, question_to_internal, serialize_state
 
 DEFAULT_BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
 #: SmolVLM2 at the same size: same dimensions and tokenizer, trained on video and multi-image data as well
@@ -177,12 +178,13 @@ def _load_image(img):
                     % type(img).__name__)
 
 
-def split_state(state: Any) -> Tuple[List, str]:
+def split_state(state: Any, state_format: Optional[str] = None) -> Tuple[List, str]:
     """Split a state into (images, text).
 
     Accepts text, a list (conversation turns), a PIL image, or a dict. Dict keys ``"image"`` (PIL image, path or
     encoded bytes) and ``"images"`` (list of them) are pulled out as images; the remaining keys are serialized to
-    JSON text exactly like the text-only model does.
+    text by ``laya.prompt.serialize_state`` in ``state_format`` (default ``"json"``: JSON, exactly like the
+    text-only model does).
     """
     try:
         from PIL import Image
@@ -192,14 +194,14 @@ def split_state(state: Any) -> Tuple[List, str]:
     except ImportError:
         pass
     if not isinstance(state, dict):
-        return [], serialize_state(state)
+        return [], serialize_state(state, state_format)
     images = []
     if state.get("image") is not None:
         images.append(_load_image(state["image"]))
     for img in state.get("images") or []:
         images.append(_load_image(img))
     rest = {k: v for k, v in state.items() if k not in ("image", "images")}
-    return images, serialize_state(rest) if rest else ""
+    return images, serialize_state(rest, state_format) if rest else ""
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -265,6 +267,7 @@ def build_vlm_inputs(
     prefix: Optional[Dict[str, Any]] = None,
     prep: Optional[ImagePrep] = None,
     readout: Optional[str] = None,
+    state_format: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build one VLM sequence for an internal question ``q = {"t", "ins", "crit"}``.
 
@@ -276,7 +279,9 @@ def build_vlm_inputs(
     (``processor_readout``). ``prefix`` (from ``vlm_prefix``) may be passed to reuse image preprocessing across
     questions; the state's images are then ignored in favour of it. ``prep`` picks the preprocessing path (see
     ``laya.preprocess``); it is ignored when ``prefix`` is given, which already carries the choice. ``max_len``
-    defaults to the checkpoint's, which the agent leaves on the processor as ``laya_max_len`` (1024 without one).
+    defaults to the checkpoint's, which the agent leaves on the processor as ``laya_max_len`` (1024 without one),
+    and ``state_format`` (how the state's non-image keys become text, ``laya.prompt.serialize_state``) to the
+    checkpoint's ``laya_state_format`` (``"json"`` without one).
     """
     if max_len is None:
         max_len = getattr(processor, "laya_max_len", 1024)
@@ -284,8 +289,10 @@ def build_vlm_inputs(
         readout = processor_readout(processor)
     if readout not in READOUTS:
         raise ValueError("readout must be one of %s, got %r" % (READOUTS, readout))
+    if state_format is None:
+        state_format = getattr(processor, "laya_state_format", None)
     tok = processor.tokenizer
-    images, text = split_state(state)
+    images, text = split_state(state, state_format)
     if prefix is None:
         prefix = vlm_prefix(processor, images, prep, MASK_PREFIX_TEXT if readout == "mask" else PREFIX_TEXT)
     if readout == "mask":
@@ -917,6 +924,8 @@ class VLMAgent:
         self.cfg["readout"] = self.processor.laya_readout = self.model.readout
         self.cfg["option_attention"] = self.model.option_attention
         self.processor.laya_max_len = self.cfg.get("max_len", 1024)
+        # the state rendering the checkpoint was trained with (absent: "json", every released checkpoint)
+        self.state_format = self.processor.laya_state_format = check_state_format(self.cfg.get("state_format"))
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
         self.temperature_by_options = self.cfg.get("temperature_by_options", {})
@@ -992,16 +1001,8 @@ class VLMAgent:
         else:
             save_file({k: v for k, v in sd.items() if not k.startswith("encoder.")}, os.path.join(path, HEAD_WEIGHTS_NAME))
 
-    @staticmethod
-    def _to_internal(qdef: Dict) -> Dict:
-        t = qdef["type"]
-        crit = qdef.get("criteria")
-        if t == "choice" and isinstance(crit, list):
-            crit = {c: None for c in crit}
-        ins = qdef["instructions"]
-        if not isinstance(ins, str):
-            ins = json.dumps(ins)
-        return {"t": t, "ins": ins, "crit": crit}
+    #: ``laya.prompt.question_to_internal``, shared with the training-data loader (``jsonl_example``)
+    _to_internal = staticmethod(question_to_internal)
 
     @torch.no_grad()
     def predict(
@@ -1016,6 +1017,7 @@ class VLMAgent:
         strict_calibration: bool = False,
         _raw_logits: Optional[Dict[str, np.ndarray]] = None,
         strict: bool = False,
+        state_format: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Evaluate typed questions over a text / JSON / image state. Same output schema as ``Agent.predict``.
 
@@ -1047,10 +1049,15 @@ class VLMAgent:
         "instructions_tokens_dropped": n, "state_tokens_dropped": n}``; the key is absent when nothing was cut.
         ``strict=True`` raises ``ValueError`` (naming the question and what would be cut) instead.
 
+        ``state_format`` renders the state's non-image keys for this call only (``laya.prompt.STATE_FORMATS``);
+        the default is the checkpoint's (``self.state_format``, ``"json"`` for every released checkpoint). Any other
+        rendering changes the input ids the checkpoint was trained on.
+
         With a value head (config ``"value_head": true``) each answer carries ``"value"``, the head's P(success
         from this state) read under that question's rows, and the result a top-level ``"value"`` (mean over all
         scored rows); both keys are absent without the head.
         """
+        state_format = check_state_format(state_format or self.state_format)
         t_override = resolve_temperature(temperature, calibration)
         if calibration is not None:
             calibration.check(checkpoint_identity(self), strict=strict_calibration)
@@ -1073,7 +1080,8 @@ class VLMAgent:
             q = internal[qid]
             k = len(render_options(q))
             for order in _permutations(k, max(1, n_permutations)):
-                it = build_vlm_inputs(self.processor, state, q, max_len, head_max_len, option_order=order, prefix=prefix)
+                it = build_vlm_inputs(self.processor, state, q, max_len, head_max_len, option_order=order, prefix=prefix,
+                                      state_format=state_format)
                 if len(it["markers"]) != k:
                     raise ValueError("question %r options exceed head_max_len" % qid)
                 if qid not in truncated:  # the cuts do not depend on the option order: report the first one's
@@ -1168,7 +1176,7 @@ class VLMAgent:
             "model": "laya-vlm",
             "answers": answers,
             "usage": {"input_tokens": n_tokens, "output_tokens": 0, "images": len(images)},
-            "provenance": self.provenance(rows, n_permutations, temps_used),
+            "provenance": dict(self.provenance(rows, n_permutations, temps_used), state_format=state_format),
         }
         if row_values:  # value head: P(success from this state), averaged over every scored row
             out["value"] = round(float(np.mean(row_values)), 4)

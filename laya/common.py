@@ -1,5 +1,4 @@
 """Core model architecture, token sequence construction, and confidence estimation for laya."""
-import json
 import math
 import os
 from typing import Dict, List, Optional, Union
@@ -8,37 +7,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+# the text of a (state, question) comes from laya.prompt, shared by data preparation, training and inference
+from .prompt import option_labels, render_options, serialize_state  # noqa: F401
+
 QTYPES = {"choice": 0, "score": 1, "noul": 2}
 QTYPE_NAMES = {v: k for k, v in QTYPES.items()}
-
-
-def serialize_state(state: Union[str, dict, list]) -> str:
-    if isinstance(state, str):
-        return state
-    return json.dumps(state, ensure_ascii=False)
-
-
-def render_options(q: Dict) -> List[str]:
-    """Render option texts in label-index order. Noul is always [false, true]."""
-    t, crit = q["t"], q.get("crit")
-    if t == "choice":
-        return [k if not v else "%s: %s" % (k, v) for k, v in crit.items()]
-    if t == "score":
-        return ["level %d: %s" % (i, c) for i, c in enumerate(crit)]
-    crit = crit or {}
-    return [
-        "false: " + (crit.get("false") or "no, the statement does not hold"),
-        "true: " + (crit.get("true") or "yes, the statement holds"),
-    ]
-
-
-def option_labels(q: Dict) -> List[str]:
-    """Option labels in label-index order, as the answers name them (choice keys, score levels, false/true)."""
-    if q["t"] == "choice":
-        return list(q["crit"].keys())
-    if q["t"] == "score":
-        return [str(i) for i in range(len(q["crit"]))]
-    return ["false", "true"]
 
 
 def truncation_report(order: List[int], full: List[List[int]], cut: List[List[int]], instructions_dropped: int,
@@ -105,10 +78,12 @@ def build_sequence(
     option_order: Optional[List[int]] = None,
     truncate_left: bool = False,
     report: Optional[Dict] = None,
+    state_format: Optional[str] = None,
 ):
     """Format: [CLS] <type> instructions [SEP] [MASK] opt0 [MASK] opt1 ... [SEP] state [SEP].
 
-    Returns ``(ids, markers)``; a ``report`` dict, when given, is filled with ``truncation_report``'s keys."""
+    Returns ``(ids, markers)``; a ``report`` dict, when given, is filled with ``truncation_report``'s keys.
+    ``state_format`` is ``laya.prompt.serialize_state``'s (default ``"json"``)."""
     mask_tok = tok.mask_token
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
@@ -131,7 +106,7 @@ def build_sequence(
         ids.extend(o)
     ids.append(tok.sep_token_id)
     room = max(0, max_len - len(ids) - 1)
-    st = tok(serialize_state(state).replace(mask_tok, " "), add_special_tokens=False)["input_ids"]
+    st = tok(serialize_state(state, state_format).replace(mask_tok, " "), add_special_tokens=False)["input_ids"]
     n_state = len(st)
     st = st[len(st) - room:] if truncate_left else st[:room]  # not st[-room:]: that keeps all of it at room=0
     ids = ids + st + [tok.sep_token_id]

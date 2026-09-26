@@ -18,6 +18,7 @@ from .common import (
     truncation_answer,
     truncation_error,
 )
+from .prompt import question_to_internal
 
 
 def _fix_tokenizer_config(path: str):
@@ -178,16 +179,8 @@ class Agent:
             else:
                 raise e
 
-    @staticmethod
-    def _to_internal(qdef: Dict) -> Dict:
-        t = qdef["type"]
-        crit = qdef.get("criteria")
-        if t == "choice" and isinstance(crit, list):
-            crit = {c: None for c in crit}
-        ins = qdef["instructions"]
-        if not isinstance(ins, str):
-            ins = json.dumps(ins)
-        return {"t": t, "ins": ins, "crit": crit}
+    #: ``laya.prompt.question_to_internal``, the conversion ``VLMAgent`` and the training loaders use
+    _to_internal = staticmethod(question_to_internal)
 
     @torch.no_grad()
     def system_one(self, state: Union[str, dict, list], questions: Dict[str, Dict[str, Any]],
