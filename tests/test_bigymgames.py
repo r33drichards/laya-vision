@@ -1,0 +1,91 @@
+"""BiGym (``laya.bigymgames``): question schema and labels without the sim; with it, IK primitives move the wrist,
+the reach oracle beats random, probe frames carry consistent ground truth, and the cupboard poses are read back."""
+import importlib.util
+
+import numpy as np
+import pytest
+
+from laya import bigymgames as bg
+from laya.common import QTYPES
+
+HAVE_SIM = all(importlib.util.find_spec(m) for m in ("mujoco", "bigym"))
+sim = pytest.mark.skipif(not HAVE_SIM, reason="needs mujoco and bigym (and MUJOCO_GL=egl or osmesa)")
+
+
+@pytest.mark.parametrize("task", sorted(bg.TASKS))
+def test_questions_are_well_formed(task):
+    q = bg.bigym_question(task)["action"]
+    assert q["type"] == "choice" and list(q["criteria"]) == list(bg.PRIMITIVES)
+    assert bg.TASKS[task]["description"] in q["instructions"]
+    probe = bg.probe_questions(task)
+    assert {v["type"] for v in probe.values()} <= set(QTYPES)
+    assert ("side" in probe) == (bg.TASKS[task]["kind"] == "reach")
+    assert len(probe["progress"]["criteria"]) == 4
+
+
+def test_progress_levels():
+    assert [bg.progress_level("ReachTarget", d) for d in (0.5, 0.25, 0.15, 0.05)] == [0, 1, 2, 3]
+    assert [bg.progress_level("DrawerTopOpen", f) for f in (0.0, 0.4, 0.7, 0.95)] == [0, 1, 2, 3]
+    assert [bg.progress_level("DrawerTopClose", f) for f in (1.0, 0.6, 0.3, 0.05)] == [0, 1, 2, 3]
+    lab = bg.labels("ReachTarget", {"success": True, "distance": 0.05, "closer": "right"})
+    assert lab == {"done": 1, "progress": 3, "side": 1}
+
+
+def test_probe_metrics_and_answer_probs():
+    rows = [{"qid": "done", "label": 1, "probs": [0.2, 0.8]}, {"qid": "done", "label": 0, "probs": [0.9, 0.1]},
+            {"qid": "done", "label": 0, "probs": [0.4, 0.6]}]
+    m = bg.probe_metrics(rows)["done"]
+    assert m["n"] == 3 and m["acc"] == pytest.approx(2 / 3) and m["prior_acc"] == pytest.approx(2 / 3)
+    assert m["label_counts"] == [2, 1] and m["pred_counts"] == [1, 2]
+    assert bg.answer_probs({"type": "noul", "noul": 0.7}, {"type": "noul"}) == pytest.approx([0.3, 0.7])
+    q = {"type": "choice", "criteria": {"left": "", "right": ""}}
+    assert bg.answer_probs({"type": "choice", "probabilities": {"right": 0.9, "left": 0.1}}, q) == [0.1, 0.9]
+    assert bg.normalized(0.5, 0.0, 1.0) == 0.5 and bg.normalized(0.3, 0.2, 0.2) is None
+
+
+@sim
+def test_primitives_stay_in_bounds_and_move_the_wrist():
+    game = bg.BiGymGame("ReachTarget", seed=0)
+    space = game.env.action_space
+    for name in bg.PRIMITIVES:
+        a = game.primitive_to_action(name)
+        assert a.shape == space.shape and np.all(a >= space.low) and np.all(a <= space.high)
+    for hand in ("left", "right"):
+        for axis in ("FORWARD", "UP", "LEFT"):
+            before = game.hand_pos(hand).copy()
+            game.step("%s_HAND_%s" % (hand.upper(), axis))
+            moved = game.hand_pos(hand) - before
+            assert moved @ game.world_dir(axis) > 0.01, (hand, axis, moved)
+    assert game.frame().shape == bg.RESOLUTION + (3,) and game.decisions == 6 and game.steps == 6 * bg.HOLD
+    game.close()
+
+
+@sim
+def test_oracle_reaches_and_random_does_not():
+    orc = bg.play_episodes("ReachTarget", bg.oracle_policy, episodes=3)
+    rnd = bg.play_episodes("ReachTarget", bg.random_policy(0), episodes=3)
+    assert orc["success_rate"] == 1.0 > rnd["success_rate"]
+    assert all(e["final"]["distance"] <= 0.1 for e in orc["results"])
+    again = bg.play_episodes("ReachTarget", bg.random_policy(0), episodes=3)
+    assert [e["final"] for e in again["results"]] == [e["final"] for e in rnd["results"]]
+
+
+@sim
+def test_probe_frames_ground_truth():
+    rows = bg.probe_frames("ReachTarget", 8)
+    assert len(rows) == 8 and any(r["labels"]["done"] for r in rows)
+    for r in rows:
+        assert r["labels"] == bg.labels("ReachTarget", r["truth"]) and r["image"].dtype == np.uint8
+        assert r["labels"]["done"] == int(r["truth"]["distance"] <= 0.1)
+    rows = bg.probe_frames("DrawerTopClose", 8)
+    assert [r["labels"]["progress"] for r in rows] == [0, 1, 2, 3] * 2
+    assert all(r["labels"]["done"] == int(r["truth"]["open"] <= 0.1) for r in rows)
+
+
+@sim
+def test_open_fraction_round_trip():
+    game = bg.BiGymGame("WallCupboardOpen", seed=0)
+    assert game.ground_truth() == {"success": False, "open": pytest.approx(0.0, abs=0.02)}
+    game.set_open_fraction(1.0)
+    assert game.ground_truth()["success"] and game.open_fraction() == pytest.approx(1.0, abs=0.02)
+    game.close()
