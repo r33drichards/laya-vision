@@ -24,8 +24,9 @@ with upstream's Microduck model walking on upstream's trained policy (rendered t
 `microduck:sim2d`, the flat cartoon. Each step the model sees the duck's camera and picks `FORWARD`, `LEFT`, `RIGHT` or
 `KICK`; the view of the arena and the ground-truth numbers are for the viewer only.
 
-The model runs on ZeroGPU (`decide` in `app.py` is the only function that uses the GPU); the simulators run on the
-Space's CPU and play each action at wall-clock speed. The action space, timings and question are the ones quackd's
+Each Play is one ZeroGPU call (`play_episode` in `app.py`): the GPU worker builds the world from the seed, plays the
+episode at wall-clock speed with the model deciding on the GPU (about 70 ms a decision), and streams the frames back.
+One call per episode rather than per decision keeps a visitor inside ZeroGPU's run limit. The action space, timings and question are the ones quackd's
 `scripts/eval_microduck.py` scores, and the physics is stepped on the simulator's own clock whatever the pacing, so an
 episode goes where the eval's does. The checkpoint is pinned at revision `7505ee2` in `app.py`; `LAYA_MODEL` and
 `LAYA_REVISION` override it. quackd is installed at start-up without its dependencies, because the Gradio SDK's
