@@ -14,6 +14,7 @@ These are **task-oriented** recipes for getting specific things done. They assum
   a scorecard.
 - [Play games with a checkpoint](play-games.md): watch a checkpoint play in a local window, and score it on the games
   suite.
+- [Serve a checkpoint over HTTP](serve.md): `laya-serve`, its endpoints, and the Python client.
 
 ## See also
 
