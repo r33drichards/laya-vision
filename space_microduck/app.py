@@ -192,7 +192,10 @@ def world_call(game, fn, *args):
 
 
 def new_game(seed, sim="2D cartoon"):
-    seed = int(seed)
+    try:  # the page can send the number as text
+        seed = int(float(seed))
+    except (TypeError, ValueError):
+        seed = 0
     if sim == "3D physics":
         from quackd_microduck.sim3d.world import MujocoWorld
 
@@ -375,7 +378,7 @@ with gr.Blocks(title="Laya Vision: Microduck find-and-kick") as demo:
     game = gr.State()
     with gr.Row():
         sim = gr.Radio(list(SIMS), value="3D physics", label="Simulator", scale=2)
-        seed = gr.Number(value=0, precision=0, label="Seed (0-9 are the eval's; any integer works)", scale=2)
+        seed = gr.Textbox(value="0", label="Seed (0-9 are the eval's; any integer works)", scale=2)
         reset = gr.Button("Reset", scale=1)
     view = gr.Image(type="pil", format="webp", label="Simulator", interactive=False, show_label=False)
     with gr.Row():
@@ -401,4 +404,6 @@ with gr.Blocks(title="Laya Vision: Microduck find-and-kick") as demo:
     stop.click(None, cancels=[play_ev])
 
 if __name__ == "__main__":
-    demo.queue(max_size=16, default_concurrency_limit=4).launch(show_error=True)
+    # No server-side rendering: under it the page sent the seed as a string that gr.Number could not round, so every
+    # visit failed at load, and it puts a Node proxy in front of every streamed frame.
+    demo.queue(max_size=16, default_concurrency_limit=4).launch(show_error=True, ssr_mode=False)
