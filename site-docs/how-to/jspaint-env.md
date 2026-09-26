@@ -97,6 +97,8 @@ seeds 900000–900002, with the default 32 directions and 6 px steps:
 |---|---|---|---|
 | Scripted expert | 0.95 | 3/3 | 139.0 |
 | Random | 0.00 | 0/3 | 22.0 |
+| `thaitea/laya-vision`, zero-shot | 0.00 | 0/3 | 260.0 |
 
-The model was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
+The zero-shot checkpoint picks `PEN_UP` on every step (780 of 780), which does nothing while the pen is already
+up. It runs out the step limit without drawing anything. The model was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
 train it on, as the game checkpoints were trained on expert frames.
