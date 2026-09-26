@@ -259,7 +259,7 @@ def test_rank_small_list_is_one_question():
     j = c.post("/v1/rank", json={"candidates": cands, "instructions": "Which is a car?", "state": "red car"}).json()
     assert [r["candidate"] for r in j["ranked"]] == _global_order(cands, "Which is a car?", "red car")
     assert [r["rank"] for r in j["ranked"]] == [1, 2, 3] and j["tournament"] == {"rounds": 1, "chunk_size": 255,
-                                                                                  "questions": 1}
+                                                                                  "questions": 1, "truncated": []}
     assert abs(sum(r["prob"] for r in j["ranked"]) - 1) < 1e-3
 
 
@@ -282,6 +282,22 @@ def test_rank_tournament(n, chunk, rounds, questions):
     assert finalists == [x for x in order if x in finalists]
     final_mass = sum(r["prob"] for r in j["ranked"] if r["round"] == rounds - 1)
     assert abs(final_mass - 1) < 5e-5 * len(finalists)  # predict rounds each probability to 4 places
+
+
+def test_rank_reports_questions_predict_had_to_cut():
+    class Cutting(MockAgent):  # like a checkpoint whose head_max_len holds 4 short options
+        def predict(self, state, questions, **kw):
+            out = super().predict(state, questions, **kw)
+            for qid, q in questions.items():
+                if len(q["criteria"]) > 4:
+                    out["answers"][qid]["truncated"] = {"options": list(q["criteria"])}
+            return out
+
+    c = TestClient(create_app(Engine({"m": None}, lambda path: Cutting())))
+    cands = ["candidate %d" % i for i in range(10)]
+    assert c.post("/v1/rank", json={"candidates": cands}).json()["tournament"]["truncated"] == ["round 0 chunk 0"]
+    j = c.post("/v1/rank", json={"candidates": cands, "chunk_size": 4}).json()
+    assert j["tournament"]["truncated"] == [] and j["tournament"]["rounds"] == 2
 
 
 @pytest.mark.parametrize("body, needle", [

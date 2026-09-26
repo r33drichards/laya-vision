@@ -309,13 +309,14 @@ class Engine:
         slot = self.slot(model)
         placed: Dict[str, Tuple[int, float, float]] = {}  # candidate -> (round, prob, logit) of its last round
         pool, rnd, n_questions, usage = list(candidates), 0, 0, {"input_tokens": 0, "output_tokens": 0}
+        truncated: List[str] = []  # the questions predict had to cut to fit the checkpoint's token budgets
         with slot.infer_lock:  # one generation for the whole tournament
             generation = slot.generation
             while True:
                 n_chunks = -(-len(pool) // cap)
                 bounds = [round(i * len(pool) / n_chunks) for i in range(n_chunks + 1)]
                 chunks = [pool[bounds[i]:bounds[i + 1]] for i in range(n_chunks)]
-                scored = self._ask_chunks(slot, state, ins, chunks, usage, **kwargs)
+                scored = self._ask_chunks(slot, state, ins, chunks, usage, truncated, rnd, **kwargs)
                 n_questions += sum(1 for c in chunks if len(c) > 1)
                 if n_chunks == 1:
                     for c, (p, z) in scored[0].items():
@@ -332,10 +333,12 @@ class Engine:
         ranked = [{"rank": i + 1, "candidate": c, "prob": placed[c][1], "round": placed[c][0]}
                   for i, c in enumerate(order)]
         return {"model": slot.name, "generation": generation, "ranked": ranked,
-                "tournament": {"rounds": rnd + 1, "chunk_size": cap, "questions": n_questions}, "usage": usage}
+                "tournament": {"rounds": rnd + 1, "chunk_size": cap, "questions": n_questions, "truncated": truncated},
+                "usage": usage}
 
     @staticmethod
-    def _ask_chunks(slot: ModelSlot, state, ins, chunks: List[List[str]], usage: Dict, **kwargs) -> List[Dict]:
+    def _ask_chunks(slot: ModelSlot, state, ins, chunks: List[List[str]], usage: Dict, truncated: List[str],
+                    rnd: int, **kwargs) -> List[Dict]:
         """One predict call for a round: per chunk ``{candidate: (prob, logit)}``. Candidates are ordered by the
         unrounded logits (``_raw_logits``), since predict rounds probabilities to 4 places and a 255-option question
         has many ties there."""
@@ -350,7 +353,10 @@ class Engine:
             if len(c) == 1:
                 scored.append({c[0]: (1.0, 0.0)})
                 continue
-            probs = out["answers"]["chunk%d" % i]["probabilities"]
+            answer = out["answers"]["chunk%d" % i]
+            if answer.get("truncated"):
+                truncated.append("round %d chunk %d" % (rnd, i))
+            probs = answer["probabilities"]
             scored.append({x: (float(probs[x]), float(z)) for x, z in zip(c, raw["chunk%d" % i])})
         return scored
 
