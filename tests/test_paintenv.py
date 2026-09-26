@@ -75,6 +75,22 @@ def test_full_question_fits_raised_budget_without_truncation():
     assert n_opts + n_ins + 2 * 64 + 256 <= PAINT_MAX_LEN  # two 512px images are 64 tokens each
 
 
+def test_judgement_questions_and_summary():
+    from laya.games import PAINT_SHAPES, paint_judgements
+    from laya.paintenv import summarize_judgements
+
+    q = paint_judgements("circle")
+    assert set(q) == {"progress", "on_track", "drawn"}
+    assert q["progress"]["type"] == "score" and len(q["progress"]["criteria"]) == 5
+    assert set(q["on_track"]["criteria"]) == {"on track", "off track"}
+    assert set(q["drawn"]["criteria"]) == set(PAINT_SHAPES) and "circle" in PAINT_SHAPES and "oval" in PAINT_SHAPES
+    fake = {"progress": {"score": 2.5, "probabilities": {str(i): 0.2 for i in range(5)}},
+            "on_track": {"probabilities": {"on track": 0.7, "off track": 0.3}},
+            "drawn": {"choice": "arc", "probabilities": {"arc": 0.6}}}
+    j = summarize_judgements(fake)
+    assert j["progress"] == 2.5 and j["on_track"] == 0.7 and j["drawn"] == "arc"
+
+
 def test_reset_is_blank_and_observation_is_canvas(env):
     obs = env.reset(seed=3)
     assert obs.size == (env.width, env.height) == (512, 512)

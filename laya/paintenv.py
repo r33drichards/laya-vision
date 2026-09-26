@@ -394,29 +394,72 @@ def random_policy(seed: int = 0):
     return lambda env: rng.choice(env.actions)
 
 
+def summarize_judgements(answers: Dict) -> Dict:
+    """The judgement answers from ``predict`` as a compact record: expected progress (0-4) and its distribution,
+    P(on track), and the top ``drawn`` label with its distribution."""
+    out = {}
+    if "progress" in answers:
+        out["progress"] = answers["progress"]["score"]
+        out["progress_probs"] = answers["progress"]["probabilities"]
+    if "on_track" in answers:
+        out["on_track"] = answers["on_track"]["probabilities"]["on track"]
+    if "drawn" in answers:
+        out["drawn"] = answers["drawn"]["choice"]
+        out["drawn_probs"] = answers["drawn"]["probabilities"]
+    return out
+
+
+def judge_canvas(agent, image, task: str = "circle", questions=("drawn", "progress", "on_track")) -> Dict:
+    """Ask the judgement questions about one image (e.g. the clean final canvas, ``Image.fromarray(env.
+    canvas_pixels())``, with no cursor on it). Used at the end of an episode to label what was actually drawn."""
+    from laya.games import paint_judgements
+
+    qs = {k: v for k, v in paint_judgements(task).items() if k in questions}
+    return summarize_judgements(agent.predict({"image": image}, qs, strict=True)["answers"])
+
+
 class ModelPolicy:
     """The model's most likely action from ``env.state()`` (two frames plus pen state and recent actions), via
-    ``predict``. ``last`` keeps the latest answer (probabilities over ``env.actions``) for logging.
+    ``predict``, with the judgement questions (``laya.games.paint_judgements``) asked about the same state in the
+    same call.
+
+    ``last`` keeps the latest action answer (probabilities over ``env.actions``, and ``act_probability``, the
+    checkpoint's act-vs-escalate gate); ``last_judgement`` the latest judgements. With ``judge_stop``, the policy
+    answers ``DONE`` when the pen is up and the model judges the task complete (P(progress = 4) >= ``stop_at``),
+    so its own judgement decides when to stop.
 
     Load the agent with ``head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN``: ``predict`` runs with
-    ``strict=True`` and raises rather than silently cut the question."""
+    ``strict=True`` and raises rather than silently cut a question."""
 
-    def __init__(self, agent, task: str = "circle"):
-        self.agent, self.task, self.last, self.provenance, self._questions = agent, task, None, None, {}
+    def __init__(self, agent, task: str = "circle", judge: bool = True, judge_stop: bool = False,
+                 stop_at: float = 0.5):
+        self.agent, self.task, self.judge, self.judge_stop, self.stop_at = agent, task, judge, judge_stop, stop_at
+        self.last, self.last_judgement, self.provenance, self._questions = None, None, None, {}
 
-    def __call__(self, env: JSPaintEnv) -> str:
-        from laya.games import paint_question
+    def questions(self, env: JSPaintEnv) -> Dict:
+        from laya.games import paint_judgements, paint_question
 
         key = (env.directions, env.step_px)
         if key not in self._questions:
-            self._questions[key] = paint_question(self.task, env.directions, env.step_px)
-        out = self.agent.predict(env.state(), self._questions[key], strict=True)
-        self.last, self.provenance = out["answers"]["action"], out.get("provenance")
+            q = paint_question(self.task, env.directions, env.step_px)
+            if self.judge:
+                q.update(paint_judgements(self.task))
+            self._questions[key] = q
+        return self._questions[key]
+
+    def __call__(self, env: JSPaintEnv) -> str:
+        out = self.agent.predict(env.state(), self.questions(env), strict=True)
+        answers = out["answers"]
+        self.last, self.provenance = answers["action"], out.get("provenance")
+        self.last_judgement = summarize_judgements(answers) if self.judge else None
+        if (self.judge and self.judge_stop and not env.pen
+                and self.last_judgement["progress_probs"]["4"] >= self.stop_at):
+            return "DONE"
         return self.last["choice"]
 
 
-def model_policy(agent, task: str = "circle") -> ModelPolicy:
-    return ModelPolicy(agent, task)
+def model_policy(agent, task: str = "circle", **kwargs) -> ModelPolicy:
+    return ModelPolicy(agent, task, **kwargs)
 
 
 def play_episodes(env: JSPaintEnv, policy, episodes: int, seed: int = 0, on_step=None) -> Dict:
@@ -445,4 +488,4 @@ __all__ = ["PAINT_HEAD_MAX_LEN", "PAINT_MAX_LEN", "ACTIONS", "MOVES", "COMPASS",
            "compass_moves", "TASKS", "TOOLS",
            "JSPaintServer",
            "JSPaintEnv", "circle_expert", "random_policy",
-           "ModelPolicy", "model_policy", "play_episodes", "default_chromium"]
+           "ModelPolicy", "model_policy", "judge_canvas", "summarize_judgements", "play_episodes", "default_chromium"]

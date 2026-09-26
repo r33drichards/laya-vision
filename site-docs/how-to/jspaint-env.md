@@ -105,6 +105,47 @@ The discrete actions are built on a mouse-only tool API: `move_mouse(dx, dy)`, `
 `JSPaintEnv.call_tool(name, args)` runs them. A tool-calling agent can therefore drive the same environment with
 free coordinates.
 
+## Judgement questions
+
+Each step the model also answers three judgement questions (`laya.games.paint_judgements`) about the same state,
+in the same `predict` call as the action:
+
+| Question | Type | Asks |
+|---|---|---|
+| `progress` | score, 0–4 | How far the canvas is toward the task, from "nothing useful drawn yet" to "the task is complete" |
+| `on_track` | choice | "on track" or "off track": could what is drawn so far become the task by continuing? |
+| `drawn` | choice | What the canvas shows: circle, oval, arc, line, square, triangle, scribble or nothing |
+
+`on_track` uses two named options rather than a yes/no (`noul`) question, because on line drawings the model's
+yes/no answers were unreliable and named choices were not.
+
+The runner logs these and the checkpoint's act-vs-escalate gate (`act_probability`) for every step. At the end of
+each episode it asks `drawn` about the clean final canvas, with no cursor, and saves the answer as the episode's
+`judged_final` label. That label is what lets a failed attempt be relabelled as an example of what was actually
+drawn. With `--judge-stop`, the model's own progress judgement ends the episode: it answers `DONE` once the pen is
+up and it rates the task complete.
+
+### Do the judgements track reality?
+
+[`examples/jspaint_judge_check.py`](https://github.com/r33drichards/laya-vision/blob/main/examples/jspaint_judge_check.py)
+asks the judgements every 10 steps along the scripted expert's circles and along random play. It compares them with
+true progress: the share of the 36 sectors around the target circle's centre that the pen has passed through. For
+zero-shot `thaitea/laya-vision` (revision `f2fe3c1`, 3 episodes each):
+
+| True progress (expert) | Checks | Judged progress (0–4) | P(on track) |
+|---|---|---|---|
+| 0 (not drawing yet) | 4 | 1.61 | 0.27 |
+| 0–25% | 11 | 1.50 | 0.26 |
+| 25–50% | 12 | 1.55 | 0.27 |
+| 50–75% | 12 | 1.57 | 0.26 |
+| 75–100% | 16 | 1.68 | 0.28 |
+| Random policy, all checks | 69 | 1.70 | 0.30 |
+
+`drawn` works: it labelled the clean final canvas of all 3 expert circles "circle". `progress` and `on_track` do
+not work zero-shot. Both are nearly flat, with a rank correlation of 0.40 between true and judged progress over a
+narrow range, and random play is rated slightly higher than the expert. The environment knows the true progress,
+so these questions can be trained with labels it produces, alongside the actions.
+
 ## The circle verifier
 
 `score_circle(pixels)` reads the canvas pixels from the page with `toDataURL`, so the cursor overlay is never

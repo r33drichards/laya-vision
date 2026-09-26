@@ -109,6 +109,45 @@ def paint_question(task: str = "circle", directions: int = 32, step_px: int = 6)
     }}
 
 
+PAINT_SHAPES = {
+    "circle": "a round, closed circle", "oval": "an oval or ellipse, round but stretched",
+    "arc": "a curved line or an unclosed part of a circle", "line": "one or more straight lines",
+    "square": "a square or rectangle", "triangle": "a triangle", "scribble": "random scribbles",
+    "nothing": "nothing, the canvas is blank",
+}
+
+
+def paint_judgements(task: str = "circle") -> Dict:
+    """The judgement questions asked with ``paint_question`` each step (same state, same ``predict`` call):
+
+    * ``progress`` (``score``, 0-4): how far the canvas is toward the task, the model's own dense signal;
+    * ``on_track`` (``choice``): whether the drawing so far is heading toward the task. Named options, because on
+      line drawings the model's yes/no (``noul``) answers were unreliable while named choices were not;
+    * ``drawn`` (``choice`` over ``PAINT_SHAPES``): what the canvas shows now, whatever the task. At the end of an
+      episode this labels what was actually drawn, so a failed attempt can be relabelled as an example of that.
+    """
+    goal = PAINT_GOALS[task]
+    return {
+        "progress": {
+            "type": "score",
+            "instructions": "The task is to %s. Looking at the canvas now, how far along is the drawing?" % goal,
+            "criteria": ["nothing useful drawn yet", "started, but far from done", "about half done",
+                         "nearly done", "the task is complete"],
+        },
+        "on_track": {
+            "type": "choice",
+            "instructions": "The task is to %s. Is the drawing so far heading toward that?" % goal,
+            "criteria": {"on track": "what is drawn so far could become the task by continuing",
+                         "off track": "what is drawn so far will not become the task"},
+        },
+        "drawn": {
+            "type": "choice",
+            "instructions": "What is drawn on this white canvas?",
+            "criteria": dict(PAINT_SHAPES),
+        },
+    }
+
+
 CONTROL_GOALS = {
     "CartPole": "A pole is hinged on a cart; push the cart left or right to keep the pole upright and the cart "
                 "on screen.",

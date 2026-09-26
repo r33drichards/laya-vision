@@ -23,8 +23,10 @@ import json
 import os
 import time
 
-from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, circle_expert, model_policy,
-                           play_episodes, random_policy)
+from PIL import Image
+
+from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, circle_expert, judge_canvas,
+                           model_policy, play_episodes, random_policy)
 
 
 def main():
@@ -43,6 +45,10 @@ def main():
     ap.add_argument("--chromium", default=None, help="Chromium executable (default: LAYA_CHROMIUM or Playwright's)")
     ap.add_argument("--canvas-size", type=int, default=None,
                     help="square canvas side (default: the model's input image_size, 512 for the released checkpoints)")
+    ap.add_argument("--no-judge", action="store_true",
+                    help="skip the judgement questions (progress, on track, what is drawn) the model answers each step")
+    ap.add_argument("--judge-stop", action="store_true",
+                    help="let the model's own judgement end the episode: DONE once it rates the task complete")
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     ap.add_argument("--out", default="results/jspaint")
     args = ap.parse_args()
@@ -69,7 +75,7 @@ def main():
                                                            executable_path=args.chromium, keep_frames=True) as env:
         for name in names:
             if name == "model":
-                policy = model_policy(agent)
+                policy = model_policy(agent, judge=not args.no_judge, judge_stop=args.judge_stop)
             elif name == "expert":
                 policy = circle_expert()
             elif name == "random":
@@ -77,14 +83,20 @@ def main():
             else:
                 raise SystemExit("unknown policy %r" % name)
 
-            rows = []
+            rows, final_labels = [], {}
 
             def on_step(env, action):
                 row = dict(env.trajectory[-1], episode=env.seed)
                 if name == "model":
                     row["probabilities"] = policy.last["probabilities"]
+                    row["act_probability"] = policy.last["action"]["act_probability"]
+                    if policy.last_judgement:
+                        row["judgement"] = policy.last_judgement
                 rows.append(row)
                 if env.done:
+                    if agent is not None and not args.no_judge:
+                        # what the clean final canvas (no cursor) actually shows, for hindsight relabelling
+                        final_labels[env.seed] = judge_canvas(agent, Image.fromarray(env.canvas_pixels()))
                     ep_dir = os.path.join(out_dir, name, "seed%d" % env.seed)
                     os.makedirs(ep_dir)
                     with open(os.path.join(ep_dir, "trajectory.jsonl"), "w") as f:
@@ -97,6 +109,9 @@ def main():
             t = time.time()
             res = play_episodes(env, policy, args.episodes, seed=args.seed, on_step=on_step)
             res["seconds"] = round(time.time() - t, 1)
+            for ep in res["results"]:
+                if ep["seed"] in final_labels:
+                    ep["judged_final"] = final_labels[ep["seed"]]
             if name == "model":
                 res["model"], res["provenance"] = args.model, policy.provenance
             summary["policies"][name] = res
