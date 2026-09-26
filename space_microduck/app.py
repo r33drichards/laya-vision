@@ -30,7 +30,23 @@ from quackd.sim2d.world import KICK_CONE_DEG, KICK_RANGE_M, World  # noqa: E402
 MODEL_ID = os.environ.get("LAYA_MODEL", "thaitea/laya-vision-microduck-kick")
 # Pinned: the Hub id can later name another checkpoint, and the Space only loads at startup. "" follows the id.
 REVISION = os.environ.get("LAYA_REVISION", "7505ee2f2cf211cdff7faa2c66ef0c1472088e0b") or None
-torch.set_num_threads(max(1, os.cpu_count() or 1))
+
+
+def usable_cpus():
+    """The CPUs this container may use. ``os.cpu_count()`` is the host's: on a Space's 2 vCPUs it can report
+    dozens, and torch running that many threads on two cores made every decision several times slower."""
+    n = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:  # cgroup v2: "<quota> <period>" or "max <period>"
+            quota, period = f.read().split()
+        if quota != "max":
+            n = min(n, max(1, math.ceil(int(quota) / int(period))))
+    except (OSError, ValueError):
+        pass
+    return max(1, n)
+
+
+torch.set_num_threads(usable_cpus())
 agent = laya.load_vlm(MODEL_ID, device="cpu", revision=REVISION)
 
 _gl = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mujoco")
@@ -70,7 +86,7 @@ RESEND_S = 0.2      # the worlds' deadman stops a duck whose last command is old
 KICK_SETTLE_S = 1.5  # after a kick, time for the ball to roll
 SUCCESS_M = 0.3     # find-and-kick.duck: the ball moved at least 0.3 m, by a kick that connected
 MAX_STEPS = 60
-FRAME_EVERY_S = 0.1  # how often the view redraws while an action plays out
+FRAME_EVERY_S = 0.25  # how often the view redraws while an action plays out (a 3D frame costs ~0.1 s of CPU)
 SIZE = 320
 
 SIMS = {
@@ -111,10 +127,29 @@ def cam(game, size):
 def top(game, size):
     w = game["world"]
     if is_3d(game):
-        from quackd_microduck.sim3d.render import render_overview
-
-        return on_gl(render_overview, w, size)
+        return on_gl(_overview_3d, w, size)
     return render_topdown(w, size)
+
+
+def _overview_3d(world, size):
+    """quackd's ``render_overview`` without the floor's reflection, which doubled its cost (the robot's meshes are
+    drawn twice). The viewer's picture only: the duck camera, which is what the model sees, is untouched."""
+    import mujoco
+    import numpy as np
+    from quackd_microduck.sim3d import render as R
+
+    cam = R._free_camera((world.x, world.y, R.OVERVIEW_HEIGHT), R.OVERVIEW_DISTANCE, R.OVERVIEW_AZIMUTH_DEG,
+                         R.OVERVIEW_ELEVATION_DEG)
+    was = float(world.model.vis.global_.fovy)
+    world.model.vis.global_.fovy = R.OVERVIEW_FOV_DEG
+    try:
+        renderer = world.renderer(size)
+        renderer.update_scene(world.data, camera=cam)
+        renderer.scene.flags[mujoco.mjtRndFlag.mjRND_SKYBOX] = 1
+        renderer.scene.flags[mujoco.mjtRndFlag.mjRND_REFLECTION] = 0
+        return Image.fromarray(np.asarray(renderer.render()), "RGB")
+    finally:
+        world.model.vis.global_.fovy = was
 
 
 def world_call(game, fn, *args):
@@ -300,7 +335,7 @@ with gr.Blocks(title="Laya Vision: Microduck find-and-kick") as demo:
         sim = gr.Radio(list(SIMS), value="3D physics", label="Simulator", scale=2)
         seed = gr.Number(value=0, precision=0, label="Seed (0-9 are the eval's; any integer works)", scale=2)
         reset = gr.Button("Reset", scale=1)
-    view = gr.Image(type="pil", label="Simulator", interactive=False, show_label=False)
+    view = gr.Image(type="pil", format="webp", label="Simulator", interactive=False, show_label=False)
     with gr.Row():
         play = gr.Button("▶ Play", variant="primary")
         step = gr.Button("Step (model)")
