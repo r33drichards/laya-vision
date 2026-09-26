@@ -55,6 +55,7 @@ nav:
           - Robustness: reference/results/robustness.md
           - Game training: reference/results/game-training.md
           - Typed answers vs generated JSON: reference/results/decision-vs-generation.md
+          - Two-tower scoring: reference/results/two-tower.md
           - What didn't work: reference/results/what-didnt-work.md
 markdown_extensions:
   - tables
