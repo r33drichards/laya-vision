@@ -37,15 +37,27 @@ the cursor is placed at a seeded point in the middle of the canvas.
 | | |
 |---|---|
 | Observation | A screenshot of the 683×384 canvas with the cursor drawn on it: a red ring and cross when the button is up, a filled red dot when it is held down. The `note` text gives the task, the pen state and the step count. |
-| Actions (`choice`) | 16 compass moves, `N` `NNE` `NE` `ENE` `E` … `NNW`, one every 22.5°. Each moves 8 px (`step_px`) and draws while the pen is down. The other three are `PEN_DOWN`, `PEN_UP` and `DONE`. |
-| End | The episode ends on `DONE` or after 200 steps (`max_steps`). The pen is released automatically at the end. |
+| Actions (`choice`) | 32 compass moves, `N` `NbE` `NNE` `NEbN` `NE` … `NbW`, one every 11.25°. Each moves 6 px (`step_px`) and draws while the pen is down. Each option's text gives its bearing in degrees. The other three are `PEN_DOWN`, `PEN_UP` and `DONE`. |
+| End | The episode ends on `DONE` or after 260 steps (`max_steps`). The pen is released automatically at the end. |
 | Reward | The verifier score, paid at the end. With `reward="shaped"`, each step instead earns the change in score. |
 
 The model can only pick from a list of options, so the actions are relative moves. They are fine-grained because
-coarse moves can't draw a circle. With 8 directions and 24 px steps, the best walk is an octagon, which scores 0.39
-and fails. With 16 directions, 12 px steps score 0.83 and 8 px steps score 0.91. Both `directions=8|16` and
-`step_px` are settable (`--directions`, `--step-px`). Smaller steps draw rounder circles but take more steps. The screenshot has no OS
-cursor, so the cursor is drawn onto it. This is the same approach as Maze and Snake.
+coarse moves can't draw a round circle. Scripted-expert scores over 3 episodes:
+
+| Directions | Step | Expert score | Steps per circle |
+|---|---|---|---|
+| 8 | 24 px | 0.39 (an octagon; fails) | 42 |
+| 16 | 12 px | 0.83 | 78 |
+| 16 | 8 px | 0.91 | 116 |
+| 32 | 8 px | 0.94 | 116 |
+| **32** | **6 px (default)** | **0.95** | **139** |
+| 32 | 4 px | 0.96 | 227 |
+
+More directions matter most, because the heading error per step falls from 22.5° to 5.6°. Steps below 6 px add
+little and make episodes longer. Both settings are configurable (`directions=8|16|32`, `step_px`; `--directions`,
+`--step-px` on the command line).
+
+The screenshot has no OS cursor, so the cursor is drawn onto it. This is the same approach as Maze and Snake.
 
 The discrete actions are built on a mouse-only tool API: `move_mouse(dx, dy)`, `mouse_down()`, `mouse_up()` and
 `screenshot()`. `paintenv.TOOLS` describes these tools as JSON-schema tool definitions, and
@@ -70,22 +82,21 @@ counted as ink. It fits a least-squares circle to the ink and computes five comp
 
 `tests/test_circle_verifier.py` checks both directions:
 
-- These pass: a drawn ring, a small ring, a coloured ring, and a 16-sided polygon (what the fine moves draw).
-- These all fail: an octagon, a line, a dot, a tiny ring, a half arc, a three-quarter arc, a square, a flat ellipse, a filled
-  disc, a ring with a stray line, and random scribbles.
+- These pass: a drawn ring, a small ring, a coloured ring, and 16- and 32-sided polygons (what the fine moves draw).
+- These all fail: an octagon, a line, a dot, a tiny ring, a half arc, a three-quarter arc, a square, a flat ellipse,
+  a filled disc, a ring with a stray line, and random scribbles.
 
 ## Reference points
 
-`circle_expert()` is a scripted policy. It walks with the pen up to the edge of a circle centred on the canvas,
-presses the button, and traces one full turn. Each step it takes the forward move that lands closest to the radius. `random_policy` picks actions uniformly. On seeds
-900000–900002:
+`circle_expert()` is a scripted policy. It walks with the pen up straight to the nearest point of a circle centred
+on the canvas, and presses the button once it is within half a step of the radius. It then traces one full turn,
+each step taking the forward move that lands closest to the radius. `random_policy` picks actions uniformly. On
+seeds 900000–900002, with the default 32 directions and 6 px steps:
 
 | Policy | Mean score | Pass rate | Mean steps |
 |---|---|---|---|
-| Scripted expert | 0.91 | 3/3 | 116.3 |
-| Random | 0.00 | 0/3 | 10.7 |
-| `thaitea/laya-vision`, zero-shot | 0.00 | 0/3 | 167.3 |
+| Scripted expert | 0.95 | 3/3 | 139.0 |
+| Random | 0.00 | 0/3 | 22.0 |
 
-The zero-shot checkpoint almost always picks `PEN_UP` (496 of 502 actions), which does nothing while the pen is
-already up. It runs out the step limit without drawing anything. The model was never trained on this task. The expert's trajectories
-(screenshot, action) are the obvious data to train it on, as the game checkpoints were trained on expert frames.
+The model was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
+train it on, as the game checkpoints were trained on expert frames.

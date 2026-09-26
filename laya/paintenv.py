@@ -9,8 +9,8 @@ Playwright; ``JSPaintServer`` serves a local checkout as static files. Each epis
   a red ring when the pen is up, a filled red dot when it is down. ``note()`` carries the pen state and step count
   as text;
 * **actions** are mouse-only. ``env.actions`` is the discrete set the image model chooses from: a ``step_px`` move
-  toward each of ``directions`` compass points (16 by default: ``N``, ``NNE``, ``NE``, ... every 22.5 degrees, 8 px,
-  fine enough to walk a round circle; 8 gives the coarse ``N NE E ...`` set), plus ``PEN_DOWN``, ``PEN_UP`` and
+  toward each of ``directions`` compass points (32 by default: ``N``, ``NbE``, ``NNE``, ... every 11.25 degrees, 6 px,
+  fine enough to walk a round circle; 16 and 8 give coarser sets), plus ``PEN_DOWN``, ``PEN_UP`` and
   ``DONE``. Each maps onto the tool API ``move_mouse(dx, dy)`` / ``mouse_down()`` /
   ``mouse_up()``, which sends real pointer events to the page. ``TOOLS`` describes that API as JSON-schema tools, so
   a tool-calling agent can drive the same environment with ``call_tool``;
@@ -39,20 +39,28 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-COMPASS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+COMPASS = ("N", "NbE", "NNE", "NEbN", "NE", "NEbE", "ENE", "EbN", "E", "EbS", "ESE", "SEbE", "SE", "SEbS", "SSE",
+           "SbE", "S", "SbW", "SSW", "SWbS", "SW", "SWbW", "WSW", "WbS", "W", "WbN", "WNW", "NWbW", "NW", "NWbN", "NNW",
+           "NbW")
 PEN_ACTIONS = ("PEN_DOWN", "PEN_UP", "DONE")
 
 
-def compass_moves(directions: int = 16) -> Dict[str, Tuple[float, float]]:
-    """``{name: (ux, uy)}`` unit vectors (screen y points down) for 8 or 16 compass directions, clockwise from ``N``."""
-    if directions not in (8, 16):
-        raise ValueError("directions must be 8 or 16")
-    every = 16 // directions
-    return {COMPASS[i]: (round(math.sin(math.radians(22.5 * i)), 6), round(-math.cos(math.radians(22.5 * i)), 6))
-            for i in range(0, 16, every)}
+def compass_bearing(name: str) -> float:
+    """Degrees clockwise from straight up (``N``) of a ``COMPASS`` point."""
+    return COMPASS.index(name) * 11.25
 
 
-MOVES = compass_moves(16)
+def compass_moves(directions: int = 32) -> Dict[str, Tuple[float, float]]:
+    """``{name: (ux, uy)}`` unit vectors (screen y points down) for 8, 16 or 32 compass points, clockwise from ``N``
+    (the 32-point names add the "by" points, e.g. ``NbE`` is one point east of north)."""
+    if directions not in (8, 16, 32):
+        raise ValueError("directions must be 8, 16 or 32")
+    every = 32 // directions
+    return {COMPASS[i]: (round(math.sin(math.radians(11.25 * i)), 6), round(-math.cos(math.radians(11.25 * i)), 6))
+            for i in range(0, 32, every)}
+
+
+MOVES = compass_moves(32)
 ACTIONS = tuple(MOVES) + PEN_ACTIONS
 TASKS = {"circle": "Draw a circle on the canvas."}
 
@@ -107,7 +115,7 @@ class JSPaintServer:
 class JSPaintEnv:
     """One headless JSPaint page; ``reset`` starts an episode and ``step(action)`` plays one of ``env.actions``."""
 
-    def __init__(self, url: str, task: str = "circle", step_px: int = 8, directions: int = 16, max_steps: int = 200,
+    def __init__(self, url: str, task: str = "circle", step_px: int = 6, directions: int = 32, max_steps: int = 260,
                  reward: str = "terminal", headless: bool = True, executable_path: Optional[str] = None,
                  viewport: Tuple[int, int] = (800, 600), keep_frames: bool = False):
         if task not in TASKS:
@@ -307,7 +315,8 @@ def _around(moves, pos, centre, r, step) -> str:
 
 
 def circle_expert(radius_frac: float = 0.3):
-    """A scripted policy: walk (pen up) to the rightmost point of a circle centred on the canvas, press, trace one
+    """A scripted policy: walk (pen up) straight to the nearest point of a circle centred on the canvas, press once
+    within half a step of its radius, trace one
     full turn plus a little overlap (each step takes the forward move that stays closest to the radius), release,
     ``DONE``. Deterministic given the environment state."""
     state: Dict = {}
@@ -321,9 +330,10 @@ def circle_expert(radius_frac: float = 0.3):
         cx, cy = state["c"]
         r, pos, step = state["r"], env.cursor, env.step_px
         if state["phase"] == "approach":
-            start = (cx + r, cy)
-            if math.dist(pos, start) > step * 0.75:
-                return _toward(env.moves, pos, start)
+            d = math.dist(pos, (cx, cy))
+            if abs(d - r) > step * 0.5:
+                ux, uy = ((pos[0] - cx) / d, (pos[1] - cy) / d) if d > 1e-6 else (1.0, 0.0)
+                return _toward(env.moves, pos, (cx + r * ux, cy + r * uy))
             state["phase"] = "trace"
             state["prev"] = math.atan2(pos[1] - cy, pos[0] - cx)
             return "PEN_DOWN"
@@ -390,6 +400,7 @@ def play_episodes(env: JSPaintEnv, policy, episodes: int, seed: int = 0, on_step
             "mean_steps": float(np.mean([e["steps"] for e in eps])), "actions": dict(counts), "results": eps}
 
 
-__all__ = ["ACTIONS", "MOVES", "COMPASS", "PEN_ACTIONS", "compass_moves", "TASKS", "TOOLS", "JSPaintServer",
+__all__ = ["ACTIONS", "MOVES", "COMPASS", "PEN_ACTIONS", "compass_bearing", "compass_moves", "TASKS", "TOOLS",
+           "JSPaintServer",
            "JSPaintEnv", "circle_expert", "random_policy",
            "ModelPolicy", "model_policy", "play_episodes", "default_chromium"]

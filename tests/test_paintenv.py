@@ -34,10 +34,11 @@ def env():
 
 def test_question_covers_actions_and_tools_are_mouse_only():
     assert set(paint_question()["action"]["criteria"]) == set(ACTIONS)
-    assert len(ACTIONS) == 16 + 3
+    assert len(ACTIONS) == 32 + 3
     assert set(paint_question(directions=8)["action"]["criteria"]) == set(compass_moves(8)) | {"PEN_DOWN", "PEN_UP",
                                                                                                 "DONE"}
-    for ux, uy in compass_moves(16).values():
+    assert set(compass_moves(16)) < set(compass_moves(32))
+    for ux, uy in compass_moves(32).values():
         assert abs(ux * ux + uy * uy - 1) < 1e-5
     assert {t["name"] for t in TOOLS} == {"move_mouse", "mouse_down", "mouse_up", "screenshot"}
 
@@ -68,7 +69,7 @@ def test_pen_down_moves_draw_and_pen_up_moves_do_not(env):
 
 def test_cursor_is_clamped_to_canvas(env):
     env.reset(seed=0)
-    for _ in range(150):
+    for _ in range(200):
         env.step("NW")
     assert env.cursor == (1.0, 1.0)
 
@@ -92,7 +93,7 @@ def test_call_tool_draws(env):
 
 def test_expert_passes_and_random_does_not(env):
     expert = play_episodes(env, circle_expert(), episodes=2, seed=0)
-    assert expert["pass_rate"] == 1.0 and expert["mean_score"] >= 0.85
-    assert all(e["roundness"] >= 0.85 for e in expert["results"])
+    assert expert["pass_rate"] == 1.0 and expert["mean_score"] >= 0.9
+    assert all(e["roundness"] >= 0.9 for e in expert["results"])
     rnd = play_episodes(env, random_policy(0), episodes=3, seed=0)
     assert rnd["pass_rate"] == 0.0 and rnd["mean_score"] < expert["mean_score"]

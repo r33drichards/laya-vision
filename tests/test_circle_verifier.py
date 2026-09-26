@@ -34,6 +34,7 @@ def test_fit_circle_recovers_centre_and_radius():
 @pytest.mark.parametrize("name,draw", [
     ("ring", lambda d: d.ellipse([230, 80, 450, 300], outline="black", width=4)),
     ("16-gon", lambda d: d.line(polygon(16), fill="black", width=4)),
+    ("32-gon", lambda d: d.line(polygon(32), fill="black", width=4)),
     ("small ring", lambda d: d.ellipse([305, 155, 375, 225], outline="black", width=4)),
     ("coloured ring", lambda d: d.ellipse([100, 50, 300, 250], outline=(200, 0, 0), width=6)),
 ])

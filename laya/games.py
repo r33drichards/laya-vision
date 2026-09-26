@@ -91,12 +91,14 @@ PAINT_PEN = {
 PAINT_GOALS = {"circle": "draw one round, closed circle, about as big as a third of the canvas height"}
 
 
-def paint_question(task: str = "circle", directions: int = 16, step_px: int = 8) -> Dict:
+def paint_question(task: str = "circle", directions: int = 32, step_px: int = 6) -> Dict:
     """The question for ``laya.paintenv.JSPaintEnv``: a paint canvas, a red cursor, and mouse-only actions (a
     ``step_px`` move toward each of ``directions`` compass points, then pen down / pen up / done)."""
-    from laya.paintenv import compass_moves
+    from laya.paintenv import compass_bearing, compass_moves
 
-    moves = {m: "move the cursor %d pixels %s" % (step_px, PAINT_DIRECTIONS[m]) for m in compass_moves(directions)}
+    moves = {m: "move the cursor %d pixels at bearing %g degrees (clockwise from straight up)%s" % (
+        step_px, compass_bearing(m), ", " + PAINT_DIRECTIONS[m] if m in PAINT_DIRECTIONS else "")
+        for m in compass_moves(directions)}
     return {"action": {
         "type": "choice",
         "instructions": "You are using a paint program with only the mouse. The white area is the canvas and the "
