@@ -7,13 +7,18 @@ upstream's Microduck model walking on upstream's trained policy. The action spac
 what was measured there.
 
 Real time: an action plays out at wall-clock speed, the view streaming as it goes, and the simulator waits only for
-the model's decision between actions, as the eval does (there, a decision takes no simulated time). The model runs on
-ZeroGPU: `decide` is the one function that borrows the GPU, and everything else (the worlds, their rendering, the
-page) stays in this process. How the physics is chunked to keep pace never changes where the duck goes: commands are
-re-sent on the simulator's own clock, exactly as the eval's transport does.
+the model's decision between actions, as the eval does (there, a decision takes no simulated time). How the physics
+is chunked to keep pace never changes where the duck goes: commands are re-sent on the simulator's own clock, exactly
+as the eval's transport does.
+
+One episode is one ZeroGPU call. `play_episode` is a generator under `@spaces.GPU`: ZeroGPU runs it in a forked
+worker that holds the GPU, and it builds its own world from the seed there, plays to the end and streams frames back.
+Calling the GPU once per decision instead counted every decision as a ZeroGPU run, and a visitor ran out of runs a
+few decisions into the first episode. Reset only draws the starting position, on the CPU, in this process.
 
 MuJoCo renders through OSMesa, whose context belongs to the thread that made it, and Gradio runs handlers on a pool
-of threads, so every call into a 3D world goes through one dedicated thread (`on_gl`).
+of threads, so each game sends all of its 3D calls through one thread of its own (`game["gl"]`): `on_gl` for the
+preview, and a thread the episode starts for itself inside the GPU worker.
 
 quackd is installed at start-up without its dependencies: the Gradio SDK installs `gradio[mcp]`, which pins mcp<2,
 and quackd 0.14.0 declares mcp>=2 for a server this Space never runs. What the simulators import (mujoco,
@@ -30,6 +35,11 @@ import spaces  # before torch: ZeroGPU patches it
 
 os.environ.setdefault("MUJOCO_GL", "osmesa")
 os.environ.setdefault("PYOPENGL_PLATFORM", "osmesa")
+# OSMesa's rasteriser (llvmpipe) keeps a pool of render threads; a process forked after the first render (the GPU
+# worker, forked after the page's preview) inherits the pool's state but not its threads, and its first render waits
+# for them forever. With no pool it renders on the calling thread.
+os.environ.setdefault("LP_NUM_THREADS", "0")
+_MAIN_PID = os.getpid()
 
 _QUACKD = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".quackd-pkgs")
 try:
@@ -76,10 +86,9 @@ if ON_GPU:  # ZeroGPU records the move here and makes it in the GPU worker
     agent.device = torch.device("cuda")
 
 
-@spaces.GPU(duration=10)
 def decide(image):
-    """One decision: the model's answer for one duck-camera frame. On ZeroGPU this runs in the GPU worker (the image
-    and the answer are pickled across); anywhere else it is a plain call on the CPU."""
+    """One decision: the model's answer for one duck-camera frame. Called inside `play_episode`, so on ZeroGPU it
+    runs on the GPU worker's copy of the model; anywhere else, on the CPU."""
     answer = agent.predict({"image": image}, QUESTION)["answers"]["action"]
     return answer["choice"], {k: float(v) for k, v in answer["probabilities"].items()}
 
@@ -155,14 +164,14 @@ def cam(game, size):
     if is_3d(game):
         from quackd_microduck.sim3d.render import render_headcam
 
-        return on_gl(render_headcam, w, size)
+        return game["gl"](render_headcam, w, size)
     return render_duckcam(w, size)
 
 
 def top(game, size):
     w = game["world"]
     if is_3d(game):
-        return on_gl(_overview_3d, w, size)
+        return game["gl"](_overview_3d, w, size)
     return render_topdown(w, size)
 
 
@@ -188,10 +197,10 @@ def _overview_3d(world, size):
 
 
 def world_call(game, fn, *args):
-    return on_gl(fn, *args) if is_3d(game) else fn(*args)
+    return game["gl"](fn, *args) if is_3d(game) else fn(*args)
 
 
-def new_game(seed, sim="2D cartoon"):
+def new_game(seed, sim="2D cartoon", gl=on_gl):
     try:  # the page can send the number as text
         seed = int(float(seed))
     except (TypeError, ValueError):
@@ -199,15 +208,15 @@ def new_game(seed, sim="2D cartoon"):
     if sim == "3D physics":
         from quackd_microduck.sim3d.world import MujocoWorld
 
-        world = on_gl(lambda: MujocoWorld(seed=seed, body="microduck"))
+        world = gl(lambda: MujocoWorld(seed=seed, body="microduck"))
     else:
         world = World(seed=seed)
-    return {"world": world, "sim": sim, "seed": seed, "steps": 0, "probs": {}, "last": None, "done": False}
+    return {"world": world, "sim": sim, "seed": seed, "steps": 0, "probs": {}, "last": None, "done": False, "gl": gl}
 
 
 def close_game(game):
     if game and is_3d(game):
-        on_gl(game["world"].close)
+        game["gl"](game["world"].close)
 
 
 def truth(world):
@@ -341,22 +350,28 @@ def on_reset(seed, sim, game):
     return game, draw(game, "ready"), panel(game)
 
 
-def on_step(game):
-    for img, md in take_turn(game):
-        yield game, img, md
+def episode_seconds(seed, sim):
+    """GPU time to ask for: the 60-step limit at each simulator's pace, and no more, so a visitor's quota covers it."""
+    return 80 if sim == "3D physics" else 45
 
 
-def on_play(game):
-    while not game["done"]:
-        for img, md in take_turn(game):
-            yield game, img, md
-
-
-def manual(action):
-    def run(game):
-        for img, md in take_turn(game, override=action):
-            yield game, img, md
-    return run
+@spaces.GPU(duration=episode_seconds)
+def play_episode(seed, sim):
+    """A whole episode in one GPU call: a fresh world from the seed, played in real time to a kick, a fall or the step
+    limit. Yields (frame, panel) as it goes; nothing unpicklable leaves, because on ZeroGPU this runs in a worker."""
+    if os.getpid() != _MAIN_PID:
+        # a forked GPU worker: torch's CPU thread pool (used here while the model loaded) did not survive the fork,
+        # and the image preprocessing's first parallel op would wait on it forever. One thread never touches it.
+        torch.set_num_threads(1)
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="episode-gl") as ex:
+        game = new_game(seed, sim, gl=lambda fn, *args: ex.submit(fn, *args).result())
+        try:
+            yield draw(game, "starting"), panel(game)
+            while not game["done"]:
+                for img, md in take_turn(game):
+                    yield img, md
+        finally:
+            close_game(game)
 
 
 INTRO = """
@@ -368,9 +383,9 @@ Each step the model sees only the duck's camera (the right-hand picture) and cho
 the arena and the ground-truth numbers are there for you; the model never sees them.
 
 **3D physics** is MuJoCo with upstream's Microduck model walking on upstream's trained policy: the walk is slow and
-lurching, and the duck can fall. **2D cartoon** is quackd's flat simulator. The duck moves in real time; between
-actions it waits for the model, which runs on a GPU. **Play** runs until it kicks the ball, falls or uses its 60 steps;
-**Step** asks for one action; the arrow buttons let you take a step yourself.
+lurching, and the duck can fall. **2D cartoon** is quackd's flat simulator. **Play** runs a whole episode on a GPU in
+real time, until the duck kicks the ball, falls or uses its 60 steps: typically 10 to 40 seconds. Pick a simulator and
+a seed, then press Play.
 """
 
 with gr.Blocks(title="Laya Vision: Microduck find-and-kick") as demo:
@@ -383,13 +398,7 @@ with gr.Blocks(title="Laya Vision: Microduck find-and-kick") as demo:
     view = gr.Image(type="pil", format="webp", label="Simulator", interactive=False, show_label=False)
     with gr.Row():
         play = gr.Button("▶ Play", variant="primary")
-        step = gr.Button("Step (model)")
         stop = gr.Button("■ Stop")
-    with gr.Row():
-        left = gr.Button("↰ Left")
-        fwd = gr.Button("↑ Forward")
-        right = gr.Button("↱ Right")
-        kick = gr.Button("⚽ Kick")
     info = gr.Markdown()
 
     outs = [game, view, info]
@@ -397,10 +406,7 @@ with gr.Blocks(title="Laya Vision: Microduck find-and-kick") as demo:
     reset.click(on_reset, [seed, sim, game], outs)
     sim.change(on_reset, [seed, sim, game], outs)
     seed.submit(on_reset, [seed, sim, game], outs)
-    play_ev = play.click(on_play, game, outs)
-    step.click(on_step, game, outs)
-    for button, action in ((left, "LEFT"), (fwd, "FORWARD"), (right, "RIGHT"), (kick, "KICK")):
-        button.click(manual(action), game, outs)
+    play_ev = play.click(play_episode, [seed, sim], [view, info])
     stop.click(None, cancels=[play_ev])
 
 if __name__ == "__main__":
