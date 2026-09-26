@@ -196,3 +196,19 @@ def recalibrate(run: str = "microduck-kick-ft2/best", out_run: str = "microduck-
     H.ckpt_vol.commit()
     print(json.dumps(log, indent=1))
     return log
+
+
+@app.function(image=image, timeout=10 * 60, secrets=[modal.Secret.from_name("huggingface-thaitea")])
+def space_hardware(repo: str = "thaitea/laya-vision-microduck-kick-demo", hardware: str = "zero-a10g",
+                   delete: str = ""):
+    """Request ``hardware`` for a Space (``zero-a10g`` is ZeroGPU, which needs a PRO owner) and delete the files named
+    in ``delete`` (comma-separated), which ``publish_space``'s upload never removes. Returns the Space's runtime."""
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    for path in filter(None, delete.split(",")):
+        api.delete_file(path, repo_id=repo, repo_type="space", commit_message="Remove %s" % path)
+        print("deleted", path)
+    runtime = api.request_space_hardware(repo, hardware)
+    print("requested %s: stage %s, hardware %s" % (hardware, runtime.stage, runtime.hardware))
+    return {"stage": str(runtime.stage), "hardware": str(runtime.hardware)}
