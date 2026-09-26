@@ -6,17 +6,39 @@ upstream's Microduck model walking on upstream's trained policy. The action spac
 `scripts/eval_microduck.py` in r33drichards/quackd scores and the checkpoint was trained on, so what plays here is
 what was measured there.
 
+Real time: an action plays out at wall-clock speed, the view streaming as it goes, and the simulator waits only for
+the model's decision between actions, as the eval does (there, a decision takes no simulated time). The model runs on
+ZeroGPU: `decide` is the one function that borrows the GPU, and everything else (the worlds, their rendering, the
+page) stays in this process. How the physics is chunked to keep pace never changes where the duck goes: commands are
+re-sent on the simulator's own clock, exactly as the eval's transport does.
+
 MuJoCo renders through OSMesa, whose context belongs to the thread that made it, and Gradio runs handlers on a pool
-of threads, so every call into a 3D world goes through one dedicated thread (`on_gl`). A step there costs
-milliseconds; the model runs outside it.
+of threads, so every call into a 3D world goes through one dedicated thread (`on_gl`).
+
+quackd is installed at start-up without its dependencies: the Gradio SDK installs `gradio[mcp]`, which pins mcp<2,
+and quackd 0.14.0 declares mcp>=2 for a server this Space never runs. What the simulators import (mujoco,
+onnxruntime, numpy, pillow, pydantic) is in requirements.txt.
 """
 import math
 import os
+import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import spaces  # before torch: ZeroGPU patches it
+
 os.environ.setdefault("MUJOCO_GL", "osmesa")
 os.environ.setdefault("PYOPENGL_PLATFORM", "osmesa")
+
+_QUACKD = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".quackd-pkgs")
+try:
+    import quackd  # noqa: F401
+    import quackd_microduck  # noqa: F401
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "--no-deps", "--target", _QUACKD,
+                           "quackd==0.14.0", "quackd-microduck==0.14.0"])
+    sys.path.insert(0, _QUACKD)
 
 import gradio as gr  # noqa: E402
 import torch  # noqa: E402
@@ -48,6 +70,19 @@ def usable_cpus():
 
 torch.set_num_threads(usable_cpus())
 agent = laya.load_vlm(MODEL_ID, device="cpu", revision=REVISION)
+ON_GPU = spaces.config.Config.zero_gpu
+if ON_GPU:  # ZeroGPU records the move here and makes it in the GPU worker
+    agent.model.to("cuda")
+    agent.device = torch.device("cuda")
+
+
+@spaces.GPU(duration=10)
+def decide(image):
+    """One decision: the model's answer for one duck-camera frame. On ZeroGPU this runs in the GPU worker (the image
+    and the answer are pickled across); anywhere else it is a plain call on the CPU."""
+    answer = agent.predict({"image": image}, QUESTION)["answers"]["action"]
+    return answer["choice"], {k: float(v) for k, v in answer["probabilities"].items()}
+
 
 _gl = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mujoco")
 
@@ -86,7 +121,7 @@ RESEND_S = 0.2      # the worlds' deadman stops a duck whose last command is old
 KICK_SETTLE_S = 1.5  # after a kick, time for the ball to roll
 SUCCESS_M = 0.3     # find-and-kick.duck: the ball moved at least 0.3 m, by a kick that connected
 MAX_STEPS = 60
-FRAME_EVERY_S = 0.25  # how often the view redraws while an action plays out (a 3D frame costs ~0.1 s of CPU)
+FRAME_EVERY_S = 0.2  # wall seconds between redraws while an action plays out (a 3D frame costs ~0.1 s of CPU)
 SIZE = 320
 
 SIMS = {
@@ -230,35 +265,44 @@ def panel(game):
 # ── one step ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def _advance(world, twist, secs, dt, since_cmd):
-    """Step ``world`` for ``secs``, re-sending ``twist`` every RESEND_S (None sends nothing); returns since_cmd."""
-    t = 0.0
-    while t < secs - 1e-9:
+def _advance(world, twist, steps, dt, since_cmd):
+    """Step ``world`` ``steps`` times, re-sending ``twist`` every RESEND_S of simulated time (None sends nothing);
+    returns since_cmd. Where the chunks fall does not matter: the re-sends follow the simulator's clock."""
+    for _ in range(steps):
         if twist is not None and since_cmd >= RESEND_S - 1e-9:
             world.set_velocity(*twist)
             since_cmd = 0.0
         world.step(dt)
-        t += dt
         since_cmd += dt
     return since_cmd
 
 
 def play_action(game, action):
-    """Run one action through the world, yielding every FRAME_EVERY_S of sim time so the view can redraw."""
+    """Run one action at wall-clock speed, yielding at most every FRAME_EVERY_S so the view can redraw. The physics
+    catches up with the clock before each frame, so a slow frame lowers the frame rate, never the duck's speed."""
     world, spec = game["world"], SIMS[game["sim"]]
     if action == "KICK":
         world_call(game, world.kick, "right")
         duration, twist = KICK_SETTLE_S, None
     else:
         duration, twist = spec["action_s"][action], spec["twist"][action]
-    t, since_cmd = 0.0, RESEND_S
-    while t < duration - 1e-9:
-        chunk = min(FRAME_EVERY_S, duration - t)
-        since_cmd = world_call(game, _advance, world, twist, chunk, spec["dt"], since_cmd)
-        t += chunk
-        yield
+    dt = spec["dt"]
+    total = int(round(duration / dt))
+    done, since_cmd = 0, RESEND_S
+    start = last_frame = time.perf_counter()
+    while done < total:
+        due = min(total, int((time.perf_counter() - start) / dt) + 1)
+        if due > done:
+            since_cmd = world_call(game, _advance, world, twist, due - done, dt, since_cmd)
+            done = due
         if fallen(world):
             break
+        now = time.perf_counter()
+        if now - last_frame >= FRAME_EVERY_S:
+            last_frame = now
+            yield
+        else:
+            time.sleep(min(dt, FRAME_EVERY_S - (now - last_frame)))
     world_call(game, world.stop)
 
 
@@ -269,11 +313,9 @@ def take_turn(game, override=None):
         return
     if override is None:
         t0 = time.perf_counter()
-        answer = agent.predict({"image": cam(game, 256)}, QUESTION)["answers"]["action"]
+        action, game["probs"] = decide(cam(game, 256))
         ms = (time.perf_counter() - t0) * 1000
-        action = answer["choice"]
-        game["probs"] = {k: float(v) for k, v in answer["probabilities"].items()}
-        game["last"] = (action, "model, %.0f ms" % ms)
+        game["last"] = (action, "model on %s, %.0f ms" % ("GPU" if ON_GPU else "CPU", ms))
     else:
         action = override
         game["probs"] = {}
@@ -323,9 +365,9 @@ Each step the model sees only the duck's camera (the right-hand picture) and cho
 the arena and the ground-truth numbers are there for you; the model never sees them.
 
 **3D physics** is MuJoCo with upstream's Microduck model walking on upstream's trained policy: the walk is slow and
-lurching, and the duck can fall. **2D cartoon** is quackd's flat simulator. **Play** runs until it kicks the ball, falls
-or uses its 60 steps; **Step** asks for one action; the arrow buttons let you take a step yourself. A step costs about
-a second of model time on this CPU.
+lurching, and the duck can fall. **2D cartoon** is quackd's flat simulator. The duck moves in real time; between
+actions it waits for the model, which runs on a GPU. **Play** runs until it kicks the ball, falls or uses its 60 steps;
+**Step** asks for one action; the arrow buttons let you take a step yourself.
 """
 
 with gr.Blocks(title="Laya Vision: Microduck find-and-kick") as demo:
