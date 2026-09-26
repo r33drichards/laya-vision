@@ -2287,7 +2287,7 @@ def bon_verifier(run: str = "autoresearch/full/long-sep24-b64/best", mc_datasets
         for rk, by_scorer in by_reward.items():
             print("\n== %s (reward: %s, %d groups)" % (name, rk, res["meta"]["datasets"][name]["groups"]))
             for s, curve in by_scorer.items():
-                print("  %-11s " % s + "  ".join("N=%d sel %.3f rnd %.3f orc %.3f" % (n, c["selected"], c["random"], c["oracle"])
+                print("  %-11s " % s + "  ".join("N=%s sel %.3f rnd %.3f orc %.3f" % (n, c["selected"], c["random"], c["oracle"])
                                                    for n, c in sorted(curve.items(), key=lambda kv: int(kv[0]))))
     print("\nwrote", out)
 
