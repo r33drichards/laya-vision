@@ -906,6 +906,10 @@ def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
     print("scored in %.1f min" % ((time.time() - t0) / 60))
     summary = R.summarize(preds, n_boot, seed)
     print(R.format_table(summary))
+    if "render" in summary:
+        from laya.robustness import render as R_render
+
+        print(R_render.format_table(summary["render"]))
     meta = {"run": run_name, "datasets": sorted({r["dataset"] for r in rows}), "n_per_dataset": n_per_dataset,
             "families": fams, "seed": seed, "n_boot": n_boot, "val_split": val_split,
             "temperature": list(agent.temperature), "gpu": torch.cuda.get_device_name(0), "row_counts": counts,
