@@ -221,6 +221,10 @@ def _expand_datasets(names: str) -> list:
     return out
 
 
+#: what ``bench_latency`` times on when the run has no ``metrics.json`` naming its val sets (full_eval's datasets default)
+LATENCY_DEFAULT_DATASETS = "vqa,cauldron,score,eval"
+
+
 def _ready(names: str):
     out = []
     for name in _expand_datasets(names):
@@ -1061,8 +1065,15 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
     path = _ckpt_path(run_name)
     agent = VLMAgent(path, device="cuda", dtype=dtype)
     if not datasets:
-        with open(os.path.join(os.path.dirname(path.rstrip("/")), "metrics.json")) as f:
-            datasets = json.load(f)["args"]["val_datasets"]
+        # the run's own val sets; a run without a modal_app-style metrics.json (e.g. an autoresearch run) gets the
+        # same groups full_eval's datasets part uses, instead of failing with FileNotFoundError as the 201M run did
+        mpath = os.path.join(os.path.dirname(path.rstrip("/")), "metrics.json")
+        if os.path.exists(mpath):
+            with open(mpath) as f:
+                datasets = json.load(f)["args"]["val_datasets"]
+        else:
+            print("bench_latency: no %s, timing on %s" % (mpath, LATENCY_DEFAULT_DATASETS))
+            datasets = LATENCY_DEFAULT_DATASETS
     names = _ready(datasets)
     rng = random.Random(seed)
     per = max(1, n // max(1, len(names)))
@@ -1089,7 +1100,7 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
     for state, _ in cases[:50]:
         views.append(vlm_prefix(agent.processor, [state["image"]], agent.prep)["n_images"])
     out = {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype, "n": len(cases),
-           "split_edge": agent.prep.split_edge, "max_len": agent.cfg["max_len"],
+           "split_edge": agent.prep.split_edge, "max_len": agent.cfg["max_len"], "datasets": names,
            "median_ms": float(np.median(ms)), "p90_ms": float(np.percentile(ms, 90)),
            "mean_input_tokens": float(np.mean(tokens)), "mean_views_per_image": float(np.mean(views))}
     print(json.dumps(out))
@@ -2116,6 +2127,169 @@ def decision_vs_generation(output: str = "results/raw/decision-vs-generation-l4.
         f.write(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
     print(json.dumps(summary(report), indent=2))
     print("wrote", output)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Best-of-N with Laya as the verifier (laya.bon)
+# ---------------------------------------------------------------------------------------------------------
+
+BON_MC_DATASETS = "aokvqa,scienceqa"
+
+
+@app.function(image=image, gpu="L4", cpu=4, memory=16384, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def bon_verifier_run(run_name: str, mc_datasets: str = BON_MC_DATASETS, n_items: int = 400, vlf_rows: int = 400,
+                     seed: int = 0, dtype: str = "bf16") -> str:
+    """Score every candidate of each group with ``laya.bon.verifier_scores`` (P(true) of a correctness ``noul`` and
+    the expected level of the helpfulness ``score`` rubric) and return the rows as JSON text.
+
+    Two kinds of groups, all from val splits:
+
+    * ``mc_datasets``: each multiple-choice question's options become candidate answers (reward 1 for the labelled
+      one), ``n_items`` seeded questions per set. Each row also keeps the checkpoint's own ``choice`` probabilities
+      for the same question, the reference a dedicated head sets.
+    * VLFeedback: the ``score_vlfeedback`` val rows (held out of training by row, so no response of theirs was
+      trained on), with *all* of their model responses as candidates (the prepared set keeps two per row) and the
+      GPT-4V helpfulness rating 1-5 as the reward; responses come from the source's ``vlfeedback_80k.jsonl`` at the
+      prepared set's recorded revision, downloaded to the container's disk. ``vlf_rows`` seeded rows.
+
+    Rows hold ids, scores and rewards only (no third-party text)."""
+    import random
+
+    import torch
+    from huggingface_hub import HfApi, hf_hub_download
+    from PIL import Image
+
+    from laya.bon import choice_candidates, verifier_scores, vlfeedback_candidates
+    from laya.vlm import VLMAgent
+
+    t0 = time.time()
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda", dtype=dtype)
+    rows, meta = [], {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype, "seed": seed,
+                      "n_items": n_items, "vlf_rows": vlf_rows, "datasets": {}}
+
+    def image_of(state):
+        with Image.open(state["image"]) as im:
+            return im.convert("RGB")
+
+    for name in _ready(mc_datasets):
+        exs = [ex for ex in _load_split(name, "val", 0)
+               if ex["q"]["t"] == "choice" and isinstance(ex["state"], dict) and ex["state"].get("image")]
+        picked = random.Random("%s-%d" % (name, seed)).sample(exs, min(n_items, len(exs)))
+        meta["datasets"][name] = {"kind": "multiple_choice", "val_choice_rows": len(exs), "groups": len(picked)}
+        for ex in picked:
+            img = image_of(ex["state"])
+            question, responses, rewards = choice_candidates(ex["q"], ex["label"])
+            ctx = ex["state"].get("context")
+            vq = "%s\n\n%s" % (ctx, question) if ctx else question  # e.g. ScienceQA's hint goes with the question
+            scores = verifier_scores(agent, img, vq, responses)
+            state = {"image": img, "context": ctx} if ctx else img
+            probs = agent.predict(state, {"q": _public_question(ex["q"])})["answers"]["q"]["probabilities"]
+            rows.append({"dataset": name, "id": ex.get("id"), "reward": rewards,
+                         "correct": [s["correct"] for s in scores], "helpful": [s["helpful"] for s in scores],
+                         "choice_prob": [float(probs[k]) for k in ex["q"]["crit"]]})
+        print("%s: %d groups, %.1f min" % (name, len(picked), (time.time() - t0) / 60), flush=True)
+
+    if vlf_rows:
+        base = "/data/vqa/score_vlfeedback"
+        repo = "MMInstruction/VLFeedback"
+        rev = None
+        if os.path.exists(os.path.join(base, "manifest.json")):
+            with open(os.path.join(base, "manifest.json")) as f:
+                rev = json.load(f).get("sources", {}).get(repo)
+        rev_recorded = rev is not None
+        rev = rev or HfApi().dataset_info(repo).sha
+        images = {}
+        with open(os.path.join(base, "val.jsonl")) as f:
+            for line in f:
+                rec = json.loads(line)
+                images[rec["id"].rsplit("-", 2)[0]] = (os.path.join(base, rec["image"]), rec["state_text"])
+        src = hf_hub_download(repo, "vlfeedback_80k.jsonl", repo_type="dataset", revision=rev, cache_dir="/tmp/hfdl")
+        # VLFeedback's ids are not unique (e.g. m3it subsets restart their numbering), and prepare_score_dataset
+        # saved each row's image as images/vlf-<id>.jpg, so a duplicated id's image may belong to another row. Only
+        # rows whose id occurs once in the source are used: their image and their responses are unambiguous.
+        id_count, cands = {}, {}
+        with open(src) as f:
+            for line in f:
+                row = json.loads(line)
+                rid = "vlf-%s" % row.get("id")
+                id_count[rid] = id_count.get(rid, 0) + 1
+                if rid in images:
+                    cands[rid] = vlfeedback_candidates(row)
+        found, mismatched = {}, 0
+        unique = [rid for rid in images if id_count.get(rid) == 1]
+        for rid in unique:
+            prompt, responses, ratings = cands[rid]
+            # the prepared record's text must be one of these candidates: same row, same clipping
+            if not any(images[rid][1] == "Question: %s\n\nResponse: %s" % (prompt, r) for r in responses):
+                mismatched += 1
+            elif len(responses) >= 2:
+                found[rid] = (prompt, responses, ratings)
+        picked = random.Random("vlfeedback-%d" % seed).sample(sorted(found), min(vlf_rows, len(found)))
+        meta["datasets"]["score_vlfeedback"] = {
+            "kind": "responses", "source": repo, "revision": rev, "revision_from_manifest": rev_recorded,
+            "val_rows": len(images), "val_rows_missing_in_source": sum(1 for rid in images if rid not in id_count),
+            "val_rows_duplicate_id": sum(1 for rid in images if id_count.get(rid, 0) > 1),
+            "source_duplicate_ids": sum(1 for v in id_count.values() if v > 1), "text_mismatch": mismatched,
+            "rows_with_2plus_rated": len(found), "groups": len(picked)}
+        for rid in picked:
+            prompt, responses, ratings = found[rid]
+            img = image_of({"image": images[rid][0]})
+            scores = verifier_scores(agent, img, prompt, responses)
+            rows.append({"dataset": "score_vlfeedback", "id": rid, "reward": ratings,
+                         "correct": [s["correct"] for s in scores], "helpful": [s["helpful"] for s in scores]})
+        print("score_vlfeedback: %d groups (%d val rows, %d with a unique id, %d text mismatches), %.1f min"
+              % (len(picked), len(images), len(unique), mismatched, (time.time() - t0) / 60), flush=True)
+    meta["minutes"] = round((time.time() - t0) / 60, 1)
+    meta["provenance"] = agent.predict(Image.new("RGB", (32, 32)), {"q": {"type": "noul", "instructions": "x"}})["provenance"]
+    return json.dumps({"meta": meta, "summary": bon_summary(rows), "rows": rows}, allow_nan=False)  # summary here: the local side has no numpy
+
+
+def bon_summary(rows: list, ns=(1, 2, 3, 4)) -> dict:
+    """``bon_verifier_run`` rows -> per dataset and scorer, ``laya.bon.bon_curve`` at each N. VLFeedback gets two
+    rewards: the rating (1-5) and ``top`` (1 when the response has the group's highest rating)."""
+    from laya.bon import bon_curve
+
+    out = {}
+    for name in sorted({r["dataset"] for r in rows}):
+        rs = [r for r in rows if r["dataset"] == name]
+        rewards = {"reward": [r["reward"] for r in rs]}
+        if name == "score_vlfeedback":
+            rewards = {"rating": [r["reward"] for r in rs],
+                       "top": [[int(x == max(r["reward"])) for x in r["reward"]] for r in rs]}
+        scorers = [s for s in ("correct", "helpful", "choice_prob") if all(s in r for r in rs)]
+        out[name] = {rk: {s: bon_curve([list(zip(r[s], rw)) for r, rw in zip(rs, rv)], ns) for s in scorers}
+                     for rk, rv in rewards.items()}
+    return out
+
+
+@app.local_entrypoint()
+def bon_verifier(run: str = "autoresearch/full/long-sep24-b64/best", mc_datasets: str = BON_MC_DATASETS,
+                 n_items: int = 400, vlf_rows: int = 400, seed: int = 0, dtype: str = "bf16", out: str = ""):
+    """modal run modal_app.py::bon_verifier [--run <run>/best] [--out results/bon/<new>.json]
+
+    Best-of-N with the checkpoint as the verifier (``laya.bon``): candidates per group are a multiple-choice
+    question's options (``--mc-datasets``) or VLFeedback's model responses, each scored by a correctness ``noul``
+    and the helpfulness ``score`` rubric; the exact expected reward of keeping the top-scored of a random N-subset
+    is reported against a random pick and the oracle (pass@N). Writes the rows and the summary to ``--out``, which
+    must not exist yet (default ``results/bon/<run>-<commit>.json``)."""
+    code = _git_state()
+    out = out or os.path.join("results", "bon", "%s-%s%s.json" % (run.replace("/", "-"), (code["commit"] or "nocommit")[:8],
+                                                                   "-dirty" if code["dirty"] else ""))
+    if os.path.exists(out):
+        raise SystemExit("%s exists; pass a new --out" % out)
+    res = json.loads(bon_verifier_run.remote(run, mc_datasets, n_items, vlf_rows, seed, dtype))
+    res["meta"]["code"] = code
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(res, f, indent=1, allow_nan=False)
+    for name, by_reward in res["summary"].items():
+        for rk, by_scorer in by_reward.items():
+            print("\n== %s (reward: %s, %d groups)" % (name, rk, res["meta"]["datasets"][name]["groups"]))
+            for s, curve in by_scorer.items():
+                print("  %-11s " % s + "  ".join("N=%s sel %.3f rnd %.3f orc %.3f" % (n, c["selected"], c["random"], c["oracle"])
+                                                   for n, c in sorted(curve.items(), key=lambda kv: int(kv[0]))))
+    print("\nwrote", out)
 
 
 # ---------------------------------------------------------------------------------------------------------

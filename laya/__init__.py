@@ -31,7 +31,7 @@ _EXPORTS = {
     "LayaError": "client",
 }
 
-__version__ = "0.1.7"
+__version__ = "0.2.0.dev0"  # the one version: pyproject.toml reads it (dynamic = ["version"])
 __all__ = [
     "Agent",
     "RLAgent",
