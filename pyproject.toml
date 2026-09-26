@@ -4,21 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "laya"
-version = "0.2.0.dev0"
+# single source of truth: laya/__init__.py's __version__ (read statically by setuptools, laya is not imported)
+dynamic = ["version"]
 description = "Laya Vision: calibrated typed decisions over images (SmolVLM or ModernVBERT backbone), a fork of Laya"
 readme = "README.md"
-requires-python = ">=3.8"
+# transformers >= 4.56 (the `dtype=` loading argument laya.vlm uses) needs Python >= 3.9
+requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
+# Laya (the text decision model, typed-question API, RLCD objective, calibration) is by Convai Innovations;
+# Laya Vision is an independent fork, not affiliated with them. See README "Credits".
 authors = [
-    { name = "Convai Innovations" }
+    { name = "Convai Innovations" },
+    { name = "r33drichards" },
 ]
-keywords = ["decision-model", "rlcd", "calibration", "system-one", "routing", "guardrails", "moderation", "triage"]
+maintainers = [
+    { name = "r33drichards" },
+]
+keywords = ["decision-model", "rlcd", "calibration", "system-one", "routing", "guardrails", "moderation", "triage",
+            "vision-language", "verifier"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -26,17 +34,29 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "torch>=2.0.0",
-    "transformers>=4.45.0",
+    "torch>=2.2",  # the floor transformers 4.56 sets
+    "torchvision>=0.17",  # the SmolVLM (Idefics3) fast image processor, and laya.preprocess's torchvision filters
+    "transformers>=4.56.0",  # from_pretrained(..., dtype=) in laya.vlm; older versions silently ignore it
     "safetensors>=0.4.0",
     "huggingface_hub>=0.20.0",
     "numpy>=1.20.0",
+    "pillow",  # the image processors, and laya.preprocess's path / PIL input
 ]
+
+[project.optional-dependencies]
+smolvlm2 = ["num2words"]  # transformers' SmolVLM2 processor imports it
+modernvbert = ["transformers>=5.3"]
+test = ["pytest"]
 
 [project.urls]
 Homepage = "https://github.com/r33drichards/laya-vision"
-Model = "https://huggingface.co/thaitea/laya-vision-smolvlm-256m"
+Documentation = "https://r33drichards.github.io/laya-vision/"
+Model = "https://huggingface.co/thaitea/laya-vision"
 Demo = "https://huggingface.co/spaces/thaitea/laya-vision-demo"
+Upstream = "https://github.com/NandhaKishorM/laya"
+
+[tool.setuptools.dynamic]
+version = { attr = "laya.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["laya*"]

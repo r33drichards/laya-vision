@@ -15,7 +15,7 @@ from .email import clean_email_body, email_questions, email_state
 from .presets import guard_questions, moderation_questions, router_questions, triage_questions
 from .vlm import VLMAgent, VLMDecisionModel, load_vlm
 
-__version__ = "0.1.7"
+__version__ = "0.2.0.dev0"  # the one version: pyproject.toml reads it (dynamic = ["version"])
 __all__ = [
     "Agent",
     "RLAgent",

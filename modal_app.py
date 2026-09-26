@@ -221,6 +221,10 @@ def _expand_datasets(names: str) -> list:
     return out
 
 
+#: what ``bench_latency`` times on when the run has no ``metrics.json`` naming its val sets (full_eval's datasets default)
+LATENCY_DEFAULT_DATASETS = "vqa,cauldron,score,eval"
+
+
 def _ready(names: str):
     out = []
     for name in _expand_datasets(names):
@@ -1061,8 +1065,15 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
     path = _ckpt_path(run_name)
     agent = VLMAgent(path, device="cuda", dtype=dtype)
     if not datasets:
-        with open(os.path.join(os.path.dirname(path.rstrip("/")), "metrics.json")) as f:
-            datasets = json.load(f)["args"]["val_datasets"]
+        # the run's own val sets; a run without a modal_app-style metrics.json (e.g. an autoresearch run) gets the
+        # same groups full_eval's datasets part uses, instead of failing with FileNotFoundError as the 201M run did
+        mpath = os.path.join(os.path.dirname(path.rstrip("/")), "metrics.json")
+        if os.path.exists(mpath):
+            with open(mpath) as f:
+                datasets = json.load(f)["args"]["val_datasets"]
+        else:
+            print("bench_latency: no %s, timing on %s" % (mpath, LATENCY_DEFAULT_DATASETS))
+            datasets = LATENCY_DEFAULT_DATASETS
     names = _ready(datasets)
     rng = random.Random(seed)
     per = max(1, n // max(1, len(names)))
@@ -1089,7 +1100,7 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
     for state, _ in cases[:50]:
         views.append(vlm_prefix(agent.processor, [state["image"]], agent.prep)["n_images"])
     out = {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype, "n": len(cases),
-           "split_edge": agent.prep.split_edge, "max_len": agent.cfg["max_len"],
+           "split_edge": agent.prep.split_edge, "max_len": agent.cfg["max_len"], "datasets": names,
            "median_ms": float(np.median(ms)), "p90_ms": float(np.percentile(ms, 90)),
            "mean_input_tokens": float(np.mean(tokens)), "mean_views_per_image": float(np.mean(views))}
     print(json.dumps(out))
