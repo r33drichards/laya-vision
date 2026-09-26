@@ -22,6 +22,8 @@ import random
 import re
 from typing import Dict, List, Optional, Sequence
 
+from .prompt import normalize_option_text
+
 LETTERS = "ABCDEFGH"
 RAVEN_OPTIONS = list(LETTERS)
 
@@ -82,7 +84,7 @@ def parse_options(user: str, assistant: str) -> Optional[Dict]:
     m = _OPTIONS_LINE.search(user)
     if m is None:
         return None
-    opts = [o.strip().lower() for o in m.group(1).rstrip(".").split(",")]
+    opts = [normalize_option_text(o, "lower") for o in m.group(1).rstrip(".").split(",")]
     opts = [o for o in opts if o]
     answer = assistant.strip().split("\n")[0]
     answer = re.sub(r"^Answer:\s*", "", answer).strip().rstrip(".").lower()

@@ -294,6 +294,54 @@ from a calibrated model at n ≈ 300. aokvqa, visual7w and vqav2_yesno are misca
 The shuffled-image ECE exceeds even the clustered floor on all seven sets, and the no-image ECE on six (all but
 mapqa). The full table has every family.
 
+## Rendering: train/serve drift in the state and option text
+
+The two opt-in families in
+[`robustness.render`](https://github.com/r33drichards/laya-vision/blob/main/laya/robustness/render.py) send a row
+with its state or its options *rendered* differently from training ([`laya/prompt.py`](https://github.com/r33drichards/laya-vision/blob/main/laya/prompt.py)
+holds the training rendering). `state_render` covers rows with a text context: `prose` (`context: <text>`),
+`text` (the text alone), `key_note` (JSON under `"note"`, as in the README example) and `struct_json` (a
+`Key: value` context split into JSON fields). `option_render` covers choice rows with bare option names: `lower`
+lower-cases every name, which is what data preparation does to A-OKVQA, and `title` upper-cases the first letter.
+
+Run on `cauldron-score-2ep-bidir-full/best`, 500 seeded val rows per set (fewer where the set is smaller), one L4,
+4.5 min
+([rows and summary](https://github.com/r33drichards/laya-vision/tree/main/results/robustness/render-drift-n500-s0)):
+
+```
+modal run --detach modal_app.py::robustness_eval --datasets aokvqa,cauldron_aokvqa,scienceqa,cauldron_scienceqa,cauldron_ai2d,cauldron_visual7w,score_vlfeedback,score_richhf,eval_vizwiz,eval_evalmuse --n 500 --families state_render,option_render --tag render-drift-n500-s0
+```
+
+| dataset | variant | rows | Δ acc [95% CI] | flip rate | mean TV |
+|---|---|---:|---|---:|---:|
+| scienceqa | option `lower` | 320 | −0.122 [−0.162, −0.081] | 0.172 | 0.179 |
+| scienceqa | option `title` | 244 | −0.041 [−0.082, −0.004] | 0.115 | 0.095 |
+| cauldron_scienceqa | option `lower` | 203 | −0.089 [−0.140, −0.040] | 0.158 | 0.157 |
+| cauldron_ai2d | option `title` | 136 | −0.074 [−0.131, −0.022] | 0.132 | 0.123 |
+| cauldron_ai2d | option `lower` | 150 | −0.027 [−0.076, +0.021] | 0.127 | 0.111 |
+| cauldron_visual7w | option `lower` | 483 | −0.031 [−0.054, −0.008] | 0.087 | 0.071 |
+| aokvqa | option `title` | 494 | −0.022 [−0.053, +0.008] | 0.172 | 0.138 |
+| cauldron_aokvqa | option `title` | 489 | −0.025 [−0.057, +0.008] | 0.162 | 0.138 |
+| score_vlfeedback | state `prose` / `text` | 500 | +0.006 [−0.024, +0.034] / +0.006 [−0.026, +0.038] | 0.198 / 0.196 | 0.107 / 0.104 |
+| score_richhf | state `prose` / `text` | 254 | −0.020 [−0.067, +0.028] / +0.000 [−0.043, +0.051] | 0.150 / 0.134 | 0.101 / 0.104 |
+| eval_evalmuse | state `prose` / `text` | 500 | −0.014 [−0.038, +0.010] / −0.030 [−0.056, −0.004] | 0.136 / 0.156 | 0.120 / 0.125 |
+| eval_vizwiz | state `prose` / `text` | 500 | +0.018 [−0.012, +0.050] / +0.018 [−0.014, +0.052] | 0.126 / 0.142 | 0.065 / 0.071 |
+| scienceqa | state `prose` / `text` | 307 | +0.016 [−0.007, +0.039] / +0.007 [−0.016, +0.029] | 0.042 / 0.039 | 0.027 / 0.030 |
+| cauldron_scienceqa | state `prose` / `text` | 203 | +0.005 [−0.015, +0.030] / +0.005 [−0.015, +0.028] | 0.034 / 0.034 | 0.023 / 0.022 |
+| all state sets | state `key_note` | 203-500 | −0.005 to +0.018 | 0.005-0.055 | 0.005-0.032 |
+| all state sets | state `struct_json` | 11-500 | −0.012 to +0.034 | 0.000-0.123 | 0.008-0.071 |
+
+- **Option case matters most.** Lower-casing options that were capitalised in training costs 3-12 points, and
+  capitalising lower-case ones costs 2-7. A caller must send options in the case the training data used: A-OKVQA
+  style answers lower-case (because `laya.cauldron.parse_options` lower-cases them), the lettered sets (AI2D,
+  ScienceQA, Visual7W) as written.
+- **The state rendering does not help this checkpoint.** Prose or bare text instead of `{"context": ...}` JSON
+  changes 13-20% of the answers on the score sets and 3-4% on ScienceQA, with no accuracy gain that is strictly
+  better anywhere (EvalMuse `text` is 3 points worse). The default stays `"json"`. Renaming the key (`key_note`)
+  is nearly free (flip rate 0.5-5.5%), so what matters is the JSON framing, not the key name.
+- These are drift *costs* for a checkpoint trained on JSON. Whether a checkpoint *trained* on prose would score
+  better is a separate question, to be settled by training one (`VLMAgent(..., state_format="prose")`).
+
 ## Caveats
 
 - **Modest samples.** 160-300 source rows per set, one seed. Intervals are ±4-6 points on accuracy, so a Δ under
