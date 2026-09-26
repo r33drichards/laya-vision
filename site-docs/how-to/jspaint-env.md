@@ -37,7 +37,7 @@ the cursor is placed at a seeded point in the middle of the canvas.
 | | |
 |---|---|
 | Canvas | 512×512, the size of laya-vision's input image (`--canvas-size`, default: the model's `image_size`). |
-| Observation | A screenshot of the canvas with the cursor drawn on it: a red ring and cross when the button is up, a filled red dot when it is held down. The `note` text gives the task, the pen state and the step count. |
+| Observation | Two screenshots of the canvas, 8 steps ago (`frame_gap`) and now, with the cursor drawn on both: a red ring and cross when the button is up, a filled red dot when it is held down. The state text gives the pen state, the step count and the last 12 actions (`history`). `JSPaintEnv.state()` builds it. |
 | Actions (`choice`) | 32 compass moves, `N` `NbE` `NNE` `NEbN` `NE` … `NbW`, one every 11.25°. Each moves 6 px (`step_px`) and draws while the pen is down. Each option's text gives its bearing in degrees. The other three are `PEN_DOWN`, `PEN_UP` and `DONE`. |
 | End | The episode ends on `DONE` or after 260 steps (`max_steps`). The pen is released automatically at the end. |
 | Reward | The verifier score, paid at the end. With `reward="shaped"`, each step instead earns the change in score. |
@@ -87,6 +87,17 @@ More directions matter most, because the heading error per step falls from 22.5�
 little and make episodes longer. Both settings are configurable (`directions=8|16|32`, `step_px`; `--directions`,
 `--step-px` on the command line).
 
+### Memory and the full question
+
+One screenshot does not show which way the stroke was heading or what the model just tried, so each step carries
+an earlier frame and the recent actions as well.
+
+The drawing question is sent in full. It has 35 options, each with its own description, and comes to about 1,050
+tokens. The checkpoint's defaults (`head_max_len` 256, `max_len` 1024) would cut every option and half the
+instructions, so the model is loaded with `head_max_len=PAINT_HEAD_MAX_LEN` (1,536) and `max_len=PAINT_MAX_LEN`
+(2,560). `ModelPolicy` calls `predict(..., strict=True)`, which raises instead of cutting. The model runs before
+this change were affected: every option and 48 of the 82 instruction tokens had been cut.
+
 The screenshot has no OS cursor, so the cursor is drawn onto it. This is the same approach as Maze and Snake.
 
 The discrete actions are built on a mouse-only tool API: `move_mouse(dx, dy)`, `mouse_down()`, `mouse_up()` and
@@ -127,8 +138,9 @@ seeds 900000–900002, on the 512×512 canvas with the default 32 directions and
 |---|---|---|---|
 | Scripted expert | 0.97 | 3/3 | 181.7 |
 | Random | 0.00 | 0/3 | 22.0 |
-| `thaitea/laya-vision`, zero-shot | 0.00 | 0/3 | 174.0 |
+| `thaitea/laya-vision`, zero-shot | 0.00 | 0/3 | 31.0 |
 
-The zero-shot checkpoint picks `PEN_UP` on 521 of 522 steps, which does nothing while the pen is already up, and
-never draws. Recognising a circle is not the same as knowing how to draw one: it was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
+With the full question and two-frame memory, the zero-shot checkpoint moves the cursor (mostly `NNW`, 81 of 93
+actions) but never presses the button, and ends each episode with `DONE` within 6–48 steps. Its top option gets
+about 0.05 probability against 0.03 for uniform, so it is close to guessing. Recognising a circle is not the same as knowing how to draw one: it was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
 train it on, as the game checkpoints were trained on expert frames.

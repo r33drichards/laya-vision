@@ -18,6 +18,9 @@ Playwright; ``JSPaintServer`` serves a local checkout as static files. Each epis
   ``DONE``. Each maps onto the tool API ``move_mouse(dx, dy)`` / ``mouse_down()`` /
   ``mouse_up()``, which sends real pointer events to the page. ``TOOLS`` describes that API as JSON-schema tools, so
   a tool-calling agent can drive the same environment with ``call_tool``;
+* **memory**: ``state()`` is what the model sees each step: two images, the canvas ``frame_gap`` steps ago and
+  now (so the direction of travel is visible), plus the pen state, step count and the last ``history`` actions as
+  text. One screenshot alone does not say which way the stroke was going or what was just tried;
 * **reward** is the task verifier on the true canvas pixels (``canvas_pixels()``, read from the page, so the cursor
   overlay never counts as ink): ``laya.circle_verifier.score_circle`` for ``task="circle"``. It is paid at the end of
   the episode, or as the per-step change in score with ``reward="shaped"``. An episode ends on ``DONE`` or after
@@ -38,7 +41,7 @@ import math
 import os
 import random
 import threading
-from collections import Counter
+from collections import Counter, deque
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -82,6 +85,10 @@ TOOLS = [
 ]
 
 CURSOR = (230, 30, 30)
+# Token budgets for ``load_vlm`` so the full drawing question (35 options with their descriptions, ~1050 tokens) and
+# a two-image state fit without any cutting; the checkpoint defaults (256 / 1024) would truncate every option.
+PAINT_HEAD_MAX_LEN = 1536
+PAINT_MAX_LEN = 2560
 
 
 def default_chromium() -> Optional[str]:
@@ -121,7 +128,8 @@ class JSPaintEnv:
 
     def __init__(self, url: str, task: str = "circle", step_px: int = 6, directions: int = 32, max_steps: int = 260,
                  reward: str = "terminal", headless: bool = True, executable_path: Optional[str] = None,
-                 viewport: Tuple[int, int] = (900, 720), keep_frames: bool = False, canvas_size: int = 512):
+                 viewport: Tuple[int, int] = (900, 720), keep_frames: bool = False, canvas_size: int = 512,
+                 frame_gap: int = 8, history: int = 12):
         if task not in TASKS:
             raise ValueError("unknown task %r (one of %s)" % (task, ", ".join(TASKS)))
         if reward not in ("terminal", "shaped"):
@@ -130,6 +138,8 @@ class JSPaintEnv:
 
         self.url, self.task, self.step_px, self.max_steps, self.reward_mode = url, task, step_px, max_steps, reward
         self.keep_frames, self.directions = keep_frames, directions
+        self.frame_gap, self.history = frame_gap, history
+        self._recent_obs: deque = deque(maxlen=frame_gap + 1)
         self.moves = compass_moves(directions)
         self.actions = tuple(self.moves) + PEN_ACTIONS
         self._pw = sync_playwright().start()
@@ -174,6 +184,8 @@ class JSPaintEnv:
         self.seed, self.steps, self.pen, self.finished = seed, 0, False, False
         self.trajectory, self.frames, self._last_score, self.result = [], [], 0.0, None
         obs = self.render()
+        self._recent_obs.clear()
+        self._recent_obs.append(obs)
         if self.keep_frames:
             self.frames.append(obs)
         return obs
@@ -212,6 +224,7 @@ class JSPaintEnv:
             score = self.verify()["score"]
             reward, self._last_score = score - self._last_score, score
         obs = self.render()
+        self._recent_obs.append(obs)
         if self.keep_frames:
             self.frames.append(obs)
         return obs, reward, self.done, info
@@ -281,6 +294,18 @@ class JSPaintEnv:
             d.line([x - 11, y, x + 11, y], fill=CURSOR)
             d.line([x, y - 11, x, y + 11], fill=CURSOR)
         return img
+
+    def state(self) -> Dict:
+        """What the model sees this step: ``images`` = [canvas ``frame_gap`` steps ago (the first frame early in an
+        episode), canvas now], both with the cursor drawn on, plus the pen state, step count and recent actions."""
+        recent = [t["action"] for t in self.trajectory[-self.history:]]
+        return {
+            "images": [self._recent_obs[0], self._recent_obs[-1]],
+            "frames": "the first image is the canvas %d steps ago, the second is now" % (len(self._recent_obs) - 1),
+            "pen": "down (drawing)" if self.pen else "up (not drawing)",
+            "step": "%d of %d" % (self.steps + 1, self.max_steps),
+            "recent_actions": " ".join(recent) if recent else "none yet",
+        }
 
     def note(self) -> str:
         return "Task: %s The pen is %s. Step %d of %d." % (TASKS[self.task], "down (drawing)" if self.pen else
@@ -370,8 +395,11 @@ def random_policy(seed: int = 0):
 
 
 class ModelPolicy:
-    """The model's most likely action from the screenshot plus the text note, via ``predict``. ``last`` keeps the
-    latest answer (probabilities over ``env.actions``) for logging."""
+    """The model's most likely action from ``env.state()`` (two frames plus pen state and recent actions), via
+    ``predict``. ``last`` keeps the latest answer (probabilities over ``env.actions``) for logging.
+
+    Load the agent with ``head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN``: ``predict`` runs with
+    ``strict=True`` and raises rather than silently cut the question."""
 
     def __init__(self, agent, task: str = "circle"):
         self.agent, self.task, self.last, self.provenance, self._questions = agent, task, None, None, {}
@@ -382,7 +410,7 @@ class ModelPolicy:
         key = (env.directions, env.step_px)
         if key not in self._questions:
             self._questions[key] = paint_question(self.task, env.directions, env.step_px)
-        out = self.agent.predict({"image": env.render(), "note": env.note()}, self._questions[key])
+        out = self.agent.predict(env.state(), self._questions[key], strict=True)
         self.last, self.provenance = out["answers"]["action"], out.get("provenance")
         return self.last["choice"]
 
@@ -413,7 +441,8 @@ def play_episodes(env: JSPaintEnv, policy, episodes: int, seed: int = 0, on_step
             "mean_steps": float(np.mean([e["steps"] for e in eps])), "actions": dict(counts), "results": eps}
 
 
-__all__ = ["ACTIONS", "MOVES", "COMPASS", "PEN_ACTIONS", "compass_bearing", "compass_moves", "TASKS", "TOOLS",
+__all__ = ["PAINT_HEAD_MAX_LEN", "PAINT_MAX_LEN", "ACTIONS", "MOVES", "COMPASS", "PEN_ACTIONS", "compass_bearing",
+           "compass_moves", "TASKS", "TOOLS",
            "JSPaintServer",
            "JSPaintEnv", "circle_expert", "random_policy",
            "ModelPolicy", "model_policy", "play_episodes", "default_chromium"]

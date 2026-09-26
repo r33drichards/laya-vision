@@ -43,6 +43,38 @@ def test_question_covers_actions_and_tools_are_mouse_only():
     assert {t["name"] for t in TOOLS} == {"move_mouse", "mouse_down", "mouse_up", "screenshot"}
 
 
+def test_state_has_two_frames_and_recent_actions(env):
+    env.reset(seed=2)
+    first = env.state()
+    assert len(first["images"]) == 2 and first["images"][0] is first["images"][1]
+    assert first["recent_actions"] == "none yet"
+    for a in ["PEN_DOWN"] + ["E"] * (env.frame_gap + 3):
+        env.step(a)
+    st = env.state()
+    old, now = st["images"]
+    assert old is not now and old.size == now.size == (env.width, env.height)
+    assert st["recent_actions"].split() == (["PEN_DOWN"] + ["E"] * (env.frame_gap + 3))[-env.history:]
+    assert st["pen"].startswith("down")
+
+
+def test_full_question_fits_raised_budget_without_truncation():
+    """The full 35-option question plus a two-frame state must fit PAINT_HEAD_MAX_LEN / PAINT_MAX_LEN uncut."""
+    from transformers import AutoProcessor
+    from laya.paintenv import PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN
+
+    try:
+        tok = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-256M-Instruct").tokenizer
+    except Exception as err:  # offline
+        pytest.skip("tokenizer unavailable: %s" % err)
+    q = paint_question()["action"]
+    opts = ["- %s: %s" % kv for kv in q["criteria"].items()]
+    n_opts = sum(len(tok(o)["input_ids"]) + 1 for o in opts)
+    n_ins = len(tok(q["instructions"])["input_ids"])
+    assert max(len(tok(o)["input_ids"]) for o in opts) <= 48  # the builder's per-option cap
+    assert n_opts + n_ins + 32 <= PAINT_HEAD_MAX_LEN
+    assert n_opts + n_ins + 2 * 64 + 256 <= PAINT_MAX_LEN  # two 512px images are 64 tokens each
+
+
 def test_reset_is_blank_and_observation_is_canvas(env):
     obs = env.reset(seed=3)
     assert obs.size == (env.width, env.height) == (512, 512)

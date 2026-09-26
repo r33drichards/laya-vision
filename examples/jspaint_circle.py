@@ -1,10 +1,12 @@
 """Ask Laya Vision to draw a circle in JSPaint with the mouse only, and score it.
 
-Each step a screenshot of the JSPaint canvas (with the cursor marked on it) goes into the model as the image, and a
-`choice` question over mouse actions (a 6 px move toward each of 32 compass directions, pen down, pen up, done)
-picks the next move, which is sent to the real app as pointer events. At the end the circle verifier scores the
-true canvas pixels. The scripted expert and a random policy play the same seeds as reference points, and the
-model's score is also reported normalized, (model - random) / (expert - random), as in the games suite.
+Each step the model sees two screenshots of the JSPaint canvas (8 steps ago and now, the cursor marked on both) plus
+its pen state and last 12 actions as text, and a `choice` question over mouse actions (a 6 px move toward each of 32
+compass directions, pen down, pen up, done) picks the next move, which is sent to the real app as pointer events.
+The model is loaded with raised token budgets and asked with strict=True, so the full question is never cut. At the
+end the circle verifier scores the true canvas pixels. The scripted expert and a random policy play the same seeds as
+reference points, and the model's score is also reported normalized, (model - random) / (expert - random), as in the
+games suite.
 
     pip install -e . playwright pillow
     git clone https://github.com/r33drichards/jspaint ../jspaint
@@ -21,7 +23,8 @@ import json
 import os
 import time
 
-from laya.paintenv import JSPaintEnv, JSPaintServer, circle_expert, model_policy, play_episodes, random_policy
+from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, circle_expert, model_policy,
+                           play_episodes, random_policy)
 
 
 def main():
@@ -53,7 +56,9 @@ def main():
     if "model" in names:
         from laya import load_vlm
 
-        agent = load_vlm(args.model, revision=args.revision, device=args.device)
+        # raised token budgets: the full question and a two-frame state fit with nothing cut
+        agent = load_vlm(args.model, revision=args.revision, device=args.device, head_max_len=PAINT_HEAD_MAX_LEN,
+                         max_len=PAINT_MAX_LEN)
     # A square canvas the size of the model's input, so the screenshot reaches the vision tower unscaled.
     canvas_size = args.canvas_size or (agent.prep.image_size if agent is not None else 512)
     summary["canvas_size"] = canvas_size

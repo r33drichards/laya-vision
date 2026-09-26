@@ -101,10 +101,10 @@ def paint_question(task: str = "circle", directions: int = 32, step_px: int = 6)
         for m in compass_moves(directions)}
     return {"action": {
         "type": "choice",
-        "instructions": "You are using a paint program with only the mouse. The white area is the canvas and the "
-                        "red mark is the mouse cursor: a hollow ring with a cross means the button is up, a filled "
-                        "dot means it is held down and moving draws a black line. Your task: %s. Which mouse action "
-                        "should you take now?" % PAINT_GOALS[task],
+        "instructions": "You are using a paint program with only the mouse. You see the canvas a few steps ago "
+                        "and now. The white area is the canvas and the red mark is the mouse cursor: a hollow ring "
+                        "with a cross means the button is up, a filled dot means it is held down and moving draws a "
+                        "black line. Your task: %s. Which mouse action should you take now?" % PAINT_GOALS[task],
         "criteria": {**moves, **PAINT_PEN},
     }}
 
