@@ -38,6 +38,8 @@ def main():
     ap.add_argument("--revision", default=None, help="pin the Hub revision of --model")
     ap.add_argument("--device", default=None)
     ap.add_argument("--chromium", default=None, help="Chromium executable (default: LAYA_CHROMIUM or Playwright's)")
+    ap.add_argument("--canvas-size", type=int, default=None,
+                    help="square canvas side (default: the model's input image_size, 512 for the released checkpoints)")
     ap.add_argument("--headed", action="store_true", help="show the browser window")
     ap.add_argument("--out", default="results/jspaint")
     args = ap.parse_args()
@@ -47,15 +49,22 @@ def main():
     names = [p.strip() for p in args.policies.split(",") if p.strip()]
     summary = {"task": "circle", "jspaint": os.path.abspath(args.jspaint), "args": vars(args), "policies": {}}
 
+    agent = None
+    if "model" in names:
+        from laya import load_vlm
+
+        agent = load_vlm(args.model, revision=args.revision, device=args.device)
+    # A square canvas the size of the model's input, so the screenshot reaches the vision tower unscaled.
+    canvas_size = args.canvas_size or (agent.prep.image_size if agent is not None else 512)
+    summary["canvas_size"] = canvas_size
+
     with JSPaintServer(args.jspaint) as server, JSPaintEnv(server.url, max_steps=args.max_steps,
                                                            step_px=args.step_px, directions=args.directions,
-                                                           headless=not args.headed,
+                                                           canvas_size=canvas_size, headless=not args.headed,
                                                            executable_path=args.chromium, keep_frames=True) as env:
         for name in names:
             if name == "model":
-                from laya import load_vlm
-
-                policy = model_policy(load_vlm(args.model, revision=args.revision, device=args.device))
+                policy = model_policy(agent)
             elif name == "expert":
                 policy = circle_expert()
             elif name == "random":

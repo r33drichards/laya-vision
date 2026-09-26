@@ -3,6 +3,10 @@
 `JSPaint <https://github.com/r33drichards/jspaint>`_ (an MS Paint clone) runs unmodified in headless Chromium through
 Playwright; ``JSPaintServer`` serves a local checkout as static files. Each episode:
 
+* **canvas** is ``canvas_size`` pixels, square and by default 512 x 512: the size laya-vision's released checkpoints
+  feed the vision tower (``image_size`` in ``vlm_agent_config.json``). The model then sees the canvas 1:1; a wide
+  canvas would be squashed to a square first, turning a drawn circle into a tall ellipse. JSPaint reads its canvas
+  size from ``localStorage`` at start-up, so the size is set there before the page loads (JSPaint is unmodified);
 * **reset** clears the canvas to white (``api_for_cypress_tests.reset_for_next_test()``), selects the Brush tool
   (so strokes are 4 px wide and visible) and puts the cursor at a seeded point on the canvas;
 * **observation** is a screenshot of the canvas with the cursor drawn on it (headless screenshots have no OS cursor):
@@ -117,7 +121,7 @@ class JSPaintEnv:
 
     def __init__(self, url: str, task: str = "circle", step_px: int = 6, directions: int = 32, max_steps: int = 260,
                  reward: str = "terminal", headless: bool = True, executable_path: Optional[str] = None,
-                 viewport: Tuple[int, int] = (800, 600), keep_frames: bool = False):
+                 viewport: Tuple[int, int] = (900, 720), keep_frames: bool = False, canvas_size: int = 512):
         if task not in TASKS:
             raise ValueError("unknown task %r (one of %s)" % (task, ", ".join(TASKS)))
         if reward not in ("terminal", "shaped"):
@@ -132,6 +136,9 @@ class JSPaintEnv:
         self.browser = self._pw.chromium.launch(headless=headless,
                                                 executable_path=executable_path or default_chromium())
         self.page = self.browser.new_page(viewport={"width": viewport[0], "height": viewport[1]})
+        self.canvas_size = canvas_size
+        self.page.add_init_script("localStorage.setItem('width', '%d'); localStorage.setItem('height', '%d');"
+                                  % (canvas_size, canvas_size))
         # Only the app itself: no fonts, analytics or update checks from the network.
         self.page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url)
                         else route.abort())
@@ -154,6 +161,12 @@ class JSPaintEnv:
         r = self.page.evaluate("(() => { const r = document.querySelector('.main-canvas').getBoundingClientRect();"
                                " return [r.x, r.y, r.width, r.height]; })()")
         self.origin, self.width, self.height = (r[0], r[1]), int(r[2]), int(r[3])
+        if (self.width, self.height) != (self.canvas_size, self.canvas_size):
+            raise RuntimeError("JSPaint canvas is %dx%d, expected %dx%d" % (self.width, self.height, self.canvas_size,
+                                                                            self.canvas_size))
+        if r[1] + r[3] > self.page.viewport_size["height"] or r[0] + r[2] > self.page.viewport_size["width"]:
+            raise RuntimeError("the %dx%d canvas does not fit the browser viewport; pass a larger viewport"
+                               % (self.width, self.height))
         rng = random.Random(seed)
         self.cursor = (rng.uniform(0.25, 0.75) * self.width, rng.uniform(0.25, 0.75) * self.height)
         self.page.mouse.move(*self._client(self.cursor))

@@ -45,7 +45,7 @@ def test_question_covers_actions_and_tools_are_mouse_only():
 
 def test_reset_is_blank_and_observation_is_canvas(env):
     obs = env.reset(seed=3)
-    assert obs.size == (env.width, env.height)
+    assert obs.size == (env.width, env.height) == (512, 512)
     assert not ink_mask(env.canvas_pixels()).any()
     assert not env.done and not env.pen
 

@@ -36,13 +36,43 @@ the cursor is placed at a seeded point in the middle of the canvas.
 
 | | |
 |---|---|
-| Observation | A screenshot of the 683×384 canvas with the cursor drawn on it: a red ring and cross when the button is up, a filled red dot when it is held down. The `note` text gives the task, the pen state and the step count. |
+| Canvas | 512×512, the size of laya-vision's input image (`--canvas-size`, default: the model's `image_size`). |
+| Observation | A screenshot of the canvas with the cursor drawn on it: a red ring and cross when the button is up, a filled red dot when it is held down. The `note` text gives the task, the pen state and the step count. |
 | Actions (`choice`) | 32 compass moves, `N` `NbE` `NNE` `NEbN` `NE` … `NbW`, one every 11.25°. Each moves 6 px (`step_px`) and draws while the pen is down. Each option's text gives its bearing in degrees. The other three are `PEN_DOWN`, `PEN_UP` and `DONE`. |
 | End | The episode ends on `DONE` or after 260 steps (`max_steps`). The pen is released automatically at the end. |
 | Reward | The verifier score, paid at the end. With `reward="shaped"`, each step instead earns the change in score. |
 
+### Why the canvas is 512×512
+
+The released checkpoints read every image as a single 512×512 view, and the processor resizes to that square
+without keeping the aspect ratio. JSPaint's default 683×384 canvas was therefore squashed: a drawn circle reached the
+model as a tall ellipse (165×293 px). On that canvas laya-vision called a perfect ring "blank", with P(circle) 0.05.
+
+A 512×512 canvas reaches the vision tower pixel for pixel. On it, the model recognizes the scripted expert's circles
+without any cropping, and still tells them apart from a square drawn the same way:
+
+| Canvas (JSPaint, 512×512) | "What is drawn?" (6 options) | "Which shape?" (5 options) | Verifier |
+|---|---|---|---|
+| Expert circle, seed 0 | circle (0.67) | circle (0.94) | 0.97 |
+| Expert circle, seed 1 | circle (0.84) | circle (0.94) | 0.97 |
+| Expert circle, seed 2 | circle (0.82) | circle (0.94) | 0.97 |
+| Square drawn with the same moves | square (P(circle) 0.09) | square (0.03) | 0.00 |
+| Blank | blank (0.08) | heart (0.15) | 0.00 |
+
+Each cell is the top answer, with the probability of "circle" in brackets. These are spot checks of
+`thaitea/laya-vision` at revision `f2fe3c1`, not a benchmark. Two caveats. The yes/no question "Does the image
+show a circle?" stays below 0.35 on all of them, so ask it as a choice. And the red cursor marker in the
+observation sometimes pulls the 6-option answer to "line".
+
+JSPaint reads its canvas size from `localStorage` at start-up, so the environment writes `width` and `height`
+there before the page loads. JSPaint itself is unmodified. The browser viewport is 900×720 so the whole canvas is
+on screen.
+
+### Move size
+
 The model can only pick from a list of options, so the actions are relative moves. They are fine-grained because
-coarse moves can't draw a round circle. Scripted-expert scores over 3 episodes:
+coarse moves can't draw a round circle. Scripted-expert scores over 3 episodes, measured on the earlier 683×384
+canvas (radius 115 px):
 
 | Directions | Step | Expert score | Steps per circle |
 |---|---|---|---|
@@ -91,14 +121,12 @@ counted as ink. It fits a least-squares circle to the ink and computes five comp
 `circle_expert()` is a scripted policy. It walks with the pen up straight to the nearest point of a circle centred
 on the canvas, and presses the button once it is within half a step of the radius. It then traces one full turn,
 each step taking the forward move that lands closest to the radius. `random_policy` picks actions uniformly. On
-seeds 900000–900002, with the default 32 directions and 6 px steps:
+seeds 900000–900002, on the 512×512 canvas with the default 32 directions and 6 px steps:
 
 | Policy | Mean score | Pass rate | Mean steps |
 |---|---|---|---|
-| Scripted expert | 0.95 | 3/3 | 139.0 |
+| Scripted expert | 0.97 | 3/3 | 181.7 |
 | Random | 0.00 | 0/3 | 22.0 |
-| `thaitea/laya-vision`, zero-shot | 0.00 | 0/3 | 260.0 |
 
-The zero-shot checkpoint picks `PEN_UP` on every step (780 of 780), which does nothing while the pen is already
-up. It runs out the step limit without drawing anything. The model was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
+The model was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
 train it on, as the game checkpoints were trained on expert frames.
