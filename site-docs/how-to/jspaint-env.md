@@ -127,6 +127,8 @@ seeds 900000–900002, on the 512×512 canvas with the default 32 directions and
 |---|---|---|---|
 | Scripted expert | 0.97 | 3/3 | 181.7 |
 | Random | 0.00 | 0/3 | 22.0 |
+| `thaitea/laya-vision`, zero-shot | 0.00 | 0/3 | 174.0 |
 
-The model was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
+The zero-shot checkpoint picks `PEN_UP` on 521 of 522 steps, which does nothing while the pen is already up, and
+never draws. Recognising a circle is not the same as knowing how to draw one: it was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
 train it on, as the game checkpoints were trained on expert frames.
