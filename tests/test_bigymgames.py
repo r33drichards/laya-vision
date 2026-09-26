@@ -36,7 +36,10 @@ def test_probe_metrics_and_answer_probs():
             {"qid": "done", "label": 0, "probs": [0.4, 0.6]}]
     m = bg.probe_metrics(rows)["done"]
     assert m["n"] == 3 and m["acc"] == pytest.approx(2 / 3) and m["prior_acc"] == pytest.approx(2 / 3)
-    assert m["label_counts"] == [2, 1] and m["pred_counts"] == [1, 2]
+    assert m["label_counts"] == [2, 1] and m["pred_counts"] == [1, 2] and m["auroc"] == 1.0
+    lev = [{"qid": "progress", "label": i, "probs": list(np.eye(4)[i] * 0.7 + 0.075)} for i in range(4)]
+    m = bg.probe_metrics(lev)["progress"]
+    assert m["acc"] == 1.0 and m["spearman"] == pytest.approx(1.0) and m["mae"] < m["prior_mae"]
     assert bg.answer_probs({"type": "noul", "noul": 0.7}, {"type": "noul"}) == pytest.approx([0.3, 0.7])
     q = {"type": "choice", "criteria": {"left": "", "right": ""}}
     assert bg.answer_probs({"type": "choice", "probabilities": {"right": 0.9, "left": 0.1}}, q) == [0.1, 0.9]

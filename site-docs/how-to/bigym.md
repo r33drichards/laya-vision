@@ -65,3 +65,53 @@ checks when `mujoco` and `bigym` are installed.
   (reach frames are mostly not done), so a model that always says "no" can look accurate.
 - **The demos are replayed at 20 Hz under MuJoCo 3.14.** They were recorded under 3.1.5, and BiGym warns that
   replay can drift. A few percent of them fail for that reason, not because the task is hard.
+
+## Results: thaitea/laya-vision
+
+These results are for revision `f2fe3c1`, from one run on 2026-09-26 (code `376e1c6`, MuJoCo 3.14.0, L4 bf16).
+Every probe row and every episode is in
+[`eval-results/bigym-laya-vision-f2fe3c1.json`](https://github.com/r33drichards/laya-vision/blob/main/eval-results/bigym-laya-vision-f2fe3c1.json).
+AUROC and Spearman below are recomputed from those rows by `laya.bigymgames.probe_metrics`.
+
+**Control** (success over 20 seeded episodes per policy; oracle and demos are the references):
+
+| Task | Model | Random | Oracle | Demos (20) |
+|---|---:|---:|---:|---:|
+| ReachTarget | 0% | 35% | 100% | – |
+| ReachTargetSingle | 0% | 25% | 100% | – |
+| DrawerTopOpen | 0% | 0% | – | 100% |
+| DrawerTopClose | 0% | 0% | – | 100% |
+| WallCupboardOpen | 0% | 0% | – | 90% |
+| WallCupboardClose | 0% | 0% | – | 100% |
+
+- **The model solves nothing, and on the reach tasks random play beats it.** Random wanders into the target
+  sometimes; the model mostly repeats one or two primitives.
+- **Top choices:** on the reach tasks, `RIGHT_HAND_UP` about 60% and `RIGHT_GRIPPER_OPEN` about 28% of
+  decisions. On WallCupboardOpen, `STAY` 99%.
+
+**Probe** (200 frames per task; `prior` is the accuracy of always giving the most common label):
+
+| Task | `done` acc / prior | `done` AUROC | `progress` acc / prior | `progress` Spearman | `side` acc / prior |
+|---|---:|---:|---:|---:|---:|
+| ReachTarget | 77% / 84% | 0.76 | 18% / 41% | −0.03 | 54% / 70% |
+| ReachTargetSingle | 48% / 87% | 0.51 | 22% / 60% | 0.00 | 57% / 57% |
+| DrawerTopOpen | 75% / 75% | 0.69 | 26% / 25% | 0.11 | – |
+| DrawerTopClose | 68% / 75% | 0.38 | 22% / 25% | −0.17 | – |
+| WallCupboardOpen | 65% / 75% | 0.61 | 22% / 25% | 0.30 | – |
+| WallCupboardClose | 54% / 75% | 0.23 | 28% / 25% | −0.44 | – |
+
+- **No question beats the prior on accuracy by more than 3 points.** `progress` answers pile up on level 2,
+  "mostly done", whatever the true level: 86–93% of frames on the cupboard tasks, 55–62% on the reach tasks.
+- **The ranking carries some signal, with the wrong sign on the close tasks.**
+    - On the open tasks, P(done) ranks the more-open frames higher (AUROC 0.69 and 0.61).
+    - On the close tasks it ranks them the same way, which is backwards for "closed", so AUROC is below 0.5 and
+      Spearman is negative.
+    - Reading: the model registers how open the drawer or doors are, but not which direction the task asks for.
+      It says "done" for open.
+- **ReachTarget `done`** has the best ranking (0.76). On ReachTargetSingle, where only the left hand counts, it
+  is at chance.
+
+**What this means.** Zero-shot, this checkpoint is not a BiGym policy or a success detector. The positive AUROC
+on the open tasks, together with the flipped sign on the close tasks, suggests the visual features carry
+cabinet-state information that the question wording does not reach. That argues for training on BiGym frames
+(the probe's labelled frames, or the demos) before trying control again.

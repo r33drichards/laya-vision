@@ -477,10 +477,39 @@ def probe_metrics(rows: List[Dict]) -> Dict:
                     "prior_acc": float(prior.max()), "prior_nll": float(-np.log(np.clip(prior[y], eps, 1)).mean()),
                     "label_counts": np.bincount(y, minlength=k).tolist(),
                     "pred_counts": np.bincount(pred, minlength=k).tolist()}
-        if k > 2:  # ordinal: mean absolute level error of the expected level
-            out[qid]["mae"] = float(np.abs((P * np.arange(k)).sum(1) - y).mean())
+        if k == 2:  # does P(label 1) rank the frames, whatever the threshold (0.5 = chance)
+            out[qid]["auroc"] = _auroc(P[:, 1], y)
+        else:  # ordinal: mean absolute level error, and rank correlation, of the expected level
+            level = (P * np.arange(k)).sum(1)
+            out[qid]["mae"] = float(np.abs(level - y).mean())
             out[qid]["prior_mae"] = float(np.abs((prior * np.arange(k)).sum() - y).mean())
+            out[qid]["spearman"] = _spearman(level, y)
     return out
+
+
+def _ranks(x: np.ndarray) -> np.ndarray:
+    """Average ranks (ties share their mean rank)."""
+    x = np.asarray(x, np.float64)
+    order = np.argsort(x, kind="mergesort")
+    r = np.empty(len(x))
+    r[order] = np.arange(len(x))
+    for v in np.unique(x):
+        r[x == v] = r[x == v].mean()
+    return r
+
+
+def _auroc(score: np.ndarray, y: np.ndarray) -> Optional[float]:
+    pos, neg = score[y == 1], score[y == 0]
+    if not len(pos) or not len(neg):
+        return None
+    return float((pos[:, None] > neg[None]).mean() + 0.5 * (pos[:, None] == neg[None]).mean())
+
+
+def _spearman(a: np.ndarray, b: np.ndarray) -> Optional[float]:
+    ra, rb = _ranks(a), _ranks(b)
+    if ra.std() == 0 or rb.std() == 0:
+        return None
+    return float(np.corrcoef(ra, rb)[0, 1])
 
 
 def answer_probs(answer: Dict, question: Dict) -> List[float]:

@@ -163,13 +163,14 @@ def _fmt(v, pct=False):
 
 
 def _print_probe(probes: list) -> None:
-    print("\n== probe (accuracy / prior-only accuracy, ECE, NLL / prior NLL)")
-    print("%-18s %-9s %5s %7s %7s %7s %7s %7s" % ("task", "question", "n", "acc", "prior", "ece", "nll", "p_nll"))
+    print("\n== probe (accuracy / prior-only accuracy, ECE, NLL / prior NLL, ranking: AUROC or Spearman)")
+    print("%-18s %-9s %5s %7s %7s %7s %7s %7s %7s" % ("task", "question", "n", "acc", "prior", "ece", "nll", "p_nll",
+                                                     "rank"))
     for p in probes:
         for qid, m in p["metrics"].items():
-            print("%-18s %-9s %5d %7s %7s %7s %7s %7s" % (p["task"], qid, m["n"], _fmt(m["acc"], True),
-                                                          _fmt(m["prior_acc"], True), _fmt(m["ece"]),
-                                                          _fmt(m["nll"]), _fmt(m["prior_nll"])))
+            print("%-18s %-9s %5d %7s %7s %7s %7s %7s %7s" % (
+                p["task"], qid, m["n"], _fmt(m["acc"], True), _fmt(m["prior_acc"], True), _fmt(m["ece"]),
+                _fmt(m["nll"]), _fmt(m["prior_nll"]), _fmt(m.get("auroc", m.get("spearman")))))
 
 
 def _print_control(control: dict) -> None:
