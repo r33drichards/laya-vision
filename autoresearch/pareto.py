@@ -6,7 +6,13 @@
 | `quality`   | higher | 0.005 (abs)   | macro dataset accuracy minus ECE on single-answer questions            |
 | `games`     | higher | 0.04 (abs)    | mean normalized game score, 0 = random play, 1 = the scripted expert   |
 | `params_m`  | lower  | 1% (rel)      | parameters of the saved model, millions                                |
-| `latency_x` | lower  | 5% (rel)      | median predict time / the base checkpoint's, timed in the same L4 run  |
+| `latency_x` | lower  | 5% (rel)      | max(question ratio, game-move ratio) vs the base checkpoint, same L4  |
+
+`latency_x` = max(`latency_q_x`, `game_move_x`). `latency_q_x`: median `predict` time on the eval questions over the
+base checkpoint's, timed alternately in the same L4 container. `game_move_x` = `game_move_ms` / `game_move_ref_ms`:
+median time of one game move at batch 1 (a fixed CartPole frame history) in the checkpoint's own game frame mode
+(`laya.frames`; for `stack-N` with the encoder cache warm, so only the new frame is encoded) over the base
+checkpoint's in `single`, alternated the same way. A model is as slow as its slower use.
 
 Upstream autoresearch keeps an experiment when its single metric (val_bpb) improves. Here an experiment is kept when
 it extends the frontier: no already-kept result is at least as good on every objective within the noise margins.

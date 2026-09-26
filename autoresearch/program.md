@@ -13,7 +13,24 @@ least as good on all four:
 | `quality` | macro accuracy over 34 eval sets (300 fixed questions each) minus the calibration error (ECE) on the questions with one right answer | higher |
 | `games` | mean normalized score over the games suite (Maze, Snake, CartPole, Acrobot, MountainCar, LunarLander, Atari Freeway and Breakout, ViZDoom basic): per game (model - random) / (expert - random), clipped to [-0.5, 1.5], fixed seeds (`autoresearch/games_eval.py`) | higher |
 | `params_m` | parameters of the saved model, millions | lower |
-| `latency_x` | median `predict` time on an L4 in bf16, preprocessing included, divided by the base checkpoint's timed in the same container (1.0 = as fast as the released model) | lower |
+| `latency_x` | max(question ratio, game-move ratio), each timed on an L4 in bf16 alternately with the base checkpoint in the same container (1.0 = as fast as the released model). Question ratio: median `predict` time, preprocessing included, over the base checkpoint's. Game-move ratio (`game_move_x`): median time of one game move at batch 1 in the checkpoint's own frame mode (state building and the frame cache as play uses them) over the base checkpoint's in `single` | lower |
+
+**Game frame modes** (`laya.frames`, `GAME_FRAMES` in `experiment.py`, saved in the checkpoint as
+`game_frames`): how a game step's state is shown.
+
+- `"single"` (default): today's states. One frame for Maze, Snake, Atari and ViZDoom; the classic-control games
+  ghost the previous frame under the current one at weight 0.35 (= `trail-2`).
+- `"trail-N"`: one image blending the last N frames, the current one strongest, geometric weights
+  w_k = r^k / sum_j r^j by age k with r = 0.35 / 0.65 (`trail-4`: 0.50, 0.27, 0.15, 0.08). Costs one image.
+- `"stack-N"`: the last N frames as N images, oldest first (64 image tokens each at 512; `stack-5` still fits the
+  1,024-token sequence). Play encodes each frame once (a feature cache), but the language model reads all N
+  images every move, which `game_move_x` charges.
+
+At an episode's start the first frame is repeated. `toolkit.*_examples(..., frames=GAME_FRAMES)` and
+`ctx.game_examples(frames=GAME_FRAMES)` build training states from each trajectory's own history (pool v4 stores up
+to 4 previous frames per Atari / ViZDoom frame, with the same decision interval as play); the benchmark plays in the
+mode the checkpoint names. Mazes and Snake are fully observable, so extra frames only cost there; Breakout, the
+control games and ViZDoom need motion.
 
 Progress is the frontier's **hypervolume**: how much of the quality × games × size × latency space it covers. A
 smaller model that is only slightly worse is a win, as is a better player at the same size. `pareto.py` makes the
@@ -31,8 +48,8 @@ keep / discard call, not you.
      for ideas; change behaviour by writing it in `experiment.py`, not by editing them.
 4. **Modal**: `modal volume ls laya-checkpoints` must work. In a Claude Code cloud sandbox, set it up as
    `.claude/skills/evals/SKILL.md` section 1 describes (the proxy extra and CA bundle, in a scratch venv).
-5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v3`, which holds only the
-   `games` parts, and `pool-v2`, whose `train` / `calib` / `eval` parts v3 reuses). If a part is missing, build
+5. **Data**: `modal volume ls laya-datasets autoresearch` must show the data pool (`pool-v4`, which holds only the
+   `games` parts, and `pool-v2`, whose `train` / `calib` / `eval` parts v4 reuses). If a part is missing, build
    it once with `modal run autoresearch/harness.py --prepare-pool` (it reads the prepared `cauldron_*`, `score_*` and
    `eval_*` sets). Every image the harness uses comes from this pool: reading the datasets' small image files
    straight from the volume is too slow to keep an H100 fed.
@@ -184,11 +201,13 @@ globally, and the benchmark fixes what the model sees.
 - **Data mix**: the eval sets reward breadth; weight the weakest groups.
 - **Game data**: mix `toolkit` game examples (soft BFS targets for Maze and Snake, expert frames for classic
   control) into the training stream, and the pool's Atari and ViZDoom expert frames via `ctx.game_examples()`.
+- **Frame mode**: `GAME_FRAMES = "trail-4"` or `"stack-4"` shows motion (ball direction in Breakout, the pole's swing,
+  the lander's drift) that one frame hides. `trail-N` is free at play time; `stack-N` pays in `latency_x`.
 - **Value head**: `"value_head": true` with `value` targets, as an auxiliary loss.
 - **Next-move head** (KataGo's auxiliary opponent-move target, arXiv 1902.10565 section 3.4, which learned ~1.3x
   faster): `"next_head": true` adds a small per-option scorer predicting the expert's move at the next step of the
   same trajectory, trained on the `next_target` that `toolkit` maze / snake / control examples and the pool's
-  Atari / ViZDoom frames (`ctx.game_examples()`, pool v3) carry (`train(..., w_next=0.15)`, KataGo's weight). It is never used for play and changes nothing when off.
+  Atari / ViZDoom frames (`ctx.game_examples()`, pool v4) carry (`train(..., w_next=0.15)`, KataGo's weight). It is never used for play and changes nothing when off.
 - **Train on the model's own states (DAgger)**: expert data never shows the states the model's mistakes lead to.
   Mid-training, roll the current model out on training seeds, label the frames it visits with the BFS / expert move
   (or a short `laya.search` where there is no expert), add them to the mix, keep training. autogo's version is

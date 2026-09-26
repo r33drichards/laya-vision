@@ -1,5 +1,7 @@
 68a1dfe6c467229d7b35fcb385d3f4d259a7b92101b701c0e45cbf108c77bd72  decision-vs-generation-l4.json
 eb668a6af261a60b2a276abcb7c48a228bfde0bd0629e5e7e1d7be2c34e29d7e  smolvlm-autoresearch-full-long-sep24-b64-best.vqa-val.meta.json
 3289c1ae93e31c9f266ed0bd914e06e3ef00c2a11b59843e7b861340ad67a4ac  smolvlm-autoresearch-full-long-sep24-b64-best.vqa-val.predictions.jsonl.gz
+e3b61c62c3b4393e052a51235148603711548f43f32d2d5808e2533fa814acba  smolvlm-autoresearch-full-long-sep24-b64-stack2-best.vqa-val.meta.json
+e4d8034233fa07d4c1daa580d90de12b16ad87fcfbe9d7e2a3423a1fcdf428be  smolvlm-autoresearch-full-long-sep24-b64-stack2-best.vqa-val.predictions.jsonl.gz
 3c1e96a714860eb2b39d293336fd34fb2a2c98e0a68bb30c774bf7953542a774  smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.meta.json
 b824b2677f813c5a74acfbb77953d0d097c867888508af2fcc6183ca89518353  smolvlm-cauldron-score-2ep-bidir-full-best.vqa-val.predictions.jsonl.gz

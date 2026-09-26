@@ -20,6 +20,12 @@ games ``frac`` of the draws. A model built with ``"value_head": True`` in its co
 (``train(..., w_value=...)``); ``"next_head": True`` adds an auxiliary head trained on the examples' ``next_target``
 (the expert's move at the next step; ``train(..., w_next=...)``), never used for play. The games are played greedy:
 no test-time search.
+
+``GAME_FRAMES`` is the game frame mode (``laya.frames``): ``"single"`` (one frame; the control games ghost the
+previous frame in), ``"trail-N"`` (the last N frames blended into one image) or ``"stack-N"`` (the last N frames as
+N images, N <= 5). ``build`` passes it to every game-data call and writes it into ``agent.cfg["game_frames"]``, so the
+saved checkpoint carries it: the games benchmark plays in it and the latency job times a game move in it
+(``latency_x`` is the larger of the question and game-move ratios, so a stack's extra per-move cost counts).
 """
 from typing import Dict, Optional
 
@@ -38,16 +44,18 @@ IMAGE_SIZE = 0            # square side fed to the vision tower, a multiple of 6
 TRAIN_SETS = None         # None = every trainable set (ctx.train_examples() default)
 MIX: Optional[Dict[str, float]] = {"score_vlfeedback": 3.0}   # per-dataset sampling weights, as in the checkpoint's run
 FREEZE = "full"           # "head", "last_n" or "full" (everything but the vision tower)
-TRAIN_VISION = True       # with "full": train the vision tower too (at LR_BACKBONE)
+TRAIN_VISION = False      # with "full": train the vision tower too (at LR_BACKBONE)
 LR_HEAD = 5e-5
-LR_BACKBONE = 5e-6
-BATCH_SIZE = 32
+LR_BACKBONE = 1e-5
+BATCH_SIZE = 64
 WARMUP_STEPS = 20
 
 # games: share of training draws given to game examples (toolkit-generated + the pool's expert frames); 0 = none
 GAME_FRAC = 0.45
+# how game states are shown (laya.frames): "single", "trail-N" or "stack-N"; saved in the checkpoint
+GAME_FRAMES = "stack-4"
 # auxiliary next-move head (KataGo 1902.10565 sec. 3.4): predicts the expert's move at t+1, training only
-NEXT_HEAD = True
+NEXT_HEAD = False
 W_NEXT = 0.5
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
@@ -96,14 +104,16 @@ def build(ctx):
         keep_vision_layers(agent, KEEP_VISION_LAYERS)
     if IMAGE_SIZE:
         set_image_size(agent, IMAGE_SIZE)
+    agent.cfg["game_frames"] = GAME_FRAMES  # the frame mode is part of the model: the benchmark reads it back
     ctx.data = ctx.train_examples(TRAIN_SETS) if TRAIN_SETS else ctx.train_examples()
     ctx.mix = MIX
     if GAME_FRAC:
         import toolkit
 
-        games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
+        games = (toolkit.maze_examples(20000, frames=GAME_FRAMES) + toolkit.snake_examples(20000, frames=GAME_FRAMES)
+                 + ctx.game_examples(frames=GAME_FRAMES))
         for g in CONTROL_GAMES:
-            games += toolkit.control_examples(g, 5000)
+            games += toolkit.control_examples(g, 5000, frames=GAME_FRAMES)
         ctx.data, ctx.mix = toolkit.game_mix(ctx.data, games, GAME_FRAC, base_weights=MIX)
     return agent
 

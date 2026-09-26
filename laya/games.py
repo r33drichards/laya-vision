@@ -96,12 +96,28 @@ CONTROL_ACTIONS = {
 }
 
 
-def control_question(game: str) -> Dict:
-    """The question for a ``laya.controlgames`` game; the screen ghosts the previous frame to show motion."""
+def control_frames_text(frames: str = "single") -> str:
+    """The sentence ``control_question`` uses to describe the screen in a ``laya.frames`` mode."""
+    from .frames import resolve
+
+    kind, n = resolve(frames, "control")
+    if n == 1:
+        return ""
+    if kind == "trail" and n == 2:
+        return "A faint copy shows where things were one step earlier. "
+    if kind == "trail":
+        return "Fainter and fainter copies show where things were over the last %d steps. " % (n - 1)
+    return "The %d images are the last %d screens, oldest first. " % (n, n)
+
+
+def control_question(game: str, frames: str = "single") -> Dict:
+    """The question for a ``laya.controlgames`` game. ``frames`` is the ``laya.frames`` mode the screen is shown in:
+    in ``"single"`` (= ``trail-2``) the screen ghosts the previous frame to show motion, and the question says so;
+    other modes describe their own screens (the sentence is ``control_frames_text``)."""
     return {"action": {
         "type": "choice",
-        "instructions": "You are playing the control task %s. %s A faint copy shows where things were one step "
-                        "earlier. Which action should you take now?" % (game, CONTROL_GOALS[game]),
+        "instructions": "You are playing the control task %s. %s %sWhich action should you take now?"
+                        % (game, CONTROL_GOALS[game], control_frames_text(frames)),
         "criteria": dict(CONTROL_ACTIONS[game]),
     }}
 
