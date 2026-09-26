@@ -15,7 +15,7 @@ sim = pytest.mark.skipif(not HAVE_SIM, reason="needs mujoco and bigym (and MUJOC
 @pytest.mark.parametrize("task", sorted(bg.TASKS))
 def test_questions_are_well_formed(task):
     q = bg.bigym_question(task)["action"]
-    assert q["type"] == "choice" and list(q["criteria"]) == list(bg.PRIMITIVES)
+    assert q["type"] == "choice" and list(q["criteria"]) == [bg.OPTION_WORDS[p] for p in bg.PRIMITIVES]
     assert bg.TASKS[task]["description"] in q["instructions"]
     probe = bg.probe_questions(task)
     assert {v["type"] for v in probe.values()} <= set(QTYPES)
@@ -91,4 +91,45 @@ def test_open_fraction_round_trip():
     assert game.ground_truth() == {"success": False, "open": pytest.approx(0.0, abs=0.02)}
     game.set_open_fraction(1.0)
     assert game.ground_truth()["success"] and game.open_fraction() == pytest.approx(1.0, abs=0.02)
+    game.close()
+
+
+def test_multi_frame_question():
+    one, four = bg.bigym_question("DrawerTopClose")["action"], bg.bigym_question("DrawerTopClose", 4)["action"]
+    assert "last 4 views 0.1 s apart, oldest first" in four["instructions"] and "views" not in one["instructions"]
+    assert four["criteria"] == one["criteria"]
+    assert [bg.FROM_WORDS[w] for w in one["criteria"]] == list(bg.PRIMITIVES)  # phrases map back, in order
+
+
+@pytest.mark.parametrize("frames", [1, 4])
+def test_questions_fit_the_budgets_whole(frames):
+    """21 options share head_max_len with the instructions: nothing (least of all the task) may be cut."""
+    transformers = pytest.importorskip("transformers")
+    from laya.vlm import VLMAgent, build_vlm_inputs
+
+    try:
+        proc = transformers.AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-256M-Instruct")
+    except Exception as e:  # offline without a cached processor
+        pytest.skip("SmolVLM processor unavailable: %r" % e)
+    img = np.zeros((256, 256, 3), np.uint8)
+    for task in bg.TASKS:
+        qs = dict(bg.probe_questions(task), action=bg.bigym_question(task, frames)["action"])
+        for qid, q in qs.items():
+            it = build_vlm_inputs(proc, {"images": [img] * frames}, VLMAgent._to_internal(q), 1024, 256)
+            tr = it["truncation"]
+            assert not tr["options"] and not tr["instructions_tokens_dropped"], (task, qid, tr)
+
+
+@sim
+def test_frame_history_pads_then_rolls():
+    game = bg.BiGymGame("ReachTarget", seed=0)
+    first = game.frames(4)
+    assert len(first) == 4 and all(f is first[0] for f in first)  # episode start: the first frame repeated
+    for _ in range(5):
+        game.step("LEFT_HAND_UP")
+    fr = game.frames(4)
+    assert len(fr) == 4 and fr[-1] is game.frame() and not np.array_equal(fr[0], fr[-1])
+    assert game.frames(2) == fr[-2:]
+    with pytest.raises(ValueError):
+        game.frames(bg.MAX_FRAMES + 1)
     game.close()

@@ -30,6 +30,7 @@ WRIST_STEP = 0.03  # metres a wrist primitive moves the wrist
 BASE_STEP = 0.05  # metres a base primitive moves the pelvis
 TURN_STEP = 0.2  # radians a turn primitive rotates the pelvis
 IK_DAMPING = 0.05
+MAX_FRAMES = 4  # decision frames kept for multi-frame questions
 REACH_BINS = (0.3, 0.2, 0.1)  # wrist-target distance (m) thresholds for progress levels 1, 2, 3
 OPEN_BINS = (0.3, 0.6, 0.9)  # task-direction open fraction thresholds for progress levels 1, 2, 3
 SEED = 300_000  # eval episodes use seeds SEED + i
@@ -71,6 +72,20 @@ PRIMITIVES.update({"BASE_FORWARD": "step the whole robot forward", "BASE_BACK": 
                    "BASE_TURN_LEFT": "turn the whole robot to the left",
                    "BASE_TURN_RIGHT": "turn the whole robot to the right", "STAY": "do nothing and wait"})
 
+# The option text the model reads: 21 options share the head budget (``head_max_len``, 256 tokens) with the
+# instructions, so "NAME: description" (about 20 tokens each) would be cut and crowd the task out of the prompt.
+# Short phrases fit whole; ``model_policy`` maps the chosen phrase back to the primitive's name.
+OPTION_WORDS: Dict[str, str] = {}
+for _hand in ("LEFT", "RIGHT"):
+    for _axis in _AXES:
+        OPTION_WORDS["%s_HAND_%s" % (_hand, _axis)] = "%s hand %s" % (_hand.lower(), _axis.lower())
+for _hand in ("LEFT", "RIGHT"):
+    OPTION_WORDS["%s_GRIPPER_CLOSE" % _hand] = "close %s gripper" % _hand.lower()
+    OPTION_WORDS["%s_GRIPPER_OPEN" % _hand] = "open %s gripper" % _hand.lower()
+OPTION_WORDS.update({"BASE_FORWARD": "step forward", "BASE_BACK": "step back", "BASE_TURN_LEFT": "turn left",
+                     "BASE_TURN_RIGHT": "turn right", "STAY": "wait"})
+FROM_WORDS = {v: k for k, v in OPTION_WORDS.items()}
+
 PROGRESS_LEVELS = ["not started: far from done", "partly done", "mostly done: nearly there", "done"]
 
 
@@ -78,14 +93,18 @@ PROGRESS_LEVELS = ["not started: far from done", "partly done", "mostly done: ne
 # Questions and labels (pure Python: no bigym needed)
 # ---------------------------------------------------------------------------------------------------------
 
-def bigym_question(task: str) -> Dict:
-    """The control question for a ``TASKS`` entry: one ``choice`` over ``PRIMITIVES``."""
+def bigym_question(task: str, frames: int = 1) -> Dict:
+    """The control question for a ``TASKS`` entry: one ``choice`` over the ``OPTION_WORDS`` phrases (one per
+    primitive, in ``PRIMITIVES`` order). With ``frames`` > 1 the state is that many head-camera frames, one per
+    decision (0.1 s apart), oldest first. Sized to fit ``head_max_len`` whole (``tests/test_bigymgames.py``)."""
+    if frames > 1:
+        view = "Robot head camera, last %d views 0.1 s apart, oldest first; grippers at the bottom." % frames
+    else:
+        view = "Robot head camera view; grippers at the bottom."
     return {"action": {
         "type": "choice",
-        "instructions": "You control a two-armed robot seen from its head camera; its two grippers are at the "
-                        "bottom of the image. Your task: %s. Which action should the robot take now?"
-                        % TASKS[task]["description"],
-        "criteria": dict(PRIMITIVES),
+        "instructions": "%s Task: %s. Next move?" % (view, TASKS[task]["description"]),
+        "criteria": {OPTION_WORDS[p]: "" for p in PRIMITIVES},
     }}
 
 
@@ -185,6 +204,7 @@ class BiGymGame:
         self.steps, self.decisions = 0, 0
         self.success, self.terminated, self.truncated = False, False, False
         self._frame = self._prev = None
+        self._history = [self.frame()]  # one head frame per decision, newest last (at most MAX_FRAMES)
 
     @property
     def done(self) -> bool:
@@ -273,6 +293,7 @@ class BiGymGame:
             if self.done:
                 break
         self.obs = e.get_observation()
+        self._history = (self._history + [self.frame()])[-MAX_FRAMES:]
         self.decisions += 1
         return self.success
 
@@ -282,6 +303,14 @@ class BiGymGame:
         if self._frame is None:
             self._frame = np.ascontiguousarray(np.asarray(self.obs["rgb_head"]).transpose(1, 2, 0))
         return self._frame
+
+    def frames(self, k: int) -> List[np.ndarray]:
+        """The last ``k`` decision frames, oldest first; at the start of an episode the first frame is repeated
+        so there are always ``k``."""
+        if not 1 <= k <= MAX_FRAMES:
+            raise ValueError("frames must be 1..%d, got %d" % (MAX_FRAMES, k))
+        h = self._history[-k:]
+        return [h[0]] * (k - len(h)) + h
 
     def render(self, ghost: float = 0.0):
         """The current head frame as a PIL image, with the previous decision's frame blended in at ``ghost``."""
@@ -354,10 +383,15 @@ def random_policy(seed: int = 0):
     return lambda game: rng.choice(game.actions)
 
 
-def model_policy(agent, task: str, ghost: float = 0.0):
-    """The model's most likely primitive from the head frame, via ``predict``."""
-    q = bigym_question(task)
-    return lambda game: agent.predict({"image": game.render(ghost)}, q)["answers"]["action"]["choice"]
+def model_policy(agent, task: str, frames: int = 1, ghost: float = 0.0):
+    """The model's most likely primitive via ``predict``: from the head frame, or with ``frames`` > 1 from the
+    last ``frames`` decision frames as ``{"images": [oldest, ..., now]}``, so it can see motion."""
+    q = bigym_question(task, frames)
+
+    def policy(game):
+        state = {"images": game.frames(frames)} if frames > 1 else {"image": game.render(ghost)}
+        return FROM_WORDS[agent.predict(state, q, strict=True)["answers"]["action"]["choice"]]
+    return policy
 
 
 def play_episodes(task: str, policy, episodes: int, seed: int = SEED, max_decisions: int = 0) -> Dict:

@@ -2,6 +2,7 @@
 
     modal run modal_bigym.py::bigym_eval                                  # all six tasks, both parts
     modal run modal_bigym.py::bigym_eval --tasks ReachTarget,DrawerTopClose --parts control --episodes 3
+    modal run modal_bigym.py::bigym_eval --parts control --frames 2,4       # the model sees its last 2 / 4 views
     modal run modal_bigym.py::bigym_eval --model thaitea/laya-vision --revision <sha> --out eval-results/x.json
 
 Parts:
@@ -10,7 +11,8 @@ Parts:
              prior-only baseline of the same rows. The frames are regenerated from their seeds (not stored).
     control  ``--episodes`` seeded episodes per task for the model, random play and, on the reach tasks, the
              privileged oracle, all over the same motion primitives; the cupboard tasks' expert reference is
-             BiGym's human demonstrations replayed in the sim (``--demos`` of them).
+             BiGym's human demonstrations replayed in the sim (``--demos`` of them). ``--frames 1,2,4`` plays the
+             model once per count of head frames it sees (one per decision, 0.1 s apart, oldest first).
 
 The local client writes one JSON (``--out``, default ``eval-results/bigym-<model>-<date>.json``) and prints the
 tables. Nothing is written to the volumes except the shared HF cache.
@@ -88,7 +90,7 @@ def bigym_probe(task: str, model: str = MODEL, revision: str = REVISION, n: int 
     agent = _agent(model, revision)
     rows = []
     for i, fr in enumerate(frames):
-        ans = agent.predict({"image": fr["image"]}, qs)["answers"]
+        ans = agent.predict({"image": fr["image"]}, qs, strict=True)["answers"]
         truth = {k: v for k, v in fr["truth"].items()}
         for qid, q in qs.items():
             rows.append({"task": task, "frame": i, "seed": fr["seed"], "qid": qid, "label": fr["labels"][qid],
@@ -100,19 +102,20 @@ def bigym_probe(task: str, model: str = MODEL, revision: str = REVISION, n: int 
     return out
 
 
-def _play(task: str, policy: str, episodes: int, seed: int, model: str = "", revision: str = "") -> dict:
+def _play(task: str, policy: str, episodes: int, seed: int, model: str = "", revision: str = "",
+          frames: int = 1) -> dict:
     gl = _pick_gl()
     from laya import bigymgames as bg
 
     t0 = time.time()
     if policy == "model":
-        fn = bg.model_policy(_agent(model, revision), task)
+        fn = bg.model_policy(_agent(model, revision), task, frames)
     elif policy == "oracle":
         fn = bg.oracle_policy
     else:
         fn = bg.random_policy(seed)
     out = bg.play_episodes(task, fn, episodes, seed)
-    out.update(policy="model:%s@%s" % (model, revision[:7]) if policy == "model" else policy,
+    out.update(policy="model:%s@%s" % (model, revision[:7]) if policy == "model" else policy, frames=frames,
                versions=_versions(), gl=gl, seconds=round(time.time() - t0, 1))
     print(json.dumps({k: v for k, v in out.items() if k != "results"}))
     return out
@@ -120,9 +123,10 @@ def _play(task: str, policy: str, episodes: int, seed: int, model: str = "", rev
 
 @app.function(image=image, gpu="L4", cpu=4, timeout=180 * 60, volumes={"/cache/hf": hf_vol})
 def bigym_play(task: str, model: str = MODEL, revision: str = REVISION, episodes: int = 20,
-               seed: int = 300_000) -> dict:
-    """The model plays ``episodes`` seeded episodes of ``task``, one ``predict`` per primitive."""
-    return _play(task, "model", episodes, seed, model, revision)
+               seed: int = 300_000, frames: int = 1) -> dict:
+    """The model plays ``episodes`` seeded episodes of ``task``, one ``predict`` per primitive, seeing the last
+    ``frames`` decision frames."""
+    return _play(task, "model", episodes, seed, model, revision, frames)
 
 
 @app.function(image=image, cpu=4, timeout=180 * 60)
@@ -173,21 +177,28 @@ def _print_probe(probes: list) -> None:
                 _fmt(m["nll"]), _fmt(m["prior_nll"]), _fmt(m.get("auroc", m.get("spearman")))))
 
 
-def _print_control(control: dict) -> None:
+def _model_key(frames: int) -> str:
+    return "model" if frames == 1 else "model_%df" % frames
+
+
+def _print_control(control: dict, frame_counts: list) -> None:
     print("\n== control (success rate over the same seeded episodes)")
-    print("%-18s %7s %7s %7s %7s %6s  %s" % ("task", "model", "random", "oracle", "demos", "norm", "top model actions"))
+    print("%-18s %6s %7s %7s %7s %7s %6s  %s" % ("task", "frames", "model", "random", "oracle", "demos", "norm",
+                                                 "top model actions"))
     for task, c in control.items():
-        m, r, o, d = (c.get(k) for k in ("model", "random", "oracle", "demos"))
-        top = ""
-        if m:
-            total = max(1, sum(m["actions"].values()))
-            top = ", ".join("%s %d%%" % (a, 100 * k / total)
-                            for a, k in sorted(m["actions"].items(), key=lambda kv: -kv[1])[:3])
-        print("%-18s %7s %7s %7s %7s %6s  %s" % (task, _fmt(m and m["success_rate"], True),
-                                                 _fmt(r and r["success_rate"], True),
-                                                 _fmt(o and o["success_rate"], True),
-                                                 _fmt(d and d["success_rate"], True),
-                                                 _fmt(c.get("normalized")), top))
+        r, o, d = (c.get(k) for k in ("random", "oracle", "demos"))
+        for n in frame_counts:
+            m = c.get(_model_key(n))
+            top = ""
+            if m:
+                total = max(1, sum(m["actions"].values()))
+                top = ", ".join("%s %d%%" % (a, 100 * k / total)
+                                for a, k in sorted(m["actions"].items(), key=lambda kv: -kv[1])[:3])
+            print("%-18s %6d %7s %7s %7s %7s %6s  %s" % (task, n, _fmt(m and m["success_rate"], True),
+                                                         _fmt(r and r["success_rate"], True),
+                                                         _fmt(o and o["success_rate"], True),
+                                                         _fmt(d and d["success_rate"], True),
+                                                         _fmt(c["normalized"].get(_model_key(n))), top))
 
 
 def _git_state() -> dict:
@@ -203,9 +214,13 @@ def _git_state() -> dict:
 @app.local_entrypoint()
 def bigym_eval(tasks: str = ",".join(TASKS), parts: str = "probe,control", model: str = MODEL,
                revision: str = REVISION, episodes: int = 20, probe_n: int = 200, demos: int = 20,
-               seed: int = 300_000, out: str = ""):
-    """Everything in parallel on one checkpoint; see the module docstring."""
+               seed: int = 300_000, frames: str = "1", out: str = ""):
+    """Everything in parallel on one checkpoint; see the module docstring. ``--frames 1,2,4`` plays the model once
+    per frame count (results under ``model``, ``model_2f``, ``model_4f``)."""
     task_list = [t for t in tasks.split(",") if t]
+    frame_counts = [int(n) for n in frames.split(",") if n]
+    if not frame_counts or any(not 1 <= n <= 4 for n in frame_counts):
+        raise SystemExit("--frames takes counts from 1 to 4, e.g. 1,2,4")
     unknown = [t for t in task_list if t not in TASKS]
     if unknown:
         raise SystemExit("unknown tasks %s (known: %s)" % (unknown, ", ".join(TASKS)))
@@ -218,8 +233,8 @@ def bigym_eval(tasks: str = ",".join(TASKS), parts: str = "probe,control", model
         if "probe" in want:
             calls["probe"][t] = bigym_probe.spawn(t, model, revision, probe_n)
         if "control" in want:
-            c = {"model": bigym_play.spawn(t, model, revision, episodes, seed),
-                 "random": bigym_baseline.spawn(t, "random", episodes, seed)}
+            c = {_model_key(n): bigym_play.spawn(t, model, revision, episodes, seed, n) for n in frame_counts}
+            c["random"] = bigym_baseline.spawn(t, "random", episodes, seed)
             if t in REACH:
                 c["oracle"] = bigym_baseline.spawn(t, "oracle", episodes, seed)
             else:
@@ -229,16 +244,19 @@ def bigym_eval(tasks: str = ",".join(TASKS), parts: str = "probe,control", model
     control = {}
     for t, cs in calls["control"].items():
         control[t] = {k: _get(c, "%s %s" % (k, t)) for k, c in cs.items()}
-        m, r, o = (control[t].get(k) for k in ("model", "random", "oracle"))
-        tie = not (m and r and o) or o["success_rate"] == r["success_rate"]
-        control[t]["normalized"] = None if tie else ((m["success_rate"] - r["success_rate"])
-                                                     / (o["success_rate"] - r["success_rate"]))
+        r, o = control[t].get("random"), control[t].get("oracle")
+        control[t]["normalized"] = {}
+        for n in frame_counts:
+            m = control[t].get(_model_key(n))
+            tie = not (m and r and o) or o["success_rate"] == r["success_rate"]
+            control[t]["normalized"][_model_key(n)] = None if tie else (
+                (m["success_rate"] - r["success_rate"]) / (o["success_rate"] - r["success_rate"]))
     if probes:
         _print_probe(probes)
     if control:
-        _print_control(control)
+        _print_control(control, frame_counts)
     result = {"model": model, "revision": revision, "tasks": task_list, "parts": sorted(want), "episodes": episodes,
-              "probe_n": probe_n, "demos": demos, "seed": seed, "code": _git_state(),
+              "probe_n": probe_n, "demos": demos, "seed": seed, "frames": frame_counts, "code": _git_state(),
               "date": time.strftime("%Y-%m-%d"), "errors": _ERRORS, "probe": probes, "control": control}
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w") as f:
