@@ -345,57 +345,69 @@ def latency_remote(runs: list, n: int = 50) -> dict:
 
     ctx_ids, end_id = tt.option_context_ids(proc)
     res = {"gpu": torch.cuda.get_device_name(0), "n": n, "rows": []}
-    for k in (2, 4, 18, 64, 255, 1024):
+    from laya.common import render_options
+
+    tok = proc.tokenizer
+
+    def batch_for(q):
+        it = build_vlm_inputs(proc, {}, q, prefix=prefix)
+        it.update(qtype=0, target=[1.0] + [0.0] * (len(render_options(q)) - 1))
+        b = collate_vlm([it], tok.pad_token_id)
+        return {kk: (v.cuda() if torch.is_tensor(v) else v) for kk, v in b.items()}
+
+    def rep(x, B):
+        return x.expand(B, *x.shape[1:]).contiguous() if torch.is_tensor(x) else x
+
+    for k, B in ((2, 1), (4, 1), (18, 1), (64, 1), (180, 1), (255, 1), (1024, 1), (4, 16), (18, 16), (64, 16)):
         q = question(k)
-        row = {"k": k}
+        row = {"k": k, "frames": B}
         with torch.inference_mode():
-            if k <= 255:
-                it = build_vlm_inputs(proc, {}, q, prefix=prefix)
-                it.update(qtype=0, target=[1.0] + [0.0] * (k - 1))
-                b = collate_vlm([it], proc.tokenizer.pad_token_id)
-                b = {kk: (v.cuda() if torch.is_tensor(v) else v) for kk, v in b.items()}
-                pv = b["pixel_values"].to(torch.bfloat16)
+            try:
+                b = batch_for(q)
+            except ValueError as e:  # the cross-encoder cannot fit this many options with the image
+                row["teacher_error"] = str(e)
+                b = None
+            if b is not None:
+                tb = {kk: rep(v, B) for kk, v in b.items()}
+                pv = tb["pixel_values"].to(torch.bfloat16)
 
                 def teach():
-                    return teacher.model(b["input_ids"], b["attention_mask"], b["marker_pos"], b["marker_mask"],
-                                         b["qtype"], pixel_values=pv, pixel_attention_mask=b["pixel_attention_mask"],
-                                         option_span=b["option_span"])
+                    return teacher.model(tb["input_ids"], tb["attention_mask"], tb["marker_pos"], tb["marker_mask"],
+                                         tb["qtype"], pixel_values=pv, pixel_attention_mask=tb["pixel_attention_mask"],
+                                         option_span=tb["option_span"])
                 row["teacher_ms"], row["teacher_p90"] = timed(teach)
                 row["teacher_tokens"] = int(b["input_ids"].size(1))
                 row["teacher_option_tokens"] = int(b["option_span"][0, 1] - b["option_span"][0, 0])
-            else:
-                it = build_vlm_inputs(proc, {}, question(4), prefix=prefix)
-                it.update(qtype=0, target=[1.0, 0, 0, 0])
-                b = collate_vlm([it], proc.tokenizer.pad_token_id)
-                b = {kk: (v.cuda() if torch.is_tensor(v) else v) for kk, v in b.items()}
-                pv = b["pixel_values"].to(torch.bfloat16)
-            # the state prefix does not depend on k; options are the question's, tokenised as the cross-encoder does
-            from laya.common import render_options
-            tok = proc.tokenizer
+            # the state tower's input: the same sequence cut before the options (from the 4-option question when the
+            # cross-encoder cannot build this one; the instructions are identical)
+            sb = b if b is not None else batch_for(question(4))
+            s0 = int(sb["option_span"][0, 0])
+            pids, pmask = rep(sb["input_ids"][:, :s0], B), rep(sb["attention_mask"][:, :s0], B)
+            spv, spam = rep(sb["pixel_values"], B).to(torch.bfloat16), rep(sb["pixel_attention_mask"], B)
             opts = [tuple(tok("- " + o.replace("\n", " "), add_special_tokens=False)["input_ids"][:48])
                     for o in render_options(q)]
-            s0 = int(b["option_span"][0, 0])
-            pids, pmask = b["input_ids"][:, :s0], b["attention_mask"][:, :s0]
             oids, omask = tt._pad(tt.option_sequences(opts, ctx_ids, end_id), tok.pad_token_id)
             oids, omask = oids.cuda(), omask.cuda()
-            mm = torch.ones((1, k), dtype=torch.bool, device="cuda")
-            qt = torch.zeros(1, dtype=torch.long, device="cuda")
+            mm = torch.ones((B, k), dtype=torch.bool, device="cuda")
+            qt = torch.zeros(B, dtype=torch.long, device="cuda")
             row["state_tokens"] = s0
             for r, s in students.items():
                 def enc_opts():
                     return s.option_cache(s.encode_options(oids, omask))
                 row[r + "_option_encode_ms"] = timed(enc_opts)[0]
-                cache = enc_opts()[None]
+                cache = enc_opts()[None].expand(B, -1, -1)
 
                 def step():
-                    ihs = s.image_features(pv, b["pixel_attention_mask"])
+                    ihs = s.image_features(spv, spam)
                     h = s.encode_state(pids, pmask, ihs)
                     return s.score(h, pmask, qt, cache, mm)
                 row[r + "_ms"], row[r + "_p90"] = timed(step)
-                if r == list(students)[0]:
-                    ihs = s.image_features(pv, b["pixel_attention_mask"])
-                    h = s.encode_state(pids, pmask, ihs)
-                    row["score_only_" + r + "_ms"] = timed(lambda: s.score(h, pmask, qt, cache, mm))[0]
+                ihs = s.image_features(spv, spam)
+                h = s.encode_state(pids, pmask, ihs)
+                row[r + "_score_only_ms"] = timed(lambda: s.score(h, pmask, qt, cache, mm))[0]
+            if B == 1:  # the shared part: vision tower + state tower (identical cost for both students)
+                s = next(iter(students.values()))
+                row["vision_ms"] = timed(lambda: s.image_features(spv, spam))[0]
         print(json.dumps(row), flush=True)
         res["rows"].append(row)
     return res
