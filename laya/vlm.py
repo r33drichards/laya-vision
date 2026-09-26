@@ -335,6 +335,7 @@ def build_vlm_inputs(
         "raw_images": prefix.get("raw_images"),
         "n_images": prefix["n_images"],
         "truncation": truncation_report(order, full, opt_ids, n_head - len(head_ids), n_state - len(st)),
+        "state_end": off,  # where the image run + state text ends and the question begins (laya.cache)
     }
 
 
@@ -1014,6 +1015,7 @@ class VLMAgent:
         temperature: Any = None,
         calibration: Optional[Calibration] = None,
         strict_calibration: bool = False,
+        cache: Any = None,
         _raw_logits: Optional[Dict[str, np.ndarray]] = None,
         strict: bool = False,
     ) -> Dict[str, Any]:
@@ -1047,6 +1049,14 @@ class VLMAgent:
         "instructions_tokens_dropped": n, "state_tokens_dropped": n}``; the key is absent when nothing was cut.
         ``strict=True`` raises ``ValueError`` (naming the question and what would be cut) instead.
 
+        ``cache`` (a ``laya.cache.DeviceArena``; off by default) keeps image features (and, with its prefix tier,
+        the image + state prefix's key/value cache) on the device across calls, so a repeated image skips the
+        preprocessing and the vision tower (and a repeated image + state the prefill). Image-feature hits leave the
+        answers bit-identical to ``cache=None``; a prefix hit reproduces the call that stored it bit for bit and
+        differs from ``cache=None`` by float rounding, like ``prefix_cache=True``. With a prefix tier,
+        ``prefix_cache`` governs storing: ``None`` stores a prefix on its second sighting or when the call prefills
+        anyway, ``True`` always, ``False`` never. See ``laya/cache.py``.
+
         With a value head (config ``"value_head": true``) each answer carries ``"value"``, the head's P(success
         from this state) read under that question's rows, and the result a top-level ``"value"`` (mean over all
         scored rows); both keys are absent without the head.
@@ -1055,11 +1065,16 @@ class VLMAgent:
         if calibration is not None:
             calibration.check(checkpoint_identity(self), strict=strict_calibration)
         images, _ = split_state(state)
-        prefix = vlm_prefix(self.processor, images, self.prep)
+        arena = cache if cache is not None and cache.accepts(self) else None
         img_feats = None
-        if images and prefix["raw_images"] is not None:
+        if arena is not None:
+            # ids only: pixels are prepared and encoded later, and only for what the arena does not hold
+            prefix, ns, digests = arena.prefix_ids(self, images)
+        else:
+            prefix = vlm_prefix(self.processor, images, self.prep)
+        if arena is None and images and prefix["raw_images"] is not None:
             img_feats = self.model.encode_raw_images(prefix["raw_images"])
-        elif images:
+        elif arena is None and images:
             img_feats = self.model.encode_images(
                 prefix["pixel_values"].to(self.device, self._torch_dtype()), prefix["pixel_attention_mask"].to(self.device)
             )
@@ -1084,9 +1099,15 @@ class VLMAgent:
                 rows.append(it)
 
         cached, step = None, batch_size
+        store = prefix_cache
         if prefix_cache is None:
             prefix_cache = len(rows) > (batch_size if self.device.type == "cuda" else 1)
-        if prefix_cache and self.model.readout == "terminator":
+        if arena is not None:
+            cached, img_feats = arena.resolve(self, rows, len(prefix["ids"]), images, ns, digests, store,
+                                              bool(prefix_cache))
+            if cached is not None:
+                step = SUFFIX_BATCH_FACTOR * batch_size
+        elif prefix_cache and self.model.readout == "terminator":
             n = shared_prefix_len(rows, len(prefix["ids"]), self.model.option_attention == "block")
             if n:
                 cached = self.model.encode_prefix(torch.tensor([rows[0]["ids"][:n]], device=self.device), img_feats)
