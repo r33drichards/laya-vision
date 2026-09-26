@@ -21,6 +21,10 @@ bridges the two in two ways, and
     - step or turn the base
     - stay
 
+  It sees the current head frame, or with `--frames 2` / `--frames 4` its last 2 or 4 decision frames (0.1 s
+  apart, oldest first, as `{"images": [...]}`), so it can see motion. The options are short phrases ("left hand
+  up", "close right gripper", "wait"), because 21 options share a 256-token budget with the instruction.
+
   Damped least-squares inverse kinematics on the wrist site turns a wrist move into joint deltas. Each primitive is
   applied once and then held for 0.1 s (5 env steps). Random play uses the same seeded episodes and the same
   primitives. So does a privileged oracle on the reach tasks: it greedily moves the nearer wrist toward the
@@ -36,6 +40,7 @@ camera is tilted up by 30°.
 ```bash
 modal run modal_bigym.py::bigym_eval                   # all six tasks, both parts, thaitea/laya-vision (pinned)
 modal run modal_bigym.py::bigym_eval --tasks ReachTarget,DrawerTopClose --parts control --episodes 3
+modal run modal_bigym.py::bigym_eval --parts control --frames 1,2,4   # the model once per frame count
 modal run modal_bigym.py::bigym_eval --model thaitea/laya-vision --revision <sha> --probe-n 200 --episodes 20
 ```
 
@@ -68,26 +73,42 @@ checks when `mujoco` and `bigym` are installed.
 
 ## Results: thaitea/laya-vision
 
-These results are for revision `f2fe3c1`, from one run on 2026-09-26 (code `376e1c6`, MuJoCo 3.14.0, L4 bf16).
-Every probe row and every episode is in
-[`eval-results/bigym-laya-vision-f2fe3c1.json`](https://github.com/r33drichards/laya-vision/blob/main/eval-results/bigym-laya-vision-f2fe3c1.json).
-AUROC and Spearman below are recomputed from those rows by `laya.bigymgames.probe_metrics`.
+These results are for revision `f2fe3c1` (MuJoCo 3.14.0, L4 bf16).
 
-**Control** (success over 20 seeded episodes per policy; oracle and demos are the references):
+- **Control** comes from a run with code `51afb36`, with every episode in
+  [`eval-results/bigym-laya-vision-f2fe3c1-frames.json`](https://github.com/r33drichards/laya-vision/blob/main/eval-results/bigym-laya-vision-f2fe3c1-frames.json).
+- **Probe** comes from a run with code `376e1c6`, with every probe row in
+  [`eval-results/bigym-laya-vision-f2fe3c1.json`](https://github.com/r33drichards/laya-vision/blob/main/eval-results/bigym-laya-vision-f2fe3c1.json).
+  AUROC and Spearman below are recomputed from those rows by `laya.bigymgames.probe_metrics`.
+- **That first run's control numbers are superseded.** Its prompt listed the options as "NAME: description",
+  which overflowed the 256-token head budget. The options were cut to about 12 tokens, most of the instruction
+  (the task) was dropped, and "open left gripper" and "close left gripper" became identical. The probe questions
+  were not truncated, so the probe results stand. `predict` now runs with `strict=True`, and a test checks that
+  every question fits.
 
-| Task | Model | Random | Oracle | Demos (20) |
-|---|---:|---:|---:|---:|
-| ReachTarget | 0% | 35% | 100% | – |
-| ReachTargetSingle | 0% | 25% | 100% | – |
-| DrawerTopOpen | 0% | 0% | – | 100% |
-| DrawerTopClose | 0% | 0% | – | 100% |
-| WallCupboardOpen | 0% | 0% | – | 90% |
-| WallCupboardClose | 0% | 0% | – | 100% |
+**Control** (success over 20 seeded episodes per policy; the model at 1, 2 and 4 frames; oracle and demos are
+the references):
 
-- **The model solves nothing, and on the reach tasks random play beats it.** Random wanders into the target
-  sometimes; the model mostly repeats one or two primitives.
-- **Top choices:** on the reach tasks, `RIGHT_HAND_UP` about 60% and `RIGHT_GRIPPER_OPEN` about 28% of
-  decisions. On WallCupboardOpen, `STAY` 99%.
+| Task | Model, 1 frame | 2 frames | 4 frames | Random | Oracle | Demos (20) |
+|---|---:|---:|---:|---:|---:|---:|
+| ReachTarget | 0% | 0% | 0% | 35% | 100% | – |
+| ReachTargetSingle | 0% | 0% | 0% | 25% | 100% | – |
+| DrawerTopOpen | 0% | 0% | 0% | 0% | – | 100% |
+| DrawerTopClose | 100%\* | 100%\* | 100%\* | 0% | – | 100% |
+| WallCupboardOpen | 0% | 0% | 0% | 0% | – | 90% |
+| WallCupboardClose | 0% | 0% | 0% | 0% | – | 100% |
+
+\* **DrawerTopClose is not a skill.** The model chooses "step forward" on 98–100% of decisions, and the robot's
+body pushes the open drawer shut. A policy that always steps forward also succeeds on every episode, in the same
+64 decisions.
+
+- **More frames do not help.** Success is the same at 1, 2 and 4 frames on every task. The choices shift a little
+  but stay collapsed.
+- **The model mostly repeats one move per task.**
+    - Reach tasks: gripper open or close, and "wait".
+    - DrawerTopOpen and DrawerTopClose: "step forward".
+    - Wall cabinet: one gripper command, up to 100% of decisions.
+- **It never beats random on the reach tasks**, where random play reaches the target in 25–35% of episodes.
 
 **Probe** (200 frames per task; `prior` is the accuracy of always giving the most common label):
 
