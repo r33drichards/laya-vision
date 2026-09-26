@@ -207,6 +207,82 @@ in bf16 (0 difference in the tables above). With causal attention in bf16 the re
 0.001, which is bf16 kernel-selection noise: the same size as the batch-1 against batch-2 difference the feature
 cache already documents.
 
+## Implemented: a cross-call device cache (`predict(..., cache=arena)`)
+
+`predict`'s `prefix_cache` shares the image + state prefix between the rows of *one* call. An agent loop that
+asks new questions about the same image, or a game whose screen changes every few steps, repeats that work on
+every call. [`laya.cache.DeviceArena`](https://github.com/r33drichards/laya-vision/blob/main/laya/cache.py) keeps
+it on the device across calls. It follows CLM's `VectorArena`: one allocation claimed at start-up from a budget
+(`"0.02"` of the device, or `"512MiB"`), carved into fixed pools, least-recently-used eviction, and never grown.
+Keys are content hashes of the image pixels (and the prefix's token ids), namespaced by the checkpoint's identity
+(config and weight hashes), `PROMPT_FORMAT_VERSION`, the dtype and the preprocessing, so a reloaded or retrained
+model stops matching old entries.
+
+```python
+from laya.cache import DeviceArena
+
+arena = DeviceArena(agent, budget="256MiB")      # image tier only (the default)
+out = agent.predict(state, questions, cache=arena)
+arena.stats()                                    # hit rates, entries, MB used / reserved
+```
+
+Two things could be cached. Both were built and measured:
+
+| tier | what one entry holds | size (SmolVLM-256M, bf16) | a hit skips | answers vs `cache=None` |
+|---|---|---|---|---|
+| image (default) | vision tower + connector output per image | 74 KB | preprocessing, vision tower | bit-identical |
+| prefix (`prefix_share=0.875`) | KV cache + hidden states of image run + state text, in 32-token pages | ~24 KB/token, ~2.3 MB typical | also the prefill | float rounding (as `prefix_cache=True`) |
+
+The prefix tier hits only when the image *and* the state text repeat. The image tier also hits when the state text
+changes (a score, a step counter). It also works with the `"mask"` readout. A prefix is stored on its second
+sighting, or at once when the call prefills anyway, so a prefix that never repeats costs no extra pass.
+
+`modal run modal_app.py::bench_arena` (L4, bf16, `cauldron-score-2ep-bidir-full/best`, `block` attention,
+processor preprocessing) runs four workloads. `agent` is 8 aokvqa photos, each asked 8 sequential sets of 1-3
+questions and then its first set again. `agent_perm4` is the same with `n_permutations=4`. `game` is 160 Atari-sized
+frames where the ball moves every 4 steps and the score is the state text. `game_step_text` is the same with a
+step counter as the state text. p50 / p90 in ms per `predict` call:
+
+| workload | no arena | `prefix_cache=True`, no arena | image tier | image + prefix tier | image + prefix, store at once |
+|---|---|---|---|---|---|
+| agent (hit rate 89%) | 50.4 / 53.9 | 79.2 / 85.4 | **36.9 / 53.3** | 39.3 / 65.3 | 37.4 / 76.7 |
+| agent_perm4 | 50.7 / 80.1 | 81.0 / 170.9 | **39.3 / 71.6** | 43.9 / 67.8 | 44.0 / 85.4 |
+| game (hit rate 75%) | 57.8 / 58.8 | 87.0 / 90.3 | **34.9 / 62.2** | 53.0 / 63.8 | 36.4 / 89.8 |
+| game_step_text | 58.0 / 59.7 | 87.2 / 90.5 | **35.0 / 62.1** | 34.8 / 61.7 (prefix never hits) | 65.3 / 92.3 |
+
+Largest probability change against no arena: 0 with the image tier (every call bit-identical). With the prefix
+tier it is 0.033-0.07, which is what the prefixed path's bf16 rounding costs anyway: `prefix_cache=True` without
+an arena moves probabilities by 0.02-0.05. Memory used: 0.6 MB (8 images) or 3 MB (40 frames) in the image tier,
+against 18.6 MB and 93 MB in the prefix tier. The run reserved a 473 MB arena (2% of the L4). Latency varies
+between containers, since the eager path runs at the host CPU's speed; a first run of the same job measured 80
+and 89 ms p50 without an arena, 54 and 52 ms with the image tier. The p90s equal the uncached ones because the
+misses are uncached calls.
+
+On a GPU the prefix tier buys nothing over the image tier. A suffix pass on a cached prefix costs what the full
+pass costs (launch-bound, as in the tables above), so the prefix tier is off by default. On a CPU the prefill is
+compute-bound, and there it pays. `modal run modal_app.py::bench_arena_cpu` (8 cores, fp32, smaller workload)
+measured p50 in ms:
+
+| workload | no arena | image tier | image + prefix tier | image + prefix, store at once |
+|---|---|---|---|---|
+| agent | 566 | 185 | **99** | 107 |
+| agent_perm4 | 585 | 288 | 235 | **228** |
+| game | 445 | 111 | 124 | **82** |
+| game_step_text | 425 | 107 | 97 | 157 (prefix never hits) |
+
+In fp32 every mode stays within 1e-4 of no arena. Raw reports:
+[docs/arena-bench-l4-bf16.json](https://github.com/r33drichards/laya-vision/blob/main/docs/arena-bench-l4-bf16.json),
+[docs/arena-bench-cpu-fp32.json](https://github.com/r33drichards/laya-vision/blob/main/docs/arena-bench-cpu-fp32.json).
+[`tests/test_cache.py`](https://github.com/r33drichards/laya-vision/blob/main/tests/test_cache.py) checks parity
+(bit-identical image tier, bit-identical prefix hits, both against the uncached path), `n_permutations` and
+suffix-batch splits sharing one entry, admission, invalidation on a weight change, and eviction within a fixed
+allocation.
+
+Limits: the image tier needs one view per image (no `image_split_edge`); with splitting only the prefix tier
+applies. The hashes are exact, so a frame that differs by one pixel is a miss. A prefix whose state text is
+truncated differently for a different question set (a state near `max_len`) is a different entry. The arena is
+tied to one device, dtype and shape; `predict` ignores an arena built for another agent.
+
 ## Recommendation
 
 1. Do not build a question-first layout (a). Its ceiling is 5-10% on CPU and 5-18% of the FLOPs in a large

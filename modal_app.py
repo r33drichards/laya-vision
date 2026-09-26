@@ -23,6 +23,8 @@
     modal run --detach modal_app.py::split_bench      # SmolVLM2, image splitting off vs 1024 vs 2048 on a 6-set subset:
                                                      # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
     modal run modal_app.py::bench_prefix_cache       # predict latency, prefix cache off vs on, L4 bf16
+    modal run modal_app.py::bench_arena              # cross-call laya.cache.DeviceArena vs none: agent + game loops,
+                                                     # p50/p90, hit rates, memory, parity; L4 bf16 (+ test_cache.py)
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
@@ -1158,6 +1160,199 @@ def bench_prefix_cache(run_name: str = "cauldron-score-2ep-bidir-full/best", dty
             rows.append(r)
     return {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype,
             "option_attention": agent.model.option_attention, "rows": rows}
+
+
+ARENA_QUESTIONS = {
+    "kind": {"type": "choice", "instructions": "What is the main subject of the photo?",
+             "criteria": ["a person", "an animal", "a vehicle", "food", "a building", "something else"]},
+    "indoor": {"type": "noul", "instructions": "Was the photo taken indoors?"},
+    "people": {"type": "score", "instructions": "How many people are visible?",
+               "criteria": ["none", "one", "two or three", "four or more"]},
+    "quality": {"type": "score", "instructions": "How sharp and well exposed is the photo?",
+                "criteria": ["unusable", "poor", "fine", "excellent"]},
+    "text": {"type": "noul", "instructions": "Is there any readable text in the photo?"},
+    "time": {"type": "choice", "instructions": "What time of day does it look like?",
+             "criteria": ["morning", "midday", "evening", "night", "cannot tell"]},
+    "safe": {"type": "noul", "instructions": "Is anyone in the photo in danger?"},
+    "colour": {"type": "choice", "instructions": "What is the dominant colour?",
+               "criteria": ["red", "green", "blue", "yellow", "white", "black", "other"]},
+    "crowd": {"type": "noul", "instructions": "Is the scene crowded?"},
+    "weather": {"type": "choice", "instructions": "What is the weather like?",
+                "criteria": ["sunny", "cloudy", "rainy", "snowy", "indoors / cannot tell"]},
+    "motion": {"type": "noul", "instructions": "Is something in the photo moving fast?"},
+    "clutter": {"type": "score", "instructions": "How cluttered is the scene?",
+                "criteria": ["empty", "sparse", "busy", "packed"]},
+}
+GAME_QUESTION = {"move": {"type": "choice", "instructions": "Which move gets the ball past the paddle?",
+                          "criteria": ["NOOP", "FIRE", "UP", "DOWN"]}}
+
+
+@app.function(image=image, gpu="L4", timeout=30 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def bench_arena(run_name: str = "cauldron-score-2ep-bidir-full/best", dtype: str = "bf16", budget: str = "0.02",
+                scenes: int = 8, calls: int = 8, steps: int = 160, hold: int = 4, seed: int = 0,
+                tests: bool = True, device: str = "cuda"):
+    """``predict`` with a cross-call ``laya.cache.DeviceArena`` against without, on two agent loops, L4 bf16.
+
+    * ``agent``: ``scenes`` photos (aokvqa val, else synthetic), each asked ``calls`` sequential question sets of
+      1-3 questions (drawn from ``ARENA_QUESTIONS``) about the same image + state text, at ``n_permutations`` 1 and 4.
+    * ``game``: ``steps`` Atari-sized frames of a moving ball that moves every ``hold`` steps, one fixed move
+      question per step; the state text is the score (changes when the frame does, ``game``) or the step counter
+      (changes every step, ``game_step_text``: only the image tier can hit).
+
+    Modes: ``off`` (no arena, as released), ``off_prefill`` (no arena, ``prefix_cache=True``: the in-call prefix
+    cache, the parity baseline for the prefix paths), ``image`` (an image-tier-only arena), ``auto`` (full arena,
+    default admission: a prefix is stored on its second sighting, or at once when the call prefills anyway) and
+    ``eager`` (full arena, ``prefix_cache=True``: stored on first sight). Each mode gets a fresh arena and the same call sequence. Per workload and mode: p50/p90
+    latency, the tiers' hit rates, arena memory, and the largest probability gap to ``off`` call by call. ``repeat``
+    re-asks each scene's first question set at the end and checks it against the first answer bit for bit.
+    ``tests`` first runs tests/test_cache.py on the GPU (fp32). ``bench_arena_cpu`` runs the same on a CPU
+    container (``device="cpu"``). Nothing is written."""
+    import random
+
+    if tests:
+        rc = subprocess.run([sys.executable, "-m", "pytest", "/root/tests/test_cache.py", "-q", "-p", "no:cacheprovider",
+                             "-W", "ignore"], cwd="/root").returncode
+        print("TESTS_RC", rc)
+
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from laya.cache import DeviceArena
+    from laya.vlm import VLMAgent
+
+    agent = VLMAgent(_ckpt_path(run_name), device=device, dtype=dtype)
+    cuda = device == "cuda"
+    sync = torch.cuda.synchronize if cuda else (lambda: None)
+    rng = random.Random(seed)
+    photos = []
+    if os.path.exists("/data/vqa/cauldron_aokvqa/_READY"):
+        exs = [ex for ex in _load_split("cauldron_aokvqa", "val", 400)
+               if isinstance(ex["state"], dict) and ex["state"].get("image")]
+        for ex in rng.sample(exs, min(scenes + 2, len(exs))):
+            with Image.open(ex["state"]["image"]) as im:
+                photos.append(im.convert("RGB"))
+    while len(photos) < scenes + 2:
+        img = Image.new("RGB", (640, 480), tuple(rng.randrange(256) for _ in range(3)))
+        img.paste(Image.new("RGB", (200, 160), tuple(rng.randrange(256) for _ in range(3))), (120, 100))
+        photos.append(img)
+    warm_photos, photos = photos[:2], photos[2:scenes + 2]
+    qids = list(ARENA_QUESTIONS)
+
+    def agent_calls(imgs, perms):
+        seq = []
+        for i, img in enumerate(imgs):
+            state = {"image": img, "context": "Photo %d from the field team's upload queue; reviewer notes pending." % i}
+            sets = [rng.sample(qids, rng.randint(1, 3)) for _ in range(calls)]
+            for s in sets:
+                seq.append((state, {q: ARENA_QUESTIONS[q] for q in s}, perms, "loop"))
+            seq.append((state, {q: ARENA_QUESTIONS[q] for q in sets[0]}, perms, "repeat"))
+        return seq
+
+    def frame(t):
+        f = np.zeros((210, 160, 3), np.uint8)
+        f[:, :, 2] = 40
+        f[190:194, 60:100] = (200, 200, 200)                     # paddle
+        x, y = 20 + (t * 7) % 120, 30 + (t * 11) % 150           # ball
+        f[y:y + 6, x:x + 6] = (240, 90, 40)
+        f[5:12, 5:5 + 4 * (t % 30)] = (255, 255, 0)              # score bar
+        return f
+
+    def game_calls(step_text, n, start=0):
+        seq = []
+        for s in range(start, start + n):
+            t = s // hold
+            text = {"step": s} if step_text else {"score": t}
+            seq.append(({"image": frame(t), **text}, GAME_QUESTION, 1, "loop"))
+        return seq
+
+    workloads = {"agent": agent_calls(photos, 1), "agent_perm4": agent_calls(photos, 4),
+                 "game": game_calls(False, steps), "game_step_text": game_calls(True, steps)}
+    warm = (agent_calls(warm_photos, 1) + agent_calls(warm_photos, 4) + game_calls(False, 16, 10**4) if cuda
+            else agent_calls(warm_photos[:1], 1)[:2] + game_calls(False, 2, 10**4))
+
+    def probs(res):
+        out = []
+        for qid, a in sorted(res["answers"].items()):
+            out += list(a["probabilities"].values()) if "probabilities" in a else [a["noul"]]
+            out.append(a["action"]["act_probability"])
+        return np.array(out)
+
+    def run(seq, mode):
+        arena = None
+        if mode in ("image", "auto", "eager"):
+            arena = DeviceArena(agent, budget=budget, prefix_share=0.0 if mode == "image" else 0.875)
+        pc = {"off": None, "off_prefill": True, "image": None, "auto": None, "eager": True}[mode]
+        ms, outs = [], []
+        for state, qs, perms, _ in seq:
+            sync()
+            t0 = time.perf_counter()
+            res = agent.predict(state, qs, n_permutations=perms, prefix_cache=pc, cache=arena)
+            sync()
+            ms.append((time.perf_counter() - t0) * 1000)
+            outs.append(res)
+        return ms, outs, arena
+
+    modes = ("off", "off_prefill", "image", "auto", "eager")
+    for mode in modes:   # kernels, allocator, tokenizer caches
+        run(warm, mode)
+    if cuda:
+        torch.cuda.reset_peak_memory_stats()
+    base_alloc = torch.cuda.memory_allocated() if cuda else 0
+    report = {"run": run_name, "gpu": torch.cuda.get_device_name(0) if cuda else "cpu x%d" % torch.get_num_threads(),
+              "dtype": dtype, "budget": budget,
+              "option_attention": agent.model.option_attention, "preprocess": agent.prep.backend,
+              "model_mb": round(base_alloc / 1e6, 1), "workloads": {}}
+    for name, seq in workloads.items():
+        ref_ms, ref_outs, _ = run(seq, "off")
+        rows = {}
+        for mode in modes:
+            ms, outs, arena = (ref_ms, ref_outs, None) if mode == "off" else run(seq, mode)
+            gaps = [float(np.abs(probs(a) - probs(b)).max()) for a, b in zip(outs, ref_outs)]
+            top = lambda a: (max(a["probabilities"], key=a["probabilities"].get) if "probabilities" in a  # noqa: E731
+                             else a["noul"] > 0.5)
+            same_answer = sum(all(top(a["answers"][q]) == top(b["answers"][q]) for q in a["answers"])
+                              for a, b in zip(outs, ref_outs))
+            first, exact = {}, []
+            for (state, qs, perms, tag), res in zip(seq, outs):
+                key = (id(state), tuple(qs))
+                if tag == "repeat":
+                    exact.append(bool(np.array_equal(probs(res), probs(first[key]))))
+                else:
+                    first.setdefault(key, res)
+            r = {"n_calls": len(seq), "p50_ms": round(float(np.percentile(ms, 50)), 2),
+                 "p90_ms": round(float(np.percentile(ms, 90)), 2), "mean_ms": round(float(np.mean(ms)), 2),
+                 "max_prob_gap_vs_off": round(max(gaps), 5), "identical_to_off": sum(g == 0 for g in gaps),
+                 "same_top_answer_as_off": same_answer}
+            if exact:
+                r["repeat_bit_identical"] = "%d/%d" % (sum(exact), len(exact))
+            if arena is not None:
+                st = arena.stats()
+                r["arena_reserved_mb"] = st["reserved_mb"]
+                for tier in ("prefix", "image"):
+                    if tier in st:
+                        r[tier] = {k: st[tier][k] for k in ("hit_rate", "hits", "misses", "entries", "used_mb",
+                                                              "evictions")}
+                del arena
+                if cuda:
+                    torch.cuda.empty_cache()
+            rows[mode] = r
+            print(json.dumps({"workload": name, "mode": mode, **r}))
+        report["workloads"][name] = rows
+    report["peak_allocated_mb"] = round(torch.cuda.max_memory_allocated() / 1e6, 1) if cuda else None
+    print("ARENA_REPORT " + json.dumps(report))
+    return report
+
+
+@app.function(image=image, cpu=8, memory=16384, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def bench_arena_cpu(run_name: str = "cauldron-score-2ep-bidir-full/best", scenes: int = 3, calls: int = 4,
+                    steps: int = 24, hold: int = 4):
+    """``bench_arena`` on an 8-core CPU container in fp32 (no GPU), with a smaller workload: where the prefill is
+    compute-bound, which is where the prefix tier can pay."""
+    return bench_arena.local(run_name=run_name, dtype="fp32", budget="1GiB", scenes=scenes, calls=calls, steps=steps,
+                             hold=hold, tests=False, device="cpu")
 
 
 SPLIT_BENCH_DATASETS = ("cauldron_ai2d", "cauldron_aokvqa", "cauldron_tqa", "cauldron_ocrvqa", "cauldron_mapqa",
