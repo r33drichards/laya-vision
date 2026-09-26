@@ -1,0 +1,50 @@
+{
+ "model": "thaitea/laya-vision",
+ "revision": "f2fe3c12cb6d04c59d8a190250bf3fb40fc828dc",
+ "n": 200,
+ "torch": "2.14.0+cu130",
+ "position": [
+  {
+   "n": 200,
+   "acc": 0.595,
+   "p_correct": 0.4987555,
+   "position_offset": 0,
+   "agree_with_no_offset": 1.0
+  },
+  {
+   "n": 200,
+   "acc": 0.585,
+   "p_correct": 0.49878900000000004,
+   "position_offset": 1000,
+   "agree_with_no_offset": 0.985
+  },
+  {
+   "n": 200,
+   "acc": 0.59,
+   "p_correct": 0.4981295,
+   "position_offset": 2000,
+   "agree_with_no_offset": 0.995
+  },
+  {
+   "n": 200,
+   "acc": 0.59,
+   "p_correct": 0.4989525,
+   "position_offset": 4000,
+   "agree_with_no_offset": 0.995
+  },
+  {
+   "n": 200,
+   "acc": 0.6,
+   "p_correct": 0.4985995,
+   "position_offset": 7000,
+   "agree_with_no_offset": 0.97
+  },
+  {
+   "n": 200,
+   "acc": 0.585,
+   "p_correct": 0.49796850000000004,
+   "position_offset": 12000,
+   "agree_with_no_offset": 0.985
+  }
+ ]
+}
