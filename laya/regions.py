@@ -233,28 +233,30 @@ def detect(detector: Callable, image) -> List[Region]:
 # ---------------------------------------------------------------------------------------------------------
 
 
-def draw_marks(image, regions: Sequence[Region], numbers: Sequence[int], width: Optional[int] = None):
-    """A copy of ``image`` with each region outlined and tagged with its number (Set-of-Mark style)."""
+def draw_marks(image, regions: Sequence[Region], numbers: Sequence[int], width: Optional[int] = None,
+               font_size: Optional[int] = None, color: Optional[Tuple[int, int, int]] = None):
+    """A copy of ``image`` with each region outlined and tagged with its number (Set-of-Mark style). Marks cycle
+    through a palette unless ``color`` fixes one; the tag's text is ``font_size`` px (default 1/30 of the short side)."""
     from PIL import ImageDraw, ImageFont
 
     img = _pil(image).copy()
     w, h = img.size
     lw = width or max(2, min(w, h) // 200)
-    size = max(12, min(w, h) // 30)
+    size = font_size or max(12, min(w, h) // 30)
     try:
         font = ImageFont.load_default(size=size)
     except TypeError:  # Pillow < 10.1: fixed-size bitmap font
         font = ImageFont.load_default()
     draw = ImageDraw.Draw(img)
     for r, n in zip(regions, numbers):
-        color = _PALETTE[(n - 1) % len(_PALETTE)]
+        c = color or _PALETTE[(n - 1) % len(_PALETTE)]
         x0, y0, x1, y1 = r.box
-        draw.rectangle([x0, y0, x1, y1], outline=color, width=lw)
+        draw.rectangle([x0, y0, x1, y1], outline=c, width=lw)
         tag = str(n)
         tx0, ty0, tx1, ty1 = draw.textbbox((0, 0), tag, font=font)
         tw, th = tx1 - tx0 + 2 * lw, ty1 - ty0 + 2 * lw
         ax, ay = max(0, min(x0, w - tw)), max(0, min(y0, h - th))
-        draw.rectangle([ax, ay, ax + tw, ay + th], fill=color)
+        draw.rectangle([ax, ay, ax + tw, ay + th], fill=c)
         draw.text((ax + lw - tx0, ay + lw - ty0), tag, fill=(255, 255, 255), font=font)
     return img
 
