@@ -1,10 +1,10 @@
 """Ask Laya Vision to draw a circle in JSPaint with the mouse only, and score it.
 
 Each step a screenshot of the JSPaint canvas (with the cursor marked on it) goes into the model as the image, and a
-`choice` question over mouse actions (eight moves, pen down, pen up, done) picks the next move, which is sent to the
-real app as pointer events. At the end the circle verifier scores the true canvas pixels. The scripted expert and
-a random policy play the same seeds as reference points, and the model's score is also reported normalized,
-(model - random) / (expert - random), as in the games suite.
+`choice` question over mouse actions (an 8 px move toward each of 16 compass directions, pen down, pen up, done)
+picks the next move, which is sent to the real app as pointer events. At the end the circle verifier scores the
+true canvas pixels. The scripted expert and a random policy play the same seeds as reference points, and the
+model's score is also reported normalized, (model - random) / (expert - random), as in the games suite.
 
     pip install -e . playwright pillow
     git clone https://github.com/r33drichards/jspaint ../jspaint
@@ -31,8 +31,9 @@ def main():
     ap.add_argument("--policies", default="model,expert,random", help="comma list of model, expert, random")
     ap.add_argument("--episodes", type=int, default=5)
     ap.add_argument("--seed", type=int, default=900_000)
-    ap.add_argument("--max-steps", type=int, default=80)
-    ap.add_argument("--step-px", type=int, default=24)
+    ap.add_argument("--max-steps", type=int, default=200)
+    ap.add_argument("--step-px", type=int, default=8)
+    ap.add_argument("--directions", type=int, default=16, choices=(8, 16))
     ap.add_argument("--model", default="thaitea/laya-vision")
     ap.add_argument("--revision", default=None, help="pin the Hub revision of --model")
     ap.add_argument("--device", default=None)
@@ -47,7 +48,8 @@ def main():
     summary = {"task": "circle", "jspaint": os.path.abspath(args.jspaint), "args": vars(args), "policies": {}}
 
     with JSPaintServer(args.jspaint) as server, JSPaintEnv(server.url, max_steps=args.max_steps,
-                                                           step_px=args.step_px, headless=not args.headed,
+                                                           step_px=args.step_px, directions=args.directions,
+                                                           headless=not args.headed,
                                                            executable_path=args.chromium, keep_frames=True) as env:
         for name in names:
             if name == "model":

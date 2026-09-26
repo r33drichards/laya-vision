@@ -8,8 +8,10 @@ The steps:
    the centre ``(cx, cy)`` and radius ``r``.
 3. **Components**, each in [0, 1]:
 
-   * ``fit``: how tightly the ink hugs the fitted circle, ``1 - rms(|d - r|) / (fit_tol * r)``, where ``d`` is each
-     ink pixel's distance from the centre;
+   * ``roundness``: how constant the radius is around the ring, ``1 - std(r_k) / (round_tol * r)``, where ``r_k`` is
+     the mean distance from the centre of the ring ink in angular sector ``k``. Averaging within a sector cancels the
+     stroke width, so this measures the shape itself: a clean ring scores ~1, a 16-sided walk ~0.9, an octagon ~0.5,
+     a square or a 4:3 ellipse 0;
    * ``coverage``: the fraction of ``bins`` equal angular sectors around the centre that hold ink on the ring, so an
      arc or a C-shape loses the missing sectors;
    * ``clean``: the fraction of ink on the ring band (within ``band * r`` of it), so scribbles, fills and stray
@@ -19,12 +21,12 @@ The steps:
    * ``size``: 1 when ``r`` is between ``min_radius`` and ``max_radius`` of the shorter canvas side and the centre is
      on the canvas, else 0 (a dot or a straight line fits a tiny or enormous "circle").
 
-4. ``score = size * fit * coverage * clean * closure``. ``passed`` needs ``score >= pass_score`` and no angular gap
-   wider than ``max_gap_deg`` (the circle is closed).
+4. ``score = size * roundness * coverage * clean * closure``. ``passed`` needs ``score >= pass_score`` and no
+   angular gap wider than ``max_gap_deg`` (the circle is closed).
 
-The tolerances are loose enough that a circle walked with only eight fixed-length moves (a rough polygon, which is
-what the environment's action set can draw) still passes, and tight enough that lines, arcs, squares, filled discs,
-dots and scribbles fail; ``tests/test_circle_verifier.py`` pins both sides.
+The tolerances pass a circle walked with the environment's 16 fine moves and fail an octagon, lines, arcs, squares,
+ellipses, filled discs, dots and scribbles; ``tests/test_circle_verifier.py`` pins both sides. ``rms`` (the RMS
+distance of all ink from the fitted circle, over ``r``) is reported alongside for diagnosis.
 """
 from typing import Dict, Sequence
 
@@ -63,15 +65,15 @@ def _max_gap_deg(occupied: np.ndarray) -> float:
 
 
 def score_circle(pixels, bg: Sequence[int] = (255, 255, 255), ink_threshold: int = 60, min_ink: int = 30,
-                 fit_tol: float = 0.2, band: float = 0.2, bins: int = 36, min_radius: float = 0.08,
-                 max_radius: float = 0.5, max_gap_deg: float = 30.0, pass_score: float = 0.6) -> Dict:
+                 round_tol: float = 0.05, band: float = 0.2, bins: int = 36, min_radius: float = 0.08,
+                 max_radius: float = 0.5, max_gap_deg: float = 30.0, pass_score: float = 0.7) -> Dict:
     """Score an ``(h, w, 3)`` canvas for one drawn circle. Returns ``score`` in [0, 1], ``passed``, every component,
     and the fitted ``cx, cy, r`` (see the module docstring)."""
     mask = ink_mask(pixels, bg, ink_threshold)
     h, w = mask.shape
     ys, xs = np.nonzero(mask)
-    out = {"score": 0.0, "passed": False, "ink": int(len(xs)), "fit": 0.0, "coverage": 0.0, "clean": 0.0,
-           "closure": 0.0, "size": 0.0, "max_gap_deg": 360.0, "cx": None, "cy": None, "r": None}
+    out = {"score": 0.0, "passed": False, "ink": int(len(xs)), "roundness": 0.0, "rms": None, "coverage": 0.0,
+           "clean": 0.0, "closure": 0.0, "size": 0.0, "max_gap_deg": 360.0, "cx": None, "cy": None, "r": None}
     if len(xs) < min_ink:
         return out
     cx, cy, r = fit_circle(xs, ys)
@@ -82,19 +84,22 @@ def score_circle(pixels, bg: Sequence[int] = (255, 255, 255), ink_threshold: int
         return out
     d = np.hypot(xs - cx, ys - cy)
     dev = np.abs(d - r)
-    fit = float(np.clip(1.0 - np.sqrt(np.mean(dev ** 2)) / (fit_tol * r), 0.0, 1.0))
     on_ring = dev <= max(band * r, 3.0)
     clean = float(on_ring.mean())
     ang = np.arctan2(ys[on_ring] - cy, xs[on_ring] - cx)
     idx = ((ang + np.pi) / (2 * np.pi) * bins).astype(int) % bins
     occupied = np.zeros(bins, dtype=bool)
     occupied[idx] = True
+    counts = np.bincount(idx, minlength=bins)[occupied]
+    radii = np.bincount(idx, weights=d[on_ring], minlength=bins)[occupied] / counts
+    roundness = float(np.clip(1.0 - np.std(radii) / (round_tol * r), 0.0, 1.0))
     coverage = float(occupied.mean())
     gap = _max_gap_deg(occupied)
     closure = float(np.clip(1.0 - (gap - max_gap_deg) / 90.0, 0.0, 1.0))
-    score = float(size_ok) * fit * coverage * clean * closure
-    out.update(score=round(score, 4), fit=round(fit, 4), coverage=round(coverage, 4), clean=round(clean, 4),
-               closure=round(closure, 4), size=float(size_ok), max_gap_deg=round(gap, 1),
+    score = float(size_ok) * roundness * coverage * clean * closure
+    rms = float(np.sqrt(np.mean(dev ** 2)) / r)
+    out.update(score=round(score, 4), roundness=round(roundness, 4), rms=round(rms, 4), coverage=round(coverage, 4),
+               clean=round(clean, 4), closure=round(closure, 4), size=float(size_ok), max_gap_deg=round(gap, 1),
                passed=bool(score >= pass_score and gap <= max_gap_deg))
     return out
 

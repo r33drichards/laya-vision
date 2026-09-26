@@ -1,5 +1,5 @@
-"""The circle verifier passes circles (including the rough polygon the eight-move action set draws) and fails the
-shapes a policy might draw instead."""
+"""The circle verifier passes round circles (including the 16-sided walk the environment's fine moves draw) and fails
+the shapes a policy might draw instead, including an octagon (what coarse eight-direction moves draw)."""
 import math
 import random
 
@@ -33,13 +33,14 @@ def test_fit_circle_recovers_centre_and_radius():
 
 @pytest.mark.parametrize("name,draw", [
     ("ring", lambda d: d.ellipse([230, 80, 450, 300], outline="black", width=4)),
-    ("octagon", lambda d: d.line(polygon(8), fill="black", width=4)),
+    ("16-gon", lambda d: d.line(polygon(16), fill="black", width=4)),
+    ("small ring", lambda d: d.ellipse([305, 155, 375, 225], outline="black", width=4)),
     ("coloured ring", lambda d: d.ellipse([100, 50, 300, 250], outline=(200, 0, 0), width=6)),
 ])
 def test_circles_pass(name, draw):
     s = score_circle(canvas(draw))
     assert s["passed"], (name, s)
-    assert s["score"] >= 0.8 and s["coverage"] == 1.0
+    assert s["score"] >= 0.85 and s["coverage"] == 1.0
 
 
 @pytest.mark.parametrize("name,draw", [
@@ -49,6 +50,7 @@ def test_circles_pass(name, draw):
     ("tiny ring", lambda d: d.ellipse([300, 150, 330, 180], outline="black", width=4)),
     ("half arc", lambda d: d.arc([230, 80, 450, 300], 0, 180, fill="black", width=4)),
     ("three-quarter arc", lambda d: d.arc([230, 80, 450, 300], 0, 270, fill="black", width=4)),
+    ("octagon", lambda d: d.line(polygon(8), fill="black", width=4)),
     ("square", lambda d: d.rectangle([230, 80, 450, 300], outline="black", width=4)),
     ("flat ellipse", lambda d: d.ellipse([140, 120, 540, 270], outline="black", width=4)),
     ("filled disc", lambda d: d.ellipse([230, 80, 450, 300], fill="black")),
@@ -58,7 +60,7 @@ def test_circles_pass(name, draw):
 def test_non_circles_fail(name, draw):
     s = score_circle(canvas(draw))
     assert not s["passed"], (name, s)
-    assert s["score"] < 0.6
+    assert s["score"] < 0.7
 
 
 def test_random_scribbles_fail():

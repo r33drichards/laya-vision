@@ -77,27 +77,33 @@ def snake_question() -> Dict:
     }}
 
 
-PAINT_ACTIONS = {
-    "UP": "move the cursor up", "DOWN": "move the cursor down", "LEFT": "move the cursor left",
-    "RIGHT": "move the cursor right", "UP_LEFT": "move the cursor diagonally up and to the left",
-    "UP_RIGHT": "move the cursor diagonally up and to the right",
-    "DOWN_LEFT": "move the cursor diagonally down and to the left",
-    "DOWN_RIGHT": "move the cursor diagonally down and to the right",
+PAINT_DIRECTIONS = {
+    "N": "straight up", "NNE": "up and slightly right", "NE": "diagonally up and right",
+    "ENE": "right and slightly up", "E": "straight right", "ESE": "right and slightly down",
+    "SE": "diagonally down and right", "SSE": "down and slightly right", "S": "straight down",
+    "SSW": "down and slightly left", "SW": "diagonally down and left", "WSW": "left and slightly down",
+    "W": "straight left", "WNW": "left and slightly up", "NW": "diagonally up and left", "NNW": "up and slightly left",
+}
+PAINT_PEN = {
     "PEN_DOWN": "press the mouse button to start drawing", "PEN_UP": "release the mouse button to stop drawing",
     "DONE": "the drawing is finished",
 }
 PAINT_GOALS = {"circle": "draw one round, closed circle, about as big as a third of the canvas height"}
 
 
-def paint_question(task: str = "circle") -> Dict:
-    """The question for ``laya.paintenv.JSPaintEnv``: a paint canvas, a red cursor, and mouse-only actions."""
+def paint_question(task: str = "circle", directions: int = 16, step_px: int = 8) -> Dict:
+    """The question for ``laya.paintenv.JSPaintEnv``: a paint canvas, a red cursor, and mouse-only actions (a
+    ``step_px`` move toward each of ``directions`` compass points, then pen down / pen up / done)."""
+    from laya.paintenv import compass_moves
+
+    moves = {m: "move the cursor %d pixels %s" % (step_px, PAINT_DIRECTIONS[m]) for m in compass_moves(directions)}
     return {"action": {
         "type": "choice",
         "instructions": "You are using a paint program with only the mouse. The white area is the canvas and the "
                         "red mark is the mouse cursor: a hollow ring with a cross means the button is up, a filled "
                         "dot means it is held down and moving draws a black line. Your task: %s. Which mouse action "
                         "should you take now?" % PAINT_GOALS[task],
-        "criteria": dict(PAINT_ACTIONS),
+        "criteria": {**moves, **PAINT_PEN},
     }}
 
 

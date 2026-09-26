@@ -8,8 +8,10 @@ Playwright; ``JSPaintServer`` serves a local checkout as static files. Each epis
 * **observation** is a screenshot of the canvas with the cursor drawn on it (headless screenshots have no OS cursor):
   a red ring when the pen is up, a filled red dot when it is down. ``note()`` carries the pen state and step count
   as text;
-* **actions** are mouse-only. ``ACTIONS`` is the discrete set the image model chooses from (eight ``step_px`` moves,
-  ``PEN_DOWN``, ``PEN_UP``, ``DONE``); each maps onto the tool API ``move_mouse(dx, dy)`` / ``mouse_down()`` /
+* **actions** are mouse-only. ``env.actions`` is the discrete set the image model chooses from: a ``step_px`` move
+  toward each of ``directions`` compass points (16 by default: ``N``, ``NNE``, ``NE``, ... every 22.5 degrees, 8 px,
+  fine enough to walk a round circle; 8 gives the coarse ``N NE E ...`` set), plus ``PEN_DOWN``, ``PEN_UP`` and
+  ``DONE``. Each maps onto the tool API ``move_mouse(dx, dy)`` / ``mouse_down()`` /
   ``mouse_up()``, which sends real pointer events to the page. ``TOOLS`` describes that API as JSON-schema tools, so
   a tool-calling agent can drive the same environment with ``call_tool``;
 * **reward** is the task verifier on the true canvas pixels (``canvas_pixels()``, read from the page, so the cursor
@@ -17,7 +19,7 @@ Playwright; ``JSPaintServer`` serves a local checkout as static files. Each epis
   the episode, or as the per-step change in score with ``reward="shaped"``. An episode ends on ``DONE`` or after
   ``max_steps``.
 
-``circle_expert`` (a scripted policy that walks a circle with the same eight moves), ``random_policy`` and
+``circle_expert`` (a scripted policy that walks a circle with the same moves), ``random_policy`` and
 ``model_policy`` (``VLMAgent.predict`` on the screenshot) are the reference points; ``play_episodes`` runs any of
 them. ``examples/jspaint_circle.py`` is the command-line runner.
 
@@ -37,11 +39,21 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-MOVES = {
-    "UP": (0, -1), "DOWN": (0, 1), "LEFT": (-1, 0), "RIGHT": (1, 0),
-    "UP_LEFT": (-1, -1), "UP_RIGHT": (1, -1), "DOWN_LEFT": (-1, 1), "DOWN_RIGHT": (1, 1),
-}
-ACTIONS = tuple(MOVES) + ("PEN_DOWN", "PEN_UP", "DONE")
+COMPASS = ("N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW")
+PEN_ACTIONS = ("PEN_DOWN", "PEN_UP", "DONE")
+
+
+def compass_moves(directions: int = 16) -> Dict[str, Tuple[float, float]]:
+    """``{name: (ux, uy)}`` unit vectors (screen y points down) for 8 or 16 compass directions, clockwise from ``N``."""
+    if directions not in (8, 16):
+        raise ValueError("directions must be 8 or 16")
+    every = 16 // directions
+    return {COMPASS[i]: (round(math.sin(math.radians(22.5 * i)), 6), round(-math.cos(math.radians(22.5 * i)), 6))
+            for i in range(0, 16, every)}
+
+
+MOVES = compass_moves(16)
+ACTIONS = tuple(MOVES) + PEN_ACTIONS
 TASKS = {"circle": "Draw a circle on the canvas."}
 
 TOOLS = [
@@ -93,9 +105,9 @@ class JSPaintServer:
 
 
 class JSPaintEnv:
-    """One headless JSPaint page; ``reset`` starts an episode and ``step(action)`` plays one of ``ACTIONS``."""
+    """One headless JSPaint page; ``reset`` starts an episode and ``step(action)`` plays one of ``env.actions``."""
 
-    def __init__(self, url: str, task: str = "circle", step_px: int = 24, max_steps: int = 80,
+    def __init__(self, url: str, task: str = "circle", step_px: int = 8, directions: int = 16, max_steps: int = 200,
                  reward: str = "terminal", headless: bool = True, executable_path: Optional[str] = None,
                  viewport: Tuple[int, int] = (800, 600), keep_frames: bool = False):
         if task not in TASKS:
@@ -105,7 +117,9 @@ class JSPaintEnv:
         from playwright.sync_api import sync_playwright
 
         self.url, self.task, self.step_px, self.max_steps, self.reward_mode = url, task, step_px, max_steps, reward
-        self.keep_frames = keep_frames
+        self.keep_frames, self.directions = keep_frames, directions
+        self.moves = compass_moves(directions)
+        self.actions = tuple(self.moves) + PEN_ACTIONS
         self._pw = sync_playwright().start()
         self.browser = self._pw.chromium.launch(headless=headless,
                                                 executable_path=executable_path or default_chromium())
@@ -148,14 +162,14 @@ class JSPaintEnv:
         return self.finished or self.steps >= self.max_steps
 
     def step(self, action: str):
-        """Play one of ``ACTIONS``. Returns ``(observation, reward, done, info)``; ``info["verifier"]`` holds the full
-        verifier result once the episode is over."""
-        if action not in ACTIONS:
+        """Play one of ``env.actions``. Returns ``(observation, reward, done, info)``; ``info["verifier"]`` holds the
+        full verifier result once the episode is over."""
+        if action not in self.actions:
             raise ValueError("unknown action %r" % action)
         if self.done:
             raise RuntimeError("episode is over; call reset()")
-        if action in MOVES:
-            dx, dy = MOVES[action]
+        if action in self.moves:
+            dx, dy = self.moves[action]
             self.move_mouse(dx * self.step_px, dy * self.step_px)
         elif action == "PEN_DOWN":
             self.mouse_down()
@@ -195,7 +209,8 @@ class JSPaintEnv:
         x = min(max(self.cursor[0] + dx, 1.0), self.width - 2.0)
         y = min(max(self.cursor[1] + dy, 1.0), self.height - 2.0)
         self.cursor = (x, y)
-        self.page.mouse.move(*self._client(self.cursor), steps=4 if self.pen else 1)
+        steps = max(2, int(math.hypot(dx, dy) // 4)) if self.pen else 1
+        self.page.mouse.move(*self._client(self.cursor), steps=steps)
 
     def mouse_down(self) -> None:
         if not self.pen:
@@ -271,16 +286,30 @@ class JSPaintEnv:
 
 
 # -- policies ------------------------------------------------------------------------------------------------------
-def _toward(pos, target) -> str:
+def _toward(moves, pos, target) -> str:
     """The move whose unit direction best matches ``target - pos``."""
     vx, vy = target[0] - pos[0], target[1] - pos[1]
-    return max(MOVES, key=lambda a: (MOVES[a][0] * vx + MOVES[a][1] * vy) / math.hypot(*MOVES[a]))
+    return max(moves, key=lambda a: moves[a][0] * vx + moves[a][1] * vy)
+
+
+def _around(moves, pos, centre, r, step) -> str:
+    """Of the moves that advance clockwise round ``centre`` by at least a third of a step, the one that lands
+    closest to radius ``r`` (ties to the larger advance)."""
+    ang = math.atan2(pos[1] - centre[1], pos[0] - centre[0])
+
+    def outcome(a):
+        x, y = pos[0] + moves[a][0] * step, pos[1] + moves[a][1] * step
+        adv = (math.atan2(y - centre[1], x - centre[0]) - ang + math.pi) % (2 * math.pi) - math.pi
+        return abs(math.hypot(x - centre[0], y - centre[1]) - r), -adv
+
+    forward = [a for a in moves if -outcome(a)[1] >= step / r / 3] or list(moves)
+    return min(forward, key=outcome)
 
 
 def circle_expert(radius_frac: float = 0.3):
     """A scripted policy: walk (pen up) to the rightmost point of a circle centred on the canvas, press, trace one
-    full turn plus a little overlap with the eight moves (each step heads for the point one step further round the
-    circle), release, ``DONE``. Deterministic given the environment state."""
+    full turn plus a little overlap (each step takes the forward move that stays closest to the radius), release,
+    ``DONE``. Deterministic given the environment state."""
     state: Dict = {}
 
     def policy(env: JSPaintEnv) -> str:
@@ -294,7 +323,7 @@ def circle_expert(radius_frac: float = 0.3):
         if state["phase"] == "approach":
             start = (cx + r, cy)
             if math.dist(pos, start) > step * 0.75:
-                return _toward(pos, start)
+                return _toward(env.moves, pos, start)
             state["phase"] = "trace"
             state["prev"] = math.atan2(pos[1] - cy, pos[0] - cx)
             return "PEN_DOWN"
@@ -304,8 +333,7 @@ def circle_expert(radius_frac: float = 0.3):
             state["turned"] += delta
             state["prev"] = ang
             if state["turned"] < 2 * math.pi + 0.3:
-                nxt = ang + step / r
-                return _toward(pos, (cx + r * math.cos(nxt), cy + r * math.sin(nxt)))
+                return _around(env.moves, pos, (cx, cy), r, step)
             state["phase"] = "lift"
             return "PEN_UP"
         return "DONE"
@@ -315,20 +343,23 @@ def circle_expert(radius_frac: float = 0.3):
 
 def random_policy(seed: int = 0):
     rng = random.Random(seed)
-    return lambda env: rng.choice(ACTIONS)
+    return lambda env: rng.choice(env.actions)
 
 
 class ModelPolicy:
     """The model's most likely action from the screenshot plus the text note, via ``predict``. ``last`` keeps the
-    latest answer (probabilities over ``ACTIONS``) for logging."""
+    latest answer (probabilities over ``env.actions``) for logging."""
 
     def __init__(self, agent, task: str = "circle"):
-        from laya.games import paint_question
-
-        self.agent, self.question, self.last, self.provenance = agent, paint_question(task), None, None
+        self.agent, self.task, self.last, self.provenance, self._questions = agent, task, None, None, {}
 
     def __call__(self, env: JSPaintEnv) -> str:
-        out = self.agent.predict({"image": env.render(), "note": env.note()}, self.question)
+        from laya.games import paint_question
+
+        key = (env.directions, env.step_px)
+        if key not in self._questions:
+            self._questions[key] = paint_question(self.task, env.directions, env.step_px)
+        out = self.agent.predict({"image": env.render(), "note": env.note()}, self._questions[key])
         self.last, self.provenance = out["answers"]["action"], out.get("provenance")
         return self.last["choice"]
 
@@ -352,11 +383,13 @@ def play_episodes(env: JSPaintEnv, policy, episodes: int, seed: int = 0, on_step
         eps.append({"seed": seed + i, "steps": env.steps, "ended": "done" if env.finished else "capped",
                     **env.result})
     scores = [e["score"] for e in eps]
-    return {"task": env.task, "episodes": episodes, "seed": seed, "step_px": env.step_px, "max_steps": env.max_steps,
+    return {"task": env.task, "episodes": episodes, "seed": seed, "directions": env.directions,
+            "step_px": env.step_px, "max_steps": env.max_steps,
             "mean_score": float(np.mean(scores)), "median_score": float(np.median(scores)),
             "pass_rate": float(np.mean([e["passed"] for e in eps])),
             "mean_steps": float(np.mean([e["steps"] for e in eps])), "actions": dict(counts), "results": eps}
 
 
-__all__ = ["ACTIONS", "MOVES", "TASKS", "TOOLS", "JSPaintServer", "JSPaintEnv", "circle_expert", "random_policy",
+__all__ = ["ACTIONS", "MOVES", "COMPASS", "PEN_ACTIONS", "compass_moves", "TASKS", "TOOLS", "JSPaintServer",
+           "JSPaintEnv", "circle_expert", "random_policy",
            "ModelPolicy", "model_policy", "play_episodes", "default_chromium"]
