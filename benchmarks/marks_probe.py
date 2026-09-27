@@ -125,8 +125,15 @@ def main():
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--out")
     ap.add_argument("--save-examples", help="directory for the first image of each condition")
+    ap.add_argument("--contextual", action="store_true",
+                    help="also score each question on a blank image and divide that prior out (Zhao et al. 2021)")
+    ap.add_argument("--threads", type=int, default=0, help="torch threads (0: torch's default)")
     args = ap.parse_args()
 
+    if args.threads:
+        import torch
+
+        torch.set_num_threads(args.threads)
     agent = load_vlm(CHECKPOINT, revision=REVISION, device=args.device)
     out = open(args.out, "w") if args.out else None
     print("checkpoint %s @ %s, n=%d per condition, n_permutations=%d" % (CHECKPOINT, agent.source["revision"],
@@ -135,6 +142,9 @@ def main():
     for cond in args.conditions.split(","):
         rng = random.Random("%s-%d" % (cond, args.seed))
         conf, correct, first = [], [], []
+        cconf, ccorrect = [], []
+        blank = Image.new("RGB", (SIZE, SIZE), BG)
+        priors = {}  # the blank-image answer depends only on the question: one call per distinct question
         t0 = time.perf_counter()
         for i in range(args.n):
             img, q, target = CONDITIONS[cond](rng)
@@ -145,9 +155,21 @@ def main():
             conf.append(max(a["probabilities"].values()))
             correct.append(a["choice"] == target)
             first.append(a["choice"] == keys[0])
+            row = {"condition": cond, "i": i, "target": target, "choice": a["choice"],
+                   "probabilities": a["probabilities"]}
+            if args.contextual:
+                qkey = json.dumps(q, sort_keys=True)
+                if qkey not in priors:
+                    priors[qkey] = agent.predict({"image": blank}, {"q": q},
+                                                 n_permutations=args.n_permutations)["answers"]["q"]
+                prior = priors[qkey]
+                adj = np.array([a["probabilities"][k] / max(1e-6, prior["probabilities"][k]) for k in keys])
+                adj = adj / adj.sum()
+                cconf.append(float(adj.max()))
+                ccorrect.append(keys[int(adj.argmax())] == target)
+                row["prior"] = prior["probabilities"]
             if out:
-                out.write(json.dumps({"condition": cond, "i": i, "target": target, "choice": a["choice"],
-                                      "probabilities": a["probabilities"]}) + "\n")
+                out.write(json.dumps(row) + "\n")
         k, n = int(sum(correct)), len(correct)
         lo, hi = wilson(k, n)
         chance = 1.0 / len(keys)
@@ -155,6 +177,12 @@ def main():
             cond, k / n, lo, hi, chance, float(np.mean(conf)),
             ece_score(np.array(conf), np.array(correct, dtype=float)), 100 * np.mean(first),
             (time.perf_counter() - t0) / n), flush=True)
+        if cconf:
+            k = int(sum(ccorrect))
+            lo, hi = wilson(k, n)
+            print("%-14s %6.3f  [%5.3f, %5.3f] %6.3f %6.3f %6.3f   (contextual calibration)" % (
+                "  +contextual", k / n, lo, hi, chance, float(np.mean(cconf)),
+                ece_score(np.array(cconf), np.array(ccorrect, dtype=float))), flush=True)
     if out:
         out.close()
 
