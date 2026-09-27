@@ -562,10 +562,13 @@ def finetune_long(
     model, proc = agent.model, agent.processor
     import shutil
 
-    tr_workers, tr_prefetch = _loader_fit(agent.prep, batch_size, num_workers, 4)
-    ev_workers, _ = _loader_fit(agent.prep, 64, num_workers, 2, min_prefetch=2)  # collect_logits: prefetch 2
-    print("loader: /dev/shm %.1f GB; train %d workers x prefetch %d, eval %d workers" % (
-        shutil.disk_usage("/dev/shm").total / 1e9, tr_workers, tr_prefetch, ev_workers), flush=True)
+    n_img = lambda exs: max([len(ex["state"].get("images") or [0]) if isinstance(ex["state"], dict) else 1  # noqa: E731
+                             for ex in exs] + [1])
+    tr_workers, tr_prefetch = _loader_fit(agent.prep, batch_size, num_workers, 4, images_per_example=n_img(train_ex))
+    ev_workers, _ = _loader_fit(agent.prep, 64, num_workers, 2, min_prefetch=2,  # collect_logits: prefetch 2
+                                images_per_example=n_img(val_ex + train_eval + calib_ex))
+    print("loader: /dev/shm %.1f GB, up to %d images per example; train %d workers x prefetch %d, eval %d workers" % (
+        shutil.disk_usage("/dev/shm").total / 1e9, n_img(train_ex), tr_workers, tr_prefetch, ev_workers), flush=True)
     ev_kw = dict(batch_size=64, num_workers=ev_workers)
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
@@ -1209,14 +1212,17 @@ SPLIT_BENCH_DATASETS = ("cauldron_ai2d", "cauldron_aokvqa", "cauldron_tqa", "cau
                         "cauldron_vqav2")  # diagrams, photos, textbook figures, book-cover text, maps, photos
 
 
-def _loader_fit(prep, batch_size: int, num_workers: int, prefetch: int, min_prefetch: int = 1) -> tuple:
+def _loader_fit(prep, batch_size: int, num_workers: int, prefetch: int, min_prefetch: int = 1,
+                images_per_example: int = 1) -> tuple:
     """(workers, prefetch) so the batches a DataLoader keeps in flight fit in half of /dev/shm. Each one holds
     float32 pixels, up to ``ceil(split_edge / image_size)^2 + 1`` tiles per image with splitting, so 22 workers x
-    prefetch 4 that fit unsplit run the split settings out of shared memory (and a lost batch hangs the loop)."""
+    prefetch 4 that fit unsplit run the split settings out of shared memory (and a lost batch hangs the loop).
+    ``images_per_example`` is the most images one example carries (a batch pads to its largest), e.g. 4 for the
+    BiGym ``bc_f4`` sets."""
     import shutil
 
     side = -(-prep.split_edge // prep.image_size) if prep.split_edge else 0
-    per_batch = batch_size * (side * side + 1) * 3 * prep.image_size ** 2 * 4
+    per_batch = batch_size * max(1, images_per_example) * (side * side + 1) * 3 * prep.image_size ** 2 * 4
     fit = int(shutil.disk_usage("/dev/shm").total * 0.5 // per_batch)
     while prefetch > min_prefetch and num_workers * prefetch > fit:
         prefetch //= 2
