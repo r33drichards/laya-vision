@@ -185,3 +185,56 @@ With the full question and two-frame memory, the zero-shot checkpoint moves the 
 actions) but never presses the button, and ends each episode with `DONE` within 6–48 steps. Its top option gets
 about 0.05 probability against 0.03 for uniform, so it is close to guessing. Recognising a circle is not the same as knowing how to draw one: it was never trained on this task. The expert's trajectories (screenshot, action) are the obvious data to
 train it on, as the game checkpoints were trained on expert frames.
+
+## Training on Modal
+
+Three jobs in `modal_app.py` train and test the drawing policy:
+
+1. **`prepare_paint`** generates the labelled episodes in headless Chromium, over parallel containers. JSPaint is
+   pinned at commit `53be67a`.
+   - **Labels:** `laya/paintdata.py` labels every state from what is on the canvas. It gives the action to take
+     there and the three judgement answers.
+   - **Behaviour:** the labeller drives, with random actions mixed in (probability 0–0.3) and sometimes a random
+     start.
+   - **DAgger (`--model <run>`):** a trained checkpoint drives each step with probability `1 - beta` instead, so
+     the data covers the states the model itself reaches, including its mistakes.
+   - **Output:** each run writes a new dataset under `/data/vqa/<name>`; existing datasets are never replaced.
+2. **`finetune_long`**, with `--head-max-len 1536 --max-len 2560`. The loader now takes `head_max_len` from the
+   checkpoint, so training builds the same uncut inputs as `predict`, and the value is saved with the new checkpoint.
+   Batch 16 fits on an A100 40 GB; batch 32 ran out of memory.
+3. **`paint_eval`** plays a checkpoint in JSPaint on an L4, alongside the labeller, the older scripted expert and
+   random play. It saves each episode's final frame and GIF under `<run>/paint_eval/<name>/`.
+
+### The labeller draws a target the model can see
+
+The first labeller always drew one circle, centred on the canvas. Nothing on screen showed where that circle
+should start, so the model trained on it (`paint-circle-v1`) walked straight past the start and never knew when to
+press.
+
+The labeller now draws the way a person does. It presses where the cursor is, if a circle fits there, and draws
+clockwise from the circle's top. The rest of the target then follows from the drawing: the circle has a fixed
+radius (0.18 of the canvas side) and its top is where the drawing began. As a policy, this labeller completes and
+ends 6 of 6 circles by itself, scoring 0.92–0.94.
+
+### Results
+
+These are 5 episodes on unseen seeds (900000–900004) with `paint_eval`, so read them as a spot check. The row
+data is in `docs/paint-circle-metrics.json`.
+
+| Checkpoint | Trained on | Mean score | Passed | Steps |
+|---|---|---|---|---|
+| `paint-circle-v1` | `paint_circle`: 240 episodes, fixed hidden target | 0.00 | 0/5 | 260 |
+| `paint-circle-v2` | `paint_circle_v2`: 240 episodes, visible target, 2 passes | 0.00 | 0/5 | 260 |
+| `paint-circle-v3` | v2's data plus `paint_circle_dagger1`: 120 episodes with v2 driving half the steps | 0.61 | 2/5 | 105 |
+| Labeller (reference) | – | 0.94 | 5/5 | 98 |
+| Random (reference) | – | 0.00 | 0/5 | 41 |
+
+- **v2** presses at once and draws the first half of the circle correctly: E, then SE, then S, then SW. It then
+  fails to keep turning at the bottom, drifts off the ring and runs into the corner. Its own judgement notices:
+  P(on track) falls from 1.0 to 0.01 as it leaves the ring. The labeller's data had almost no such states.
+- **v3**, after one DAgger round, draws one continuous closed stroke in every episode, releases the button and
+  answers `DONE` by itself. It judges the result "circle" with progress 3.7–4.0 out of 4. The three misses fail
+  only on roundness (0.46–0.64; passing needs 0.7): they close up but are lopsided, with a small gap where the
+  stroke started.
+
+Each round took about 1.5 hours on Modal: data generation, about an hour of A100 training, then evaluation.
