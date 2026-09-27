@@ -141,7 +141,7 @@ def follow(task: str, demo: Dict, max_decisions: Optional[int] = None, env=None)
     the follower got."""
     w = demo["waypoints"]
     game = bg.BiGymGame(task, demo["seed"], env=env or bg.make_env(task, cameras=False))
-    cap = max_decisions or 10 * len(w) + 100  # one part at a time is several times slower than the demo
+    cap = max_decisions or 20 * len(w) + 200  # one part at a time is many times slower than the demo
     k, labels, skipped = 0, [], 0
     best_c, since = np.inf, 0  # best cost reached on waypoint k, and decisions since it last improved
 
