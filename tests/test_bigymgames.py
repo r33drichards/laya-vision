@@ -170,3 +170,45 @@ def test_tilt_aims_the_gripper():
         assert turned == pytest.approx(np.degrees(bg.TILT_STEP), abs=4), (name, turned)
         assert sign * (x1[axis] - x0[axis]) > 0.1, (name, x0, x1)  # it turned the named way
     game.close()
+
+
+@sim
+def test_restore_is_exact():
+    """Trying moves and undoing them (the demo follower's lookahead) leaves the episode bit-identical to one played
+    without them, so recorded labels replay to the same outcome."""
+    import random
+
+    rng = random.Random(0)
+    seq = [rng.choice(list(bg.PRIMITIVES)) for _ in range(12)]
+    env = bg.make_env("DrawerTopOpen", cameras=False)
+
+    def play(probe):
+        game, out = bg.BiGymGame("DrawerTopOpen", seed=3, env=env), []
+        for p in seq:
+            if probe:
+                snap = game.snapshot()
+                for q in ("LEFT_HAND_FORWARD", "BASE_BACK", "RIGHT_GRIPPER_CLOSE"):
+                    game.step(q)
+                    game.restore(snap)
+            game.step(p)
+            out.append(np.concatenate([game._data.qpos, game._data.qvel, game._data.ctrl]).copy())
+        return np.array(out)
+
+    assert np.array_equal(play(False), play(True))
+    env.close()
+
+
+@sim
+def test_targets_do_not_wind_up_against_contact():
+    """A hand pushed into the cabinet keeps its arm and base targets within ARM_LEAD / BASE_LEAD of the joints (the
+    env integrates delta targets, which ran 22 cm ahead of the pelvis before)."""
+    game = bg.BiGymGame("WallCupboardOpen", seed=0, env=bg.make_env("WallCupboardOpen", cameras=False))
+    m, d = game._model, game._data
+    for _ in range(40):
+        game.step("BASE_FORWARD")
+        game.step("LEFT_HAND_FORWARD")
+    arm, base = np.array(game._acts), np.array(game._base_acts)
+    step = max(bg.BASE_STEP, bg.WRIST_STEP)
+    assert np.all(np.abs(d.ctrl[base[:2]] - game._joint_qpos(base[:2])) < bg.BASE_LEAD + step)
+    assert np.all(np.abs(d.ctrl[arm] - game._joint_qpos(arm)) < bg.ARM_LEAD + 0.5)
+    game.close()
