@@ -92,3 +92,16 @@ def test_grouped_choice_moves_when_moving_is_likelier_than_any_pen_action():
     assert max(probs, key=probs.get) == "PEN_UP" and grouped_choice(probs) == "E"
     probs.update(PEN_UP=0.9)
     assert grouped_choice(probs) == "PEN_UP"
+
+
+def test_sampled_choice_follows_the_grouped_probabilities():
+    import collections
+    import random
+
+    from laya.paintenv import COMPASS, sampled_choice
+
+    probs = {d: 0.0 for d in COMPASS}
+    probs.update(E=0.3, N=0.3, PEN_DOWN=0.0, PEN_UP=0.4, DONE=0.0)
+    rng = random.Random(0)
+    c = collections.Counter(sampled_choice(probs, rng) for _ in range(4000))
+    assert set(c) == {"E", "N", "PEN_UP"} and abs(c["PEN_UP"] / 4000 - 0.4) < 0.03

@@ -2861,7 +2861,8 @@ def train_quickdraw_classifier(n_per: int = 3000, epochs: int = 12, seed: int = 
 
 @app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=2 * 60 * 60,
               volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol})
-def doodle_eval_task(model: str, task: str, episodes: int, seed: int, policies: str, first_doodle: int) -> dict:
+def doodle_eval_task(model: str, task: str, episodes: int, seed: int, policies: str, first_doodle: int,
+                     decide: str = "argmax") -> dict:
     """``doodle_eval`` for one category: play ``episodes`` with each policy, graded by the classifier."""
     from laya.paintenv import PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, model_policy, \
         play_episodes, random_policy
@@ -2879,7 +2880,7 @@ def doodle_eval_task(model: str, task: str, episodes: int, seed: int, policies: 
                                                          keep_frames=True) as env:
         for pname in policies.split(","):
             if pname == "model":
-                pol = model_policy(agent, task, judge=False)
+                pol = model_policy(agent, task, judge=False, decide=decide, seed=seed)
             elif pname == "random":
                 pol = random_policy(seed)
             else:  # the labeller following held-back human doodles: what a faithful copier would score
@@ -2910,7 +2911,7 @@ def _ckpt_exists(model: str) -> bool:
 @app.function(image=image, timeout=4 * 60 * 60, volumes={"/ckpt": ckpt_vol})
 def doodle_eval(model: str = "paint-circle-v3/best", tasks: str = "train,heldout", episodes: int = 2,
                 seed: int = 910_000, policies: str = "model,labeller,random", first_doodle: int = 200,
-                name: str = ""):
+                name: str = "", decide: str = "argmax"):
     """Ask a checkpoint to draw each Quick, Draw! category in JSPaint and grade it with the independent classifier
     (``train_quickdraw_classifier``): score = P(requested category), passed = the classifier's top category.
 
@@ -2924,7 +2925,7 @@ def doodle_eval(model: str = "paint-circle-v3/best", tasks: str = "train,heldout
     for t in tasks.split(","):
         t = t.strip()
         names += list(TRAIN_CATEGORIES) if t == "train" else list(HELDOUT_CATEGORIES) if t == "heldout" else [t]
-    jobs = [(model, t, episodes, seed, policies, first_doodle) for t in names]
+    jobs = [(model, t, episodes, seed, policies, first_doodle, decide) for t in names]
     per_task = {r["task"]: r for r in doodle_eval_task.starmap(jobs)}
     summary = {}
     for group, cats in (("train", TRAIN_CATEGORIES), ("heldout", HELDOUT_CATEGORIES)):
@@ -2934,7 +2935,7 @@ def doodle_eval(model: str = "paint-circle-v3/best", tasks: str = "train,heldout
         summary[group] = {p: {"mean_score": round(sum(r["policies"][p]["mean_score"] for r in rows) / len(rows), 4),
                               "pass_rate": round(sum(r["policies"][p]["pass_rate"] for r in rows) / len(rows), 4)}
                           for p in policies.split(",")}
-    out = {"model": model, "episodes_per_task": episodes, "seed": seed, "first_doodle": first_doodle,
+    out = {"model": model, "decide": decide, "episodes_per_task": episodes, "seed": seed, "first_doodle": first_doodle,
            "summary": summary, "tasks": per_task}
     print(json.dumps(summary, indent=2))
     for t in names:
