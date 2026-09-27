@@ -262,3 +262,295 @@ def bigym_eval(tasks: str = ",".join(TASKS), parts: str = "probe,control", model
     with open(path, "w") as f:
         json.dump(result, f)
     print("\nwrote", path)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Behaviour-cloning data: BiGym's human demos, followed with primitives, as laya-vision training sets
+# ---------------------------------------------------------------------------------------------------------
+#
+#     modal run modal_bigym.py::prepare_bigym_bc --prefix bigym_smoke_20260927 --tasks DrawerTopClose --max-demos 3
+#     modal run --detach modal_bigym.py::prepare_bigym_bc          # all demos of the four cupboard tasks
+#
+# Every demo of each task is followed (``laya.bigymdemos.follow``, one container per demo); each successful run is
+# replayed with the head camera and written, one frame per decision, as three datasets on laya-datasets:
+# ``<prefix>_bc_f1`` / ``<prefix>_bc_f4`` (the control question on 1 / 4 frames, labelled with the follower's
+# primitive) and ``<prefix>_probe`` (the probe questions on every third frame, simulator labels); see
+# ``laya.bigymdata``. Create-only: the job refuses if any of the three exists.
+
+data_vol = modal.Volume.from_name("laya-datasets")
+BC_TASKS = ("DrawerTopClose", "WallCupboardClose", "DrawerTopOpen", "WallCupboardOpen")
+JPEG_QUALITY = 90
+
+
+def _bc_names(prefix: str) -> dict:
+    return {"f1": prefix + "_bc_f1", "f4": prefix + "_bc_f4", "probe": prefix + "_probe"}
+
+
+@app.function(image=image, cpu=2, memory=8192, timeout=90 * 60)
+def bigym_bc_waypoints(task: str, amount: int = -1) -> list:
+    """``laya.bigymdemos.demo_waypoints``: ``amount`` (-1: all) of ``task``'s demos replayed to waypoints."""
+    _pick_gl()
+    from laya import bigymdemos
+
+    t0 = time.time()
+    demos = bigymdemos.demo_waypoints(task, amount=amount, seed=0)
+    print("%s: %d demos, %d succeed in BiGym's replay, %.0f s" % (
+        task, len(demos), sum(d["success_step"] is not None for d in demos), time.time() - t0))
+    return demos
+
+
+@app.function(image=image, cpu=2, memory=4096, timeout=3 * 60 * 60, volumes={"/data": data_vol},
+              retries=modal.Retries(max_retries=1, initial_delay=10.0))
+def bigym_bc_episode(task: str, demo: dict, tmp_root: str, names: dict, probe_every: int = 3) -> dict:
+    """Follow one demo; if the follower succeeds, replay its primitives with the head camera and write every
+    decision frame (JPEG) under ``<tmp_root>/<dataset>/images/``. Returns the run summary, its primitives and the
+    probe frames' labels. A run whose camera replay does not reproduce the follower's episode is not kept."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    gl = _pick_gl()
+    from laya import bigymdata as bd
+    from laya import bigymdemos
+    from laya import bigymgames as bg
+
+    t0 = time.time()
+    out = {"task": task, "seed": int(demo["seed"]), "uuid": demo["uuid"],
+           "demo_success": demo["success_step"] is not None, "kept": False, "gl": gl}
+    try:
+        run = bigymdemos.follow(task, demo)
+        out["follow"] = {k: v for k, v in run.items() if k != "labels"}
+        out["follow_seconds"] = round(time.time() - t0, 1)
+        if not run["success"]:
+            return out
+        prims = [lab["primitive"] for lab in run["labels"]]
+        game = bg.BiGymGame(task, out["seed"], env=bg.make_env(task, cameras=True))
+        keep_probe = set(bd.probe_decisions(len(prims), probe_every))
+        jpgs, probes, recent, problem = [], [], {}, None
+
+        def snap(d):
+            fr = game.frame()
+            buf = io.BytesIO()
+            Image.fromarray(fr).save(buf, "JPEG", quality=JPEG_QUALITY)
+            jpgs.append(buf.getvalue())
+            recent[d] = fr.copy()
+            recent.pop(d - bg.MAX_FRAMES, None)
+            if d in keep_probe:
+                truth = game.ground_truth()
+                probes.append({"decision": d, "truth": truth, "labels": bg.labels(out["task"], truth)})
+
+        for d, p in enumerate(prims):
+            if game.done or game.decisions != d:
+                problem = "episode ended or drifted at decision %d of %d" % (d, len(prims))
+                break
+            snap(d)
+            window = [recent[i] for i in bd.frame_window(d, 4)]
+            if not all(np.array_equal(a, b) for a, b in zip(window, game.frames(4))):
+                problem = "frame window differs from BiGymGame.frames(4) at decision %d" % d
+                break
+            game.step(p)
+        if problem is None:
+            snap(len(prims))  # the final frame (task done): probe only
+            if not game.success or game.decisions != run["decisions"]:
+                problem = "replay success %s after %d decisions; follower %s after %d" % (
+                    game.success, game.decisions, run["success"], run["decisions"])
+        game.close()
+        if problem:
+            out["replay_problem"] = problem
+            print("%s-%d not kept: %s" % (task, out["seed"], problem))
+            return out
+        for key, name in names.items():
+            folder = os.path.join(tmp_root, name, "images")
+            os.makedirs(folder, exist_ok=True)
+            for d, data in enumerate(jpgs):
+                if key == "probe" and d not in keep_probe or key != "probe" and d == len(prims):
+                    continue
+                with open(os.path.join(tmp_root, name, bd.image_path(task, out["seed"], d)), "wb") as f:
+                    f.write(data)
+        data_vol.commit()
+        out.update(kept=True, primitives=prims, probes=probes, frames=len(prims),
+                   jpeg_bytes=sum(len(b) for b in jpgs))
+    except Exception as e:  # one broken demo should not lose the rest
+        out["error"] = repr(e)[:1000]
+        print("%s-%d failed: %s" % (task, out["seed"], out["error"]))
+    finally:
+        out["seconds"] = round(time.time() - t0, 1)
+        print(json.dumps({k: out.get(k) for k in ("task", "seed", "kept", "frames", "seconds")}
+                         | {"follow": {k: v for k, v in (out.get("follow") or {}).items()
+                                       if k in ("success", "decisions", "demo_decisions", "skipped")}}))
+    return out
+
+
+def _file_sha256(path: str) -> str:
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+@app.function(image=image, cpu=2, memory=16384, timeout=24 * 60 * 60, volumes={"/data": data_vol})
+def bigym_bc_build(tasks: list, prefix: str = "bigym", max_demos: int = -1, probe_every: int = 3,
+                   code: dict = None) -> dict:
+    """Fan the demos out to ``bigym_bc_episode``, then write the three datasets' jsonl, meta.json and
+    manifest.json in a tmp dir, check they load (``laya.vlm_train.load_jsonl_examples``), rename them into
+    /data/vqa and write ``_READY`` last."""
+    import datetime
+    import shutil
+    from collections import Counter
+
+    from laya import bigymdata as bd
+    from laya.bigymgames import FROM_WORDS, PRIMITIVES
+    from laya.vlm_train import load_jsonl_examples
+
+    t0 = time.time()
+    names = _bc_names(prefix)
+    finals = {k: "/data/vqa/" + n for k, n in names.items()}
+    data_vol.reload()
+    taken = [p for p in finals.values() if os.path.exists(p)]
+    if taken:
+        raise RuntimeError("refusing: %s already exist (datasets are create-only; pass a new --prefix)" % taken)
+    tmp_root = "/data/vqa/%s_bc.tmp" % prefix
+    shutil.rmtree(tmp_root, ignore_errors=True)
+    for n in names.values():
+        os.makedirs(os.path.join(tmp_root, n, "images"))
+    data_vol.commit()
+
+    demos = dict(zip(tasks, list(bigym_bc_waypoints.map(tasks, kwargs={"amount": max_demos}))))
+    args = [(task, d, tmp_root, names, probe_every) for task in tasks for d in demos[task]]
+    print("following %d demos: %s" % (len(args), {t: len(d) for t, d in demos.items()}))
+    runs, crashed = [], []
+    for i, r in enumerate(bigym_bc_episode.starmap(args, order_outputs=False, return_exceptions=True)):
+        if isinstance(r, Exception):
+            crashed.append(repr(r)[:500])
+            print("episode call crashed: %s" % crashed[-1])
+            continue
+        runs.append(r)
+        if (i + 1) % 20 == 0:
+            print("%d / %d episodes back, %d kept, %.0f min" % (i + 1, len(args), sum(x["kept"] for x in runs),
+                                                                 (time.time() - t0) / 60))
+    data_vol.reload()
+
+    import mujoco
+
+    base_meta = {"source": "BiGym human demonstrations (DemoStore), followed closed-loop with laya.bigymgames "
+                           "primitives by laya.bigymdemos.follow; successful follower runs replayed with the head "
+                           "camera (256x256, JPEG q%d), one frame per 0.1 s decision" % JPEG_QUALITY,
+                 "bigym": BIGYM, "bigym_sha": BIGYM.rsplit("@", 1)[-1], "mujoco": mujoco.__version__,
+                 "laya_commit": (code or {}).get("commit"), "laya_dirty": (code or {}).get("dirty"),
+                 "primitives": list(PRIMITIVES), "tasks": list(tasks), "max_demos": max_demos,
+                 "probe_every": probe_every, "val_frac": bd.VAL_FRAC,
+                 "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                 "episode_calls_crashed": crashed}
+    per_task, recs = {}, {k: {"train": [], "val": []} for k in names}
+    for task in tasks:
+        tr = sorted([r for r in runs if r["task"] == task], key=lambda r: r["seed"])
+        kept = [r for r in tr if r["kept"]]
+        val = set(bd.val_seeds(task, [r["seed"] for r in kept]))
+        follows = [r for r in tr if "follow" in r]
+        per_task[task] = {
+            "demos": len(demos[task]), "demo_replay_success": sum(d["success_step"] is not None for d in demos[task]),
+            "followed": len(follows), "follower_successes": sum(r["follow"]["success"] for r in follows),
+            "follower_success_rate": (sum(r["follow"]["success"] for r in follows) / len(follows)) if follows else None,
+            "kept": len(kept), "replay_mismatch": [r["seed"] for r in tr if r.get("replay_problem")],
+            "errors": [{"seed": r["seed"], "error": r["error"]} for r in tr if r.get("error")],
+            "val_seeds": sorted(val), "train_seeds": sorted(r["seed"] for r in kept if r["seed"] not in val),
+            "mean_follower_decisions": (sum(r["follow"]["decisions"] for r in follows) / len(follows)
+                                        if follows else None),
+            "runs": [{"seed": r["seed"], "uuid": r["uuid"], "demo_success": r["demo_success"], "kept": r["kept"],
+                      **{k: v for k, v in (r.get("follow") or {}).items()
+                         if k in ("success", "decisions", "demo_decisions", "reached", "waypoints", "skipped")},
+                      "seconds": r.get("seconds")} for r in tr],
+        }
+        for r in kept:
+            split = "val" if r["seed"] in val else "train"
+            recs["f1"][split] += bd.control_records(task, r["seed"], r["primitives"], 1)
+            recs["f4"][split] += bd.control_records(task, r["seed"], r["primitives"], 4)
+            recs["probe"][split] += bd.probe_records(task, r["seed"], r["probes"])
+
+    metas = {}
+    for key, name in names.items():
+        d = os.path.join(tmp_root, name)
+        stats = {}
+        for task in tasks:
+            s = {"demos": per_task[task]["demos"], "follower_successes": per_task[task]["follower_successes"],
+                 "follower_success_rate": per_task[task]["follower_success_rate"]}
+            for split in ("train", "val"):
+                rows = [r for r in recs[key][split] if r["id"].startswith(task + "-")]
+                s[split] = len(rows)
+                if key == "probe":
+                    c = Counter("%s=%d" % (r["id"].split("-")[-2], r["label"]) for r in rows)
+                else:
+                    c = Counter(r["primitive"] for r in rows)
+                s[split + "_labels"] = dict(c.most_common())
+            stats[task] = s
+        for split in ("train", "val"):
+            with open(os.path.join(d, split + ".jsonl"), "w") as f:
+                for r in recs[key][split]:
+                    f.write(json.dumps(r) + "\n")
+        meta = dict(base_meta, dataset=name, kind=key,
+                    question=("bigym_question(task, %d)" % (1 if key == "f1" else 4)) if key != "probe"
+                    else "probe_questions(task)", records={s: len(recs[key][s]) for s in ("train", "val")},
+                    per_task=stats, follower=per_task)
+        with open(os.path.join(d, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+        files = {s + ".jsonl": {"sha256": _file_sha256(os.path.join(d, s + ".jsonl")), "records": len(recs[key][s])}
+                 for s in ("train", "val")}
+        with open(os.path.join(d, "manifest.json"), "w") as f:
+            json.dump({"sources": {BIGYM: base_meta["bigym_sha"], "mujoco": base_meta["mujoco"]},
+                       "params": {"tasks": list(tasks), "max_demos": max_demos, "probe_every": probe_every},
+                       "laya_commit": base_meta["laya_commit"], "files": files,
+                       "images": len(os.listdir(os.path.join(d, "images"))), "created_utc": base_meta["created_utc"]},
+                      f, indent=2)
+        metas[key] = meta
+    data_vol.commit()
+
+    # check before publishing: every record loads, its images exist, and control labels decode to the primitive
+    for key, name in names.items():
+        imgs = set(os.listdir(os.path.join(tmp_root, name, "images")))
+        for split in ("train", "val"):
+            exs = load_jsonl_examples(tmp_root, name, split)
+            if len(exs) != len(recs[key][split]):
+                raise RuntimeError("%s/%s: %d of %d records load" % (name, split, len(exs), len(recs[key][split])))
+            for r in recs[key][split]:
+                for p in r.get("images") or [r["image"]]:
+                    if os.path.basename(p) not in imgs:
+                        raise RuntimeError("%s/%s: %s is missing %s" % (name, split, r["id"], p))
+                if key != "probe" and FROM_WORDS[list(r["question"]["criteria"])[r["label"]]] != r["primitive"]:
+                    raise RuntimeError("%s: label %d does not decode to %s" % (r["id"], r["label"], r["primitive"]))
+        print("%s: %s records load, images present" % (name, metas[key]["records"]))
+
+    data_vol.reload()
+    taken = [p for p in finals.values() if os.path.exists(p)]
+    if taken:
+        raise RuntimeError("refusing: %s appeared while building; data left in %s" % (taken, tmp_root))
+    for key, name in names.items():
+        os.rename(os.path.join(tmp_root, name), finals[key])
+    os.rmdir(tmp_root)
+    for p in finals.values():
+        open(os.path.join(p, "_READY"), "w").close()
+    data_vol.commit()
+    summary = {"datasets": finals, "records": {k: m["records"] for k, m in metas.items()},
+               "per_task": {t: {k: v for k, v in s.items() if k != "runs"} for t, s in per_task.items()},
+               "stats": {k: m["per_task"] for k, m in metas.items()}, "minutes": round((time.time() - t0) / 60, 1)}
+    print(json.dumps(summary, indent=1))
+    return summary
+
+
+@app.local_entrypoint()
+def prepare_bigym_bc(tasks: str = ",".join(BC_TASKS), prefix: str = "bigym", max_demos: int = -1,
+                     probe_every: int = 3):
+    """Build ``<prefix>_bc_f1``, ``<prefix>_bc_f4`` and ``<prefix>_probe`` on laya-datasets from all (or
+    ``--max-demos``) demos of ``--tasks``; see the section comment above ``bigym_bc_build``."""
+    task_list = [t for t in tasks.split(",") if t]
+    unknown = [t for t in task_list if t not in TASKS]
+    if unknown:
+        raise SystemExit("unknown tasks %s" % unknown)
+    code = _git_state()
+    print("datasets %s from laya %s%s" % (list(_bc_names(prefix).values()), code["commit"][:10],
+                                          " (dirty)" if code["dirty"] else ""))
+    summary = bigym_bc_build.remote(task_list, prefix, max_demos, probe_every, code)
+    print(json.dumps(summary, indent=1))
