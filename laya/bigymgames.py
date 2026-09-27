@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 import numpy as np
 
 HOLD = 5  # env steps (at 50 Hz) each primitive is held for: 0.1 s
+GRIP_HOLD = 20  # env steps a gripper open / close is held for: 0.4 s, what the fingers take to close on a handle
 CONTROL_FREQUENCY = 50
 RESOLUTION = (256, 256)
 WRIST_STEP = 0.03  # metres a wrist primitive moves the wrist
@@ -34,6 +35,15 @@ WRIST_ROLL = 0.25  # radians a wrist-roll primitive turns the wrist joint (about
 TILT_STEP = 0.26  # radians a tilt primitive turns the gripper's pointing direction (15 degrees)
 IK_DAMPING = 0.05
 TILT_HOLD = 0.3  # how hard a tilt holds the hand in place (a position row weight; the direction rows weigh 1)
+# Anti-windup. The env integrates delta actions into position targets, so a hand pressed against a door or handle
+# keeps accumulating target the joints never reach: the target runs ahead, the position servo (kp 300 per arm joint,
+# 1e4 N/m for the base) pushes harder every step (over 2 kN at the pads, measured), the fingers jam against the door
+# and cannot close, and when the contact gives, the stored lead yanks the hand. Before each primitive the targets
+# are pulled back to within these leads of where the joints actually are (in free space the lead after a move has
+# settled is well inside them, so free moves are unchanged).
+ARM_LEAD = 0.15  # radians an arm joint's target may lead its position (45 Nm at kp 300)
+BASE_LEAD = 0.03  # metres the pelvis x / y / height targets may lead the pelvis (300 N at 1e4 N/m)
+YAW_LEAD = 0.1  # radians the pelvis yaw target may lead the pelvis yaw
 MAX_FRAMES = 4  # decision frames kept for multi-frame questions
 REACH_BINS = (0.3, 0.2, 0.1)  # wrist-target distance (m) thresholds for progress levels 1, 2, 3
 OPEN_BINS = (0.3, 0.6, 0.9)  # task-direction open fraction thresholds for progress levels 1, 2, 3
@@ -230,6 +240,9 @@ class BiGymGame:
         self._arm = {"left": (slice(0, half), dofs[:half]), "right": (slice(half, 2 * half), dofs[half:])}
         self._acts = acts
         self._n_base = robot.floating_base.dof_amount
+        fb = robot.floating_base
+        self._base_acts = [physics.bind(a).element_id for a in fb._position_actuators + fb._rotation_actuators if a]
+        self._base_lead = np.array([BASE_LEAD] * (len(self._base_acts) - 1) + [YAW_LEAD])  # order X, Y, Z, yaw
         self._grip = np.zeros(len(robot.grippers), np.float32)  # gripper commands are absolute: 0 open, 1 closed
         self.steps, self.decisions = 0, 0
         self.success, self.terminated, self.truncated = False, False, False
@@ -359,17 +372,40 @@ class BiGymGame:
         elif name != "STAY":
             raise ValueError("unknown primitive %r" % name)
         act[-len(self._grip):] = self._grip
+        self._unwind(act)
         return np.clip(act, space.low, space.high).astype(np.float32)
 
+    def _joint_qpos(self, actuators) -> np.ndarray:
+        m = self._model
+        return np.array([self._data.qpos[m.jnt_qposadr[m.actuator_trnid[a][0]]] for a in actuators])
+
+    def _unwind(self, act: np.ndarray) -> None:
+        """Pull the arm and base position targets back to within ``ARM_LEAD`` / ``BASE_LEAD`` / ``YAW_LEAD`` of the
+        joints before adding ``act`` (in place), so contact cannot wind them up (see ``ARM_LEAD``)."""
+        d, m = self._data, self._model
+        arm = np.array(self._acts)
+        ctrl, q = np.array(d.ctrl[arm]), self._joint_qpos(arm)
+        want = np.clip(ctrl, q - ARM_LEAD, q + ARM_LEAD) + act[self._n_base:self._n_base + len(arm)]
+        lo, hi = m.actuator_ctrlrange[arm].T
+        act[self._n_base:self._n_base + len(arm)] = np.clip(want, lo, hi) - ctrl
+        base = np.array(self._base_acts)
+        ctrl, q = np.array(d.ctrl[base]), self._joint_qpos(base)
+        act[:len(base)] += np.clip(ctrl, q - self._base_lead, q + self._base_lead) - ctrl
+
+    @staticmethod
+    def hold(name: str) -> int:
+        """Env steps primitive ``name`` lasts: ``GRIP_HOLD`` for a gripper open / close, else ``HOLD``."""
+        return GRIP_HOLD if "_GRIPPER_" in name else HOLD
+
     def step(self, name: str) -> bool:
-        """Play primitive ``name``: its action once, then ``HOLD - 1`` settle steps. Only the last step renders
-        the observation (BiGym's ``fast`` steps skip it); success is checked after every step. Returns
-        ``success``."""
+        """Play primitive ``name``: its action once, then settle steps, ``hold(name)`` env steps in all. Only the
+        last step renders the observation (BiGym's ``fast`` steps skip it); success is checked after every step.
+        Returns ``success``."""
         self._prev, self._frame = self._frame, None
         rest = np.zeros(self.env.action_space.shape, np.float32)
         rest[-len(self._grip):] = self._grip
         e = self.env
-        for i in range(HOLD):
+        for i in range(self.hold(name)):
             e.step(self.primitive_to_action(name) if i == 0 else rest, fast=True)
             self.steps += 1
             self.success = self.success or bool(e.success)
