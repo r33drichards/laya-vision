@@ -46,15 +46,17 @@ def test_question_covers_actions_and_tools_are_mouse_only():
 def test_state_has_two_frames_and_recent_actions(env):
     env.reset(seed=2)
     first = env.state()
+    assert set(first) == {"images", "context"}
     assert len(first["images"]) == 2 and first["images"][0] is first["images"][1]
-    assert first["recent_actions"] == "none yet"
-    for a in ["PEN_DOWN"] + ["E"] * (env.frame_gap + 3):
+    assert "none yet" in first["context"] and "pen is up" in first["context"]
+    acts = ["PEN_DOWN"] + ["E"] * (env.frame_gap + 3)
+    for a in acts:
         env.step(a)
     st = env.state()
     old, now = st["images"]
     assert old is not now and old.size == now.size == (env.width, env.height)
-    assert st["recent_actions"].split() == (["PEN_DOWN"] + ["E"] * (env.frame_gap + 3))[-env.history:]
-    assert st["pen"].startswith("down")
+    assert ("oldest first: %s." % " ".join(acts[-env.history:])) in st["context"]
+    assert "pen is down" in st["context"]
 
 
 def test_full_question_fits_raised_budget_without_truncation():

@@ -295,17 +295,20 @@ class JSPaintEnv:
             d.line([x, y - 11, x, y + 11], fill=CURSOR)
         return img
 
+    def state_text(self) -> str:
+        """The text half of ``state()``: which image is which, the pen state, the step count and recent actions.
+        Training records store exactly this string (``laya.paintdata``), so play and training see the same input."""
+        recent = [t["action"] for t in self.trajectory[-self.history:]]
+        return ("The first image is the canvas %d steps ago, the second is now. The pen is %s. Step %d of %d. "
+                "Recent actions, oldest first: %s." % (
+                    len(self._recent_obs) - 1, "down (drawing)" if self.pen else "up (not drawing)",
+                    self.steps + 1, self.max_steps, " ".join(recent) if recent else "none yet"))
+
     def state(self) -> Dict:
         """What the model sees this step: ``images`` = [canvas ``frame_gap`` steps ago (the first frame early in an
-        episode), canvas now], both with the cursor drawn on, plus the pen state, step count and recent actions."""
-        recent = [t["action"] for t in self.trajectory[-self.history:]]
-        return {
-            "images": [self._recent_obs[0], self._recent_obs[-1]],
-            "frames": "the first image is the canvas %d steps ago, the second is now" % (len(self._recent_obs) - 1),
-            "pen": "down (drawing)" if self.pen else "up (not drawing)",
-            "step": "%d of %d" % (self.steps + 1, self.max_steps),
-            "recent_actions": " ".join(recent) if recent else "none yet",
-        }
+        episode), canvas now], both with the cursor drawn on, and ``context`` = ``state_text()``. The keys match a
+        training record's (``images`` + ``state_text``, which the loader passes as ``context``)."""
+        return {"images": [self._recent_obs[0], self._recent_obs[-1]], "context": self.state_text()}
 
     def note(self) -> str:
         return "Task: %s The pen is %s. Step %d of %d." % (TASKS[self.task], "down (drawing)" if self.pen else
@@ -319,6 +322,17 @@ class JSPaintEnv:
         img = Image.open(io.BytesIO(base64.b64decode(data.split(",", 1)[1]))).convert("RGBA")
         white = Image.new("RGBA", img.size, (255, 255, 255, 255))
         return np.asarray(Image.alpha_composite(white, img).convert("RGB"))
+
+    def visible_pixels(self, hide_cursor_px: int = 5) -> np.ndarray:
+        """The canvas as it looks on screen, as an ``(h, w, 3)`` uint8 array, without our cursor overlay. Unlike
+        ``canvas_pixels`` this includes a stroke still being drawn: JSPaint keeps the stroke on an overlay and only
+        commits it to the canvas when the button is released. JSPaint also previews the brush tip under the mouse
+        pointer, which is not ink, so pixels within ``hide_cursor_px`` of the cursor are painted white."""
+        arr = np.array(self.screenshot())
+        if hide_cursor_px:
+            yy, xx = np.ogrid[: arr.shape[0], : arr.shape[1]]
+            arr[(xx - self.cursor[0]) ** 2 + (yy - self.cursor[1]) ** 2 <= hide_cursor_px ** 2] = 255
+        return arr
 
     def close(self) -> None:
         self.browser.close()

@@ -407,6 +407,7 @@ def finetune_long(
     mix_alpha: float = 0.0,
     split_edge: int = 0,
     max_len: int = 0,
+    head_max_len: int = 0,
     max_train: int = 0,
     max_val: int = 0,
     restart: bool = False,
@@ -450,8 +451,10 @@ def finetune_long(
     * ``split_edge`` > 0 turns on the processor's image splitting (``laya.preprocess``): each image is resized to
       that longest edge and cut into 512 tiles plus a global view, up to 17 views at 2048 against 1 without.
       Needs ``preprocess="processor"``. ``max_len`` (0: ``laya.vlm.default_max_len``, 1024 without splitting)
-      is the sequence cap; both are saved in the checkpoint. Neither applies with ``init_from``, which keeps the
-      checkpoint's.
+      is the sequence cap; both are saved in the checkpoint. ``split_edge`` does not apply with ``init_from``,
+      which keeps the checkpoint's. ``max_len`` and ``head_max_len`` (0: the checkpoint's, 256 for a fresh
+      head) do: they override the starting checkpoint's and are saved with the new one, so a task whose question
+      needs more than 256 tokens (the JSPaint drawing question, ~1,050) trains and plays uncut.
     * ``max_train`` / ``max_val`` > 0 keep the first records per dataset (file order) for a quicker run on a
       subset; ``max_train`` does not count the ``n_calib`` holdout.
     * Durability: every ``state_every_min`` minutes (clamped to ``vlm_train.MIN_STATE_MINUTES``, and backed off
@@ -495,11 +498,13 @@ def finetune_long(
           % (max_passes or None, {n: round(epochs * len(train_ex) * probs[n] / sizes[n], 2) for n in names}))
 
     if init_from:
-        agent = VLMAgent(_ckpt_path(init_from), device="cuda")
+        budgets = {k: v for k, v in (("max_len", max_len), ("head_max_len", head_max_len)) if v}
+        agent = VLMAgent(_ckpt_path(init_from), device="cuda", **budgets)
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
         agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention,
-                         image_split_edge=split_edge, **({"max_len": max_len} if max_len else {}))
+                         image_split_edge=split_edge, **({"max_len": max_len} if max_len else {}),
+                         **({"head_max_len": head_max_len} if head_max_len else {}))
     print("backbone %s, readout %s, preprocess %s, split_edge %d, max_len %d" % (
         agent.cfg["backbone"], agent.model.readout, agent.prep.backend, agent.prep.split_edge, agent.cfg["max_len"]))
     init_temps = list(agent.temperature)
@@ -515,6 +520,7 @@ def finetune_long(
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
                                          split_edge=agent.prep.split_edge, max_len=agent.cfg["max_len"],
+                                         head_max_len=agent.cfg.get("head_max_len", 256),
                                          max_train=max_train, max_val=max_val,
                                          option_attention=agent.model.option_attention,
                                          w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
@@ -2540,3 +2546,170 @@ def full_eval(model: str, parts: str = ",".join(FULL_EVAL_PARTS), datasets: str 
             print("saved", path, "on laya-checkpoints")
     if failed:
         raise SystemExit("full_eval: %s produced no results (see the errors above)" % ", ".join(failed))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# JSPaint drawing task (laya/paintenv.py, laya/paintdata.py): labelled data from headless Chromium, and play eval.
+# JSPaint is cloned at a pinned commit; Chromium comes from `playwright install --with-deps`.
+JSPAINT_REPO = "https://github.com/r33drichards/jspaint"
+JSPAINT_COMMIT = "53be67ab8c47cc0d2168899e7481bc04839c4c81"
+paint_image = _with_local_code(
+    base_image.pip_install("playwright==1.63.0").run_commands(
+        "playwright install --with-deps chromium",
+        "git clone %s /jspaint && cd /jspaint && git checkout %s" % (JSPAINT_REPO, JSPAINT_COMMIT),
+    )
+)
+PAINT_DATASET = "paint_circle"
+
+
+@app.function(image=paint_image, cpu=2, memory=4096, timeout=2 * 60 * 60, volumes={"/data": data_vol},
+              retries=modal.Retries(max_retries=2, initial_delay=5.0))
+def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int = 3) -> list:
+    """Play the episodes in ``specs`` (``[seed, eps, random_prefix]``) and write ``<split>-<shard>.jsonl`` plus
+    the frames under ``tmp_dir``. Returns one summary per episode."""
+    from laya.paintdata import play_labelled_episode
+    from laya.paintenv import JSPaintEnv, JSPaintServer
+
+    os.makedirs(os.path.join(tmp_dir, "images"), exist_ok=True)
+
+    def save_frame(name, img):
+        rel = "images/%s.png" % name
+        img.save(os.path.join(tmp_dir, rel), optimize=True)
+        return rel
+
+    out, summaries = os.path.join(tmp_dir, "%s-%03d.jsonl" % (split, shard)), []
+    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, executable_path=None) as env, \
+            open(out + ".part", "w") as f:
+        for seed, eps, prefix in specs:
+            recs, summ = play_labelled_episode(env, seed, "%s-%d" % (split, seed), save_frame, eps=eps,
+                                               random_prefix=prefix, judge_every=judge_every)
+            f.writelines(json.dumps(r) + "\n" for r in recs)
+            summaries.append(summ)
+    os.rename(out + ".part", out)
+    data_vol.commit()
+    return summaries
+
+
+@app.function(image=paint_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
+def prepare_paint(n_train: int = 240, n_val: int = 24, shards: int = 32, seed: int = 0, judge_every: int = 3):
+    """Write /data/vqa/paint_circle/{train,val}.jsonl + images/: labelled JSPaint circle episodes.
+
+    Each episode runs a behaviour policy in headless Chromium: the state-based labeller (``laya.paintdata``) with
+    probability ``1 - eps``, else a random action, after ``random_prefix`` purely random steps. ``eps`` is drawn from
+    (0, 0.1, 0.2, 0.3) and ``random_prefix`` from (0, 0, 10, 30, 60), so the data covers clean circles, noisy ones,
+    and recoveries from a messy start. Every step is labelled with the labeller's action for that state (soft
+    over the neighbouring compass points); every ``judge_every`` steps also with progress, on track and what is
+    drawn. Train and val use disjoint seeds. Episodes are split over ``shards`` containers.
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    final_dir = "/data/vqa/" + PAINT_DATASET
+    tmp_dir = final_dir + ".tmp"
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"))
+    data_vol.commit()
+    rng = random.Random(seed)
+    jobs = []
+    for split, n, seed0 in (("train", n_train, seed), ("val", n_val, seed + 1_000_000)):
+        specs = [[seed0 + i, rng.choice((0.0, 0.1, 0.2, 0.3)), rng.choice((0, 0, 10, 30, 60))] for i in range(n)]
+        k = max(1, min(shards, n))
+        for s in range(k):
+            if specs[s::k]:
+                jobs.append((tmp_dir, split, s, specs[s::k], judge_every))
+    summaries = {"train": [], "val": []}
+    for (_, split, _, _, _), res in zip(jobs, paint_shard.starmap(jobs)):
+        summaries[split].extend(res)
+    data_vol.reload()
+    meta = {"source": "JSPaint %s@%s in headless Chromium, state-based circle labeller (laya/paintdata.py)"
+            % (JSPAINT_REPO, JSPAINT_COMMIT), "judge_every": judge_every}
+    for split in ("train", "val"):
+        parts = sorted(fn for fn in os.listdir(tmp_dir) if fn.startswith(split + "-") and fn.endswith(".jsonl"))
+        kinds = Counter()
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as out:
+            for fn in parts:
+                with open(os.path.join(tmp_dir, fn)) as f:
+                    for line in f:
+                        kinds[json.loads(line)["id"].rsplit("-", 1)[1]] += 1
+                        out.write(line)
+                os.remove(os.path.join(tmp_dir, fn))
+        eps = summaries[split]
+        meta[split] = {"episodes": len(eps), "records": dict(kinds),
+                       "labeller_mean_verifier": round(sum(e["verifier"] for e in eps) / max(1, len(eps)), 4),
+                       "mean_steps": round(sum(e["steps"] for e in eps) / max(1, len(eps)), 1)}
+        print(split, meta[split])
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    with open(os.path.join(tmp_dir, "episodes.json"), "w") as f:
+        json.dump(summaries, f)
+    _write_manifest(tmp_dir, {JSPAINT_REPO: JSPAINT_COMMIT},
+                    dict(n_train=n_train, n_val=n_val, shards=shards, seed=seed, judge_every=judge_every))
+    shutil.rmtree(final_dir, ignore_errors=True)
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    return meta
+
+
+@app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=3 * 60 * 60,
+              volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol})
+def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int = 5, seed: int = 900_000,
+               policies: str = "model,expert,random", judge_stop: bool = False, name: str = ""):
+    """Play the JSPaint circle task with a checkpoint (a run under /ckpt, or a Hub id) and the reference policies.
+
+    The model runs with the raised token budgets (``paintenv.PAINT_HEAD_MAX_LEN`` / ``PAINT_MAX_LEN``) or the
+    checkpoint's if larger, the full drawing question, two-frame state and the judgement questions each step.
+    Seeds start at 900,000, disjoint from ``prepare_paint``'s. The summary (verifier score, pass rate, steps,
+    action mix and per-step judgements) is written to ``<run>/paint_eval/<name or timestamp>.json`` for a run on the
+    volume and returned.
+    """
+    from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, circle_expert,
+                               model_policy, play_episodes, random_policy)
+    from laya.vlm import VLMAgent
+
+    path = _ckpt_path(model)
+    src = path if os.path.exists(os.path.join(path, "vlm_agent_config.json")) else model
+    probe = VLMAgent(src, device="cuda")
+    budgets = dict(head_max_len=max(PAINT_HEAD_MAX_LEN, probe.cfg.get("head_max_len", 256)),
+                   max_len=max(PAINT_MAX_LEN, probe.cfg.get("max_len", 1024)))
+    del probe
+    agent = VLMAgent(src, device="cuda", **budgets)
+    names = [p for p in policies.split(",") if p]
+    out = {"model": model, "budgets": budgets, "episodes": episodes, "seed": seed, "judge_stop": judge_stop,
+           "jspaint": JSPAINT_COMMIT, "policies": {}}
+    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, canvas_size=agent.prep.image_size) as env:
+        for pname in names:
+            pol = {"model": lambda: model_policy(agent, judge_stop=judge_stop), "expert": circle_expert,
+                   "random": lambda: random_policy(seed)}[pname]()
+            steps_log = []
+
+            def on_step(env, action, pol=pol, pname=pname, steps_log=steps_log):
+                if pname == "model":
+                    steps_log.append({"seed": env.seed, "step": env.steps, "action": action,
+                                      "top_p": max(pol.last["probabilities"].values()),
+                                      "act_probability": pol.last["action"]["act_probability"],
+                                      **({"judgement": {k: v for k, v in pol.last_judgement.items()
+                                                        if not k.endswith("_probs")}} if pol.last_judgement else {})})
+
+            t = time.time()
+            res = play_episodes(env, pol, episodes, seed=seed, on_step=on_step)
+            res["seconds"] = round(time.time() - t, 1)
+            if pname == "model":
+                res["provenance"] = pol.provenance
+                res["steps_log"] = steps_log
+            out["policies"][pname] = res
+            print("%-7s mean score %.3f  pass rate %.2f  mean steps %.1f  actions %s  (%.0fs)" % (
+                pname, res["mean_score"], res["pass_rate"], res["mean_steps"],
+                dict(sorted(res["actions"].items(), key=lambda kv: -kv[1])[:6]), res["seconds"]), flush=True)
+    if os.path.exists(os.path.join(path, "vlm_agent_config.json")):
+        d = os.path.join(path, "paint_eval")
+        os.makedirs(d, exist_ok=True)
+        fn = os.path.join(d, (name or time.strftime("%Y%m%d-%H%M%S")) + ".json")
+        with open(fn, "w") as f:
+            json.dump(out, f, indent=2, default=str)
+        ckpt_vol.commit()
+        print("wrote", fn)
+    return {k: v for k, v in out.items() if k != "policies"} | {
+        "summary": {p: {k: r[k] for k in ("mean_score", "pass_rate", "mean_steps", "actions")}
+                    for p, r in out["policies"].items()}}

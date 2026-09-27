@@ -917,6 +917,7 @@ class VLMAgent:
         self.cfg["readout"] = self.processor.laya_readout = self.model.readout
         self.cfg["option_attention"] = self.model.option_attention
         self.processor.laya_max_len = self.cfg.get("max_len", 1024)
+        self.processor.laya_head_max_len = self.cfg.get("head_max_len", 256)
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
         self.temperature_by_options = self.cfg.get("temperature_by_options", {})
