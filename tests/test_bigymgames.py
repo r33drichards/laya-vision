@@ -103,7 +103,7 @@ def test_multi_frame_question():
 
 @pytest.mark.parametrize("frames", [1, 4])
 def test_questions_fit_the_budgets_whole(frames):
-    """25 options share head_max_len with the instructions: nothing (least of all the task) may be cut."""
+    """29 options share head_max_len with the instructions: nothing (least of all the task) may be cut."""
     transformers = pytest.importorskip("transformers")
     from laya.vlm import VLMAgent, build_vlm_inputs
 

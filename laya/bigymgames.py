@@ -5,7 +5,7 @@ base X, Y, yaw; five joints per arm; two grippers) at 50 Hz. Laya answers discre
 bridges the two in two ways:
 
 - **Control.** Each decision the model picks one of ``PRIMITIVES``, a named motion: move a wrist 3 cm along a
-  robot-frame axis, roll a wrist, open or close a gripper, step or turn the base, or stay.
+  robot-frame axis, roll a wrist, open or close a gripper, step, sidestep, turn, crouch or stand, or stay.
   ``primitive_to_action`` turns a wrist move into joint deltas with damped least-squares IK on the wrist site; the
   action is applied once and the robot is left ``HOLD`` env steps to settle. A random policy and a privileged
   oracle play the same seeded episodes over the same primitives. The oracle greedily moves the relevant wrist
@@ -28,6 +28,7 @@ CONTROL_FREQUENCY = 50
 RESOLUTION = (256, 256)
 WRIST_STEP = 0.03  # metres a wrist primitive moves the wrist
 BASE_STEP = 0.05  # metres a base primitive moves the pelvis
+CROUCH_STEP = 0.03  # metres a crouch / stand primitive lowers or raises the pelvis (the demos crouch ~0.11 m)
 TURN_STEP = 0.2  # radians a turn primitive rotates the pelvis
 WRIST_ROLL = 0.25  # radians a wrist-roll primitive turns the wrist joint (about 14 degrees; its range is +-90)
 IK_DAMPING = 0.05
@@ -76,9 +77,13 @@ for _hand in ("LEFT", "RIGHT"):
     PRIMITIVES["%s_WRIST_CCW" % _hand] = "roll the %s wrist counterclockwise" % _hand.lower()
 PRIMITIVES.update({"BASE_FORWARD": "step the whole robot forward", "BASE_BACK": "step the whole robot back",
                    "BASE_TURN_LEFT": "turn the whole robot to the left",
-                   "BASE_TURN_RIGHT": "turn the whole robot to the right", "STAY": "do nothing and wait"})
+                   "BASE_TURN_RIGHT": "turn the whole robot to the right",
+                   "BASE_LEFT": "sidestep the whole robot to the left",
+                   "BASE_RIGHT": "sidestep the whole robot to the right",
+                   "BASE_DOWN": "crouch: lower the whole robot", "BASE_UP": "stand up: raise the whole robot",
+                   "STAY": "do nothing and wait"})
 
-# The option text the model reads: 25 options share the head budget (``head_max_len``, 256 tokens) with the
+# The option text the model reads: 29 options share the head budget (``head_max_len``, 256 tokens) with the
 # instructions, so "NAME: description" (about 20 tokens each) would be cut and crowd the task out of the prompt.
 # Short phrases fit whole; ``model_policy`` maps the chosen phrase back to the primitive's name.
 OPTION_WORDS: Dict[str, str] = {}
@@ -92,7 +97,9 @@ for _hand in ("LEFT", "RIGHT"):
     OPTION_WORDS["%s_WRIST_CW" % _hand] = "roll %s wrist clockwise" % _hand.lower()
     OPTION_WORDS["%s_WRIST_CCW" % _hand] = "roll %s wrist counterclockwise" % _hand.lower()
 OPTION_WORDS.update({"BASE_FORWARD": "step forward", "BASE_BACK": "step back", "BASE_TURN_LEFT": "turn left",
-                     "BASE_TURN_RIGHT": "turn right", "STAY": "wait"})
+                     "BASE_TURN_RIGHT": "turn right", "BASE_LEFT": "sidestep left", "BASE_RIGHT": "sidestep right",
+                     "BASE_DOWN": "crouch", "BASE_UP": "stand up",
+                     "STAY": "wait"})
 FROM_WORDS = {v: k for k, v in OPTION_WORDS.items()}
 
 PROGRESS_LEVELS = ["not started: far from done", "partly done", "mostly done: nearly there", "done"]
@@ -167,7 +174,7 @@ def make_env(task: str, cameras: bool = True):
     for the wall-cabinet tasks) and the privileged target position."""
     import importlib
 
-    from bigym.action_modes import JointPositionActionMode
+    from bigym.action_modes import JointPositionActionMode, PelvisDof
     from bigym.utils.observation_config import CameraConfig, ObservationConfig
 
     cls = getattr(importlib.import_module("bigym.envs." + TASKS[task]["module"]), task)
@@ -179,7 +186,9 @@ def make_env(task: str, cameras: bool = True):
         mujoco.mju_mulQuat(q, np.array(HEAD_QUAT), np.array([np.cos(a / 2), np.sin(a / 2), 0.0, 0.0]))
         view = {"pos": HEAD_POS, "quat": tuple(float(v) for v in q)}
     cams = [CameraConfig("head", rgb=True, depth=False, resolution=RESOLUTION, **view)] if cameras else []
-    return cls(action_mode=JointPositionActionMode(absolute=False, floating_base=True),
+    # the floating base moves in X, Y, height and yaw (the DOFs BiGym's demos were recorded with)
+    dofs = [PelvisDof.X, PelvisDof.Y, PelvisDof.Z, PelvisDof.RZ]
+    return cls(action_mode=JointPositionActionMode(absolute=False, floating_base=True, floating_dofs=dofs),
                observation_config=ObservationConfig(cameras=cams, proprioception=True, privileged_information=True),
                control_frequency=CONTROL_FREQUENCY)
 
@@ -213,7 +222,9 @@ class BiGymGame:
         self.steps, self.decisions = 0, 0
         self.success, self.terminated, self.truncated = False, False, False
         self._frame = self._prev = None
-        self._history = [self.frame()]  # one head frame per decision, newest last (at most MAX_FRAMES)
+        # one head frame per decision, newest last (at most MAX_FRAMES); empty for a camera-less env (make_env
+        # cameras=False), which is enough for the oracle, the random policy and the demo follower
+        self._history = [self.frame()] if "rgb_head" in self.obs else []
 
     @property
     def done(self) -> bool:
@@ -261,6 +272,10 @@ class BiGymGame:
             return self._jac(hand) @ self.ik_delta(hand, WRIST_STEP * self.world_dir(parts[2]))
         if name in ("BASE_FORWARD", "BASE_BACK"):
             return self.world_dir("FORWARD") * (BASE_STEP if name == "BASE_FORWARD" else -BASE_STEP)
+        if name in ("BASE_LEFT", "BASE_RIGHT"):
+            return self.world_dir("LEFT") * (BASE_STEP if name == "BASE_LEFT" else -BASE_STEP)
+        if name in ("BASE_UP", "BASE_DOWN"):
+            return np.array([0.0, 0.0, CROUCH_STEP if name == "BASE_UP" else -CROUCH_STEP])
         return np.zeros(3)
 
     # -- actions ---------------------------------------------------------------------------------------------
@@ -286,8 +301,13 @@ class BiGymGame:
         elif name in ("BASE_FORWARD", "BASE_BACK"):
             d = self.world_dir("FORWARD") * (BASE_STEP if name == "BASE_FORWARD" else -BASE_STEP)
             act[0:2] = d[:2]
+        elif name in ("BASE_LEFT", "BASE_RIGHT"):
+            d = self.world_dir("LEFT") * (BASE_STEP if name == "BASE_LEFT" else -BASE_STEP)
+            act[0:2] = d[:2]
         elif name in ("BASE_TURN_LEFT", "BASE_TURN_RIGHT"):
             act[self._n_base - 1] = TURN_STEP if name == "BASE_TURN_LEFT" else -TURN_STEP
+        elif name in ("BASE_UP", "BASE_DOWN"):
+            act[2] = CROUCH_STEP if name == "BASE_UP" else -CROUCH_STEP  # base action order: X, Y, Z, yaw
         elif name != "STAY":
             raise ValueError("unknown primitive %r" % name)
         act[-len(self._grip):] = self._grip
@@ -309,9 +329,34 @@ class BiGymGame:
             if self.done:
                 break
         self.obs = e.get_observation()
-        self._history = (self._history + [self.frame()])[-MAX_FRAMES:]
+        if "rgb_head" in self.obs:
+            self._history = (self._history + [self.frame()])[-MAX_FRAMES:]
         self.decisions += 1
         return self.success
+
+    # -- lookahead -------------------------------------------------------------------------------------------
+    def snapshot(self):
+        """Everything ``step`` changes: the MuJoCo state plus the Python-side floating-base and gripper commands and
+        this game's counters. ``restore`` puts it back, so a planner can try a primitive and undo it."""
+        m, d, mj = self._model, self._data, self._mj
+        spec = mj.mjtState.mjSTATE_INTEGRATION
+        state = np.empty(mj.mj_stateSize(m, spec))
+        mj.mj_getState(m, d, state, spec)
+        fb = self.env.robot.floating_base
+        return (state, fb._accumulated_actions.copy(), fb._last_action.copy(), self._grip.copy(),
+                (self.steps, self.decisions, self.success, self.terminated, self.truncated, self.obs,
+                 self._frame, self._prev, list(self._history)))
+
+    def restore(self, snap) -> None:
+        m, d, mj = self._model, self._data, self._mj
+        state, acc, last, grip, counters = snap
+        mj.mj_setState(m, d, state, mj.mjtState.mjSTATE_INTEGRATION)
+        mj.mj_forward(m, d)
+        fb = self.env.robot.floating_base
+        fb._accumulated_actions, fb._last_action, self._grip = acc.copy(), last.copy(), grip.copy()
+        (self.steps, self.decisions, self.success, self.terminated, self.truncated, self.obs, self._frame,
+         self._prev, history) = counters
+        self._history = list(history)
 
     # -- observation -----------------------------------------------------------------------------------------
     def frame(self) -> np.ndarray:

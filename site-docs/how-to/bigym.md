@@ -15,16 +15,17 @@ bridges the two in two ways, and
 
   Each question is scored for accuracy, ECE and NLL, next to a prior-only baseline. That baseline always predicts
   the label frequencies of the same rows, so its accuracy is the share of the most common label.
-- **Zero-shot control.** The model picks one of 25 named motion primitives each decision:
+- **Zero-shot control.** The model picks one of 29 named motion primitives each decision:
     - move one wrist 3 cm forward, back, left, right, up or down, in the robot's frame
     - roll one wrist 0.25 rad (about 14°) clockwise or counterclockwise, as the head camera sees it
     - open or close a gripper
-    - step or turn the base
+    - step forward or back, sidestep left or right, turn, crouch or stand up (the base moves in X, Y, height and
+      yaw, the four DOFs BiGym's demos were recorded with)
     - stay
 
   It sees the current head frame, or with `--frames 2` / `--frames 4` its last 2 or 4 decision frames (0.1 s
   apart, oldest first, as `{"images": [...]}`), so it can see motion. The options are short phrases ("left hand
-  up", "close right gripper", "wait"), because 25 options share a 256-token budget with the instruction.
+  up", "close right gripper", "wait"), because 29 options share a 256-token budget with the instruction.
 
   Damped least-squares inverse kinematics on the wrist site turns a wrist move into joint deltas. Each primitive is
   applied once and then held for 0.1 s (5 env steps). Random play uses the same seeded episodes and the same
@@ -74,8 +75,8 @@ checks when `mujoco` and `bigym` are installed.
 
 ## Results: thaitea/laya-vision
 
-These results are for revision `f2fe3c1` (MuJoCo 3.14.0, L4 bf16). They were run with 21 primitives, before the
-four wrist rolls were added.
+These results are for revision `f2fe3c1` (MuJoCo 3.14.0, L4 bf16). They were run with 21 primitives and a 3-DOF
+base, before the wrist rolls, sidesteps and crouching were added.
 
 - **Control** comes from a run with code `51afb36`, with every episode in
   [`eval-results/bigym-laya-vision-f2fe3c1-frames.json`](https://github.com/r33drichards/laya-vision/blob/main/eval-results/bigym-laya-vision-f2fe3c1-frames.json).
