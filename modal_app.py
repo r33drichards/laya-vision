@@ -2561,13 +2561,9 @@ paint_image = _with_local_code(
 )
 
 
-@app.function(image=paint_image, cpu=2, memory=4096, timeout=2 * 60 * 60, volumes={"/data": data_vol},
-              retries=modal.Retries(max_retries=2, initial_delay=5.0))
-def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int = 3) -> list:
-    """Play the episodes in ``specs`` (``[seed, eps, random_prefix, messy]``) and write ``<split>-<shard>.jsonl`` plus
-    the frames under ``tmp_dir``. Returns one summary per episode."""
+def _paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int, model: str, beta: float) -> list:
     from laya.paintdata import play_labelled_episode
-    from laya.paintenv import JSPaintEnv, JSPaintServer
+    from laya.paintenv import PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, ModelPolicy
 
     os.makedirs(os.path.join(tmp_dir, "images"), exist_ok=True)
 
@@ -2576,12 +2572,19 @@ def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: 
         img.save(os.path.join(tmp_dir, rel), optimize=True)
         return rel
 
+    driver = None
+    if model:
+        from laya.vlm import VLMAgent
+
+        agent = VLMAgent(_ckpt_path(model), device="cuda", head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN)
+        driver = ModelPolicy(agent, judge=False)
     out, summaries = os.path.join(tmp_dir, "%s-%03d.jsonl" % (split, shard)), []
     with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, executable_path=None) as env, \
             open(out + ".part", "w") as f:
         for seed, eps, prefix, messy in specs:
             recs, summ = play_labelled_episode(env, seed, "%s-%d" % (split, seed), save_frame, eps=eps,
-                                               random_prefix=prefix, judge_every=judge_every, messy=messy)
+                                               random_prefix=prefix, judge_every=judge_every, messy=messy,
+                                               driver=driver, beta=beta)
             f.writelines(json.dumps(r) + "\n" for r in recs)
             summaries.append(summ)
     os.rename(out + ".part", out)
@@ -2589,9 +2592,26 @@ def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: 
     return summaries
 
 
+@app.function(image=paint_image, cpu=2, memory=4096, timeout=2 * 60 * 60, volumes={"/data": data_vol},
+              retries=modal.Retries(max_retries=2, initial_delay=5.0))
+def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int = 3) -> list:
+    """Play the episodes in ``specs`` (``[seed, eps, random_prefix, messy]``) with the labeller driving and write
+    ``<split>-<shard>.jsonl`` plus the frames under ``tmp_dir``. Returns one summary per episode."""
+    return _paint_shard(tmp_dir, split, shard, specs, judge_every, "", 1.0)
+
+
+@app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=3 * 60 * 60,
+              volumes={"/data": data_vol, "/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()},
+              retries=modal.Retries(max_retries=2, initial_delay=5.0))
+def paint_shard_dagger(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int = 3, model: str = "",
+                       beta: float = 0.5) -> list:
+    """``paint_shard`` with a trained checkpoint driving each step with probability ``1 - beta`` (DAgger)."""
+    return _paint_shard(tmp_dir, split, shard, specs, judge_every, model, beta)
+
+
 @app.function(image=paint_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
 def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int = 24, shards: int = 32, seed: int = 0,
-                  judge_every: int = 3):
+                  judge_every: int = 3, model: str = "", beta: float = 0.5):
     """Write /data/vqa/<name>/{train,val}.jsonl + images/: labelled JSPaint circle episodes. Refuses to replace an
     existing prepared dataset (they are create-only; ``paint_circle`` was the first, fixed-target labeller).
 
@@ -2602,6 +2622,10 @@ def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int 
     may draw, leaving stray ink). Every step is labelled with the labeller's action for that state (soft
     over the neighbouring compass points); every ``judge_every`` steps also with progress, on track and what is
     drawn. Train and val use disjoint seeds. Episodes are split over ``shards`` containers.
+
+    With ``model`` (a run under /ckpt), the checkpoint drives each step with probability ``1 - beta`` (DAgger, on L4
+    containers): the data then covers the states the model itself reaches, labelled with what the labeller would
+    do there. Use a new ``seed`` per round so the episodes differ from the earlier sets'.
     """
     import random
     import shutil
@@ -2624,13 +2648,16 @@ def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int 
         k = max(1, min(shards, n))
         for s in range(k):
             if specs[s::k]:
-                jobs.append((tmp_dir, split, s, specs[s::k], judge_every))
+                jobs.append((tmp_dir, split, s, specs[s::k], judge_every) + ((model, beta) if model else ()))
     summaries = {"train": [], "val": []}
-    for (_, split, _, _, _), res in zip(jobs, list(paint_shard.starmap(jobs))):
+    shard_fn = paint_shard_dagger if model else paint_shard
+    for job, res in zip(jobs, list(shard_fn.starmap(jobs))):
+        split = job[1]
         summaries[split].extend(res)
     data_vol.reload()
     meta = {"source": "JSPaint %s@%s in headless Chromium, state-based circle labeller (laya/paintdata.py)"
-            % (JSPAINT_REPO, JSPAINT_COMMIT), "judge_every": judge_every}
+            % (JSPAINT_REPO, JSPAINT_COMMIT), "judge_every": judge_every, "driver": model or "labeller",
+            "beta": beta if model else None}
     for split in ("train", "val"):
         parts = sorted(fn for fn in os.listdir(tmp_dir) if fn.startswith(split + "-") and fn.endswith(".jsonl"))
         kinds = Counter()
@@ -2651,7 +2678,8 @@ def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int 
     with open(os.path.join(tmp_dir, "episodes.json"), "w") as f:
         json.dump(summaries, f)
     _write_manifest(tmp_dir, {JSPAINT_REPO: JSPAINT_COMMIT},
-                    dict(n_train=n_train, n_val=n_val, shards=shards, seed=seed, judge_every=judge_every))
+                    dict(n_train=n_train, n_val=n_val, shards=shards, seed=seed, judge_every=judge_every,
+                         model=model, beta=beta))
     os.rename(tmp_dir, final_dir)
     open(os.path.join(final_dir, "_READY"), "w").close()
     data_vol.commit()

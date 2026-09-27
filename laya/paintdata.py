@@ -183,13 +183,18 @@ def _question_record(q: Dict) -> Dict:
 
 
 def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0, random_prefix: int = 0,
-                          judge_every: int = 3, task: str = "circle", messy: bool = False) -> Tuple[List[Dict], Dict]:
+                          judge_every: int = 3, task: str = "circle", messy: bool = False, driver=None,
+                          beta: float = 0.5) -> Tuple[List[Dict], Dict]:
     """Play one episode and return (training records, episode summary).
 
     ``save_frame(name, image) -> path`` stores an observation and returns the path the records should reference.
     Each step yields an action record; every ``judge_every`` steps, and once for the final canvas, also one record
     per labelled judgement. With ``messy`` the ``random_prefix`` steps may press the button too, leaving stray ink
-    to judge and recover from; otherwise they are pen-up moves that only relocate the cursor."""
+    to judge and recover from; otherwise they are pen-up moves that only relocate the cursor.
+
+    ``driver(env) -> action`` (e.g. a trained ``paintenv.ModelPolicy``) takes the step with probability ``1 - beta``
+    instead of the labeller (DAgger): the episode then visits the states the model itself reaches, including its
+    mistakes, and every one of them is still labelled with the labeller's action."""
     from laya.games import paint_judgements, paint_question
 
     rng = random.Random(seed)
@@ -232,6 +237,8 @@ def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0
             act = rng.choice([a for a in env.actions if a != "DONE"] if messy else list(env.moves))
         elif rng.random() < eps:
             act = rng.choice([a for a in env.actions if a != "DONE"])
+        elif driver is not None and rng.random() >= beta:
+            act = driver(env)
         else:
             act = label
         env.step(act)
@@ -239,7 +246,8 @@ def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0
             frame_path(env.steps)
     frame_path(env.steps)  # the final canvas, judged once more (it is where "complete" and "circle" are true)
     judge_records(base_state(env.steps), env.visible_pixels(), env.steps)
-    summary = {"seed": seed, "eps": eps, "random_prefix": random_prefix, "messy": messy, "steps": env.steps,
+    summary = {"seed": seed, "eps": eps, "random_prefix": random_prefix, "messy": messy,
+               "driver": driver is not None, "beta": beta if driver is not None else None, "steps": env.steps,
                "records": len(records), "verifier": env.result["score"],
                "final": label_judgements(env.visible_pixels())}
     return records, summary
