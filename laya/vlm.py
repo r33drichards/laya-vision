@@ -254,6 +254,9 @@ def vlm_prefix(processor, images: Sequence, prep: Optional[ImagePrep] = None,
     }
 
 
+OPTION_MAX_LEN = 48  # tokens kept of each option before the head_max_len split; override with cfg["option_max_len"]
+
+
 def build_vlm_inputs(
     processor,
     state: Any,
@@ -265,6 +268,7 @@ def build_vlm_inputs(
     prefix: Optional[Dict[str, Any]] = None,
     prep: Optional[ImagePrep] = None,
     readout: Optional[str] = None,
+    option_max_len: int = OPTION_MAX_LEN,
 ) -> Dict[str, Any]:
     """Build one VLM sequence for an internal question ``q = {"t", "ins", "crit"}``.
 
@@ -277,6 +281,7 @@ def build_vlm_inputs(
     questions; the state's images are then ignored in favour of it. ``prep`` picks the preprocessing path (see
     ``laya.preprocess``); it is ignored when ``prefix`` is given, which already carries the choice. ``max_len``
     defaults to the checkpoint's, which the agent leaves on the processor as ``laya_max_len`` (1024 without one).
+    ``option_max_len`` caps each option's tokens before the ``head_max_len`` split (48, the training cap).
     """
     if max_len is None:
         max_len = getattr(processor, "laya_max_len", 1024)
@@ -289,7 +294,8 @@ def build_vlm_inputs(
     if prefix is None:
         prefix = vlm_prefix(processor, images, prep, MASK_PREFIX_TEXT if readout == "mask" else PREFIX_TEXT)
     if readout == "mask":
-        return _mask_inputs(processor, text, q, max_len, head_max_len, option_order, truncate_left, prefix)
+        return _mask_inputs(processor, text, q, max_len, head_max_len, option_order, truncate_left, prefix,
+                            option_max_len)
     enc = lambda s: tok(s, add_special_tokens=False)["input_ids"]  # noqa: E731
     end_id = enc(OPTION_END)
     assert len(end_id) == 1, "option terminator must be a single token"
@@ -298,7 +304,7 @@ def build_vlm_inputs(
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
     full = [enc(OPTION_BULLET + opts[i].replace(OPTION_END, " ")) for i in order]
-    opt_ids = [o[:48] for o in full]
+    opt_ids = [o[:option_max_len] for o in full]
     head_ids = enc(QUESTION_TEXT % (q["t"], str(q["ins"]).replace("<end_of_utterance>", " ")))
     n_head = len(head_ids)
     opt_budget = head_max_len - sum(len(o) + 1 for o in opt_ids)
@@ -339,13 +345,13 @@ def build_vlm_inputs(
 
 
 def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int, option_order: Optional[List[int]],
-                 truncate_left: bool, prefix: Dict[str, Any]) -> Dict[str, Any]:
+                 truncate_left: bool, prefix: Dict[str, Any], option_max_len: int = OPTION_MAX_LEN) -> Dict[str, Any]:
     """The bidirectional sequence (see the module docstring), ``laya.common.build_sequence`` with an image run:
 
         [CLS]User:<image tokens...> <type> question: <ins>[SEP][MASK] opt0[MASK] opt1 ...[SEP]<state>[SEP]
 
-    Budgets are the text model's: the question plus options fit in ``head_max_len`` (options are cut to 48
-    tokens each, then evenly, then the instructions), the state takes what is left of ``max_len``.
+    Budgets are the text model's: the question plus options fit in ``head_max_len`` (options are cut to
+    ``option_max_len`` tokens each, then evenly, then the instructions), the state takes what is left of ``max_len``.
     """
     tok = processor.tokenizer
     mask_id, sep_id = tok.mask_token_id, tok.sep_token_id
@@ -357,7 +363,7 @@ def _mask_inputs(processor, text: str, q: Dict, max_len: int, head_max_len: int,
     opts = render_options(q)
     order = option_order if option_order is not None else list(range(len(opts)))
     full = [[mask_id] + enc(" " + clean(opts[i])) for i in order]
-    opt_ids = [o[:49] for o in full]  # [MASK] + 48 option tokens
+    opt_ids = [o[:option_max_len + 1] for o in full]  # [MASK] + option_max_len option tokens
     head_ids = enc(MASK_QUESTION_TEXT % (q["t"], clean(str(q["ins"]))))
     n_head = len(head_ids)
     opt_budget = head_max_len - sum(len(o) for o in opt_ids)
@@ -1040,7 +1046,7 @@ class VLMAgent:
         warns, or raises with ``strict_calibration=True``. ``_raw_logits``, if a dict, receives each question's
         permutation-averaged logits before any temperature (used by ``calibrate``).
 
-        Inputs are cut to fit the checkpoint's budgets: each option to 48 tokens (then evenly when all of them
+        Inputs are cut to fit the checkpoint's budgets: each option to ``option_max_len`` tokens (48) (then evenly when all of them
         exceed ``head_max_len``), the instructions to what ``head_max_len`` leaves, the state's text to what
         ``max_len`` leaves. An answer whose question was cut carries ``"truncated": {"options": [labels cut],
         "indistinguishable": [[label, label], ...] (identical once cut), "instructions": bool,
@@ -1073,7 +1079,8 @@ class VLMAgent:
             q = internal[qid]
             k = len(render_options(q))
             for order in _permutations(k, max(1, n_permutations)):
-                it = build_vlm_inputs(self.processor, state, q, max_len, head_max_len, option_order=order, prefix=prefix)
+                it = build_vlm_inputs(self.processor, state, q, max_len, head_max_len, option_order=order, prefix=prefix,
+                                      option_max_len=self.cfg.get("option_max_len", OPTION_MAX_LEN))
                 if len(it["markers"]) != k:
                     raise ValueError("question %r options exceed head_max_len" % qid)
                 if qid not in truncated:  # the cuts do not depend on the option order: report the first one's
