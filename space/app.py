@@ -139,4 +139,6 @@ with gr.Blocks(title="Laya Vision") as demo:
     if EXAMPLE_PATH:
         gr.Examples([[EXAMPLE_PATH]], inputs=[image], label="Example (photo: Alvesgaspar, CC BY-SA 3.0, Wikimedia Commons)")
 
-demo.queue(max_size=16).launch(show_error=True)
+# ssr_mode=False: Spaces turn on server-side rendering by default, and with gradio 6.28 its page asset
+# requests (/_app/immutable/...) return 404, which leaves the page blank. The client-rendered page loads.
+demo.queue(max_size=16).launch(show_error=True, ssr_mode=False)
