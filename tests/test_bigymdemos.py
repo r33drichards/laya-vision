@@ -16,6 +16,7 @@ HAVE_DEMOS = (pathlib.Path.home() / ".bigym" / "demonstrations").exists()
 
 def test_cost_is_zero_at_the_waypoint_and_wraps_yaw():
     w = np.zeros(len(bd.FIELDS))
+    w[bd.FIELDS.index("plx")] = w[bd.FIELDS.index("prx")] = 1.0  # grippers pointing forward
     assert bd.cost(w, w) == 0.0
     s = w.copy()
     s[bd.FIELDS.index("yaw")] = 2 * np.pi - 0.1  # -0.1 rad, not 6.18
@@ -33,7 +34,7 @@ def test_lookahead_leaves_the_game_unchanged():
     game.step("LEFT_HAND_UP")
     before, steps = bd._state(game), game.steps
     target = before.copy()
-    target[bd.FIELDS.index("lz")] += 0.1
+    target[bd.FIELDS.index("lz")] += bd.bg.WRIST_STEP  # one hand step up, same gripper direction
     assert bd.lookahead(game, target) == "LEFT_HAND_UP"
     assert game.steps == steps and np.allclose(bd._state(game), before, atol=1e-3)
     game.close()
@@ -47,3 +48,11 @@ def test_follower_completes_a_drawer_demo():
     runs = [bd.follow("DrawerTopClose", d) for d in demos]
     assert sum(r["success"] for r in runs) >= 3  # 4/5 when written
     assert all(lab["primitive"] in bd.bg.PRIMITIVES for r in runs for lab in r["labels"])
+
+
+def test_pointing_mismatch_costs_by_angle():
+    w = np.zeros(len(bd.FIELDS))
+    w[bd.FIELDS.index("plx")] = w[bd.FIELDS.index("prx")] = 1.0
+    s = w.copy()
+    s[bd.FIELDS.index("plx")], s[bd.FIELDS.index("plz")] = 0.0, 1.0  # left gripper pointing up: 90 degrees off
+    assert bd.cost(s, w) == pytest.approx(bd.W_POINT * np.pi / 2)

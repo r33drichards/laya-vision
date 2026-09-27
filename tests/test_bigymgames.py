@@ -103,7 +103,7 @@ def test_multi_frame_question():
 
 @pytest.mark.parametrize("frames", [1, 4])
 def test_questions_fit_the_budgets_whole(frames):
-    """29 options share head_max_len with the instructions: nothing (least of all the task) may be cut."""
+    """37 options share head_max_len with the instructions: nothing (least of all the task) may be cut."""
     transformers = pytest.importorskip("transformers")
     from laya.vlm import VLMAgent, build_vlm_inputs
 
@@ -152,4 +152,21 @@ def test_wrist_roll_turns_only_the_wrist():
     for _ in range(12):
         game.step("LEFT_WRIST_CW")
     assert float(d.qpos[qadr["left"]]) <= m.jnt_range[m.dof_jntid[game._arm["left"][1][-1]]][1] + 1e-3
+    game.close()
+
+
+@sim
+def test_tilt_aims_the_gripper():
+    game = bg.BiGymGame("ReachTarget", seed=0, env=bg.make_env("ReachTarget", cameras=False))
+    for _ in range(3):
+        game.step("STAY")
+    for name, axis, sign in (("LEFT_TILT_UP", 2, 1), ("LEFT_TILT_DOWN", 2, -1), ("RIGHT_TILT_LEFT", 1, 1),
+                             ("RIGHT_TILT_RIGHT", 1, -1)):
+        hand = name.split("_")[0].lower()
+        x0 = game.pointing(hand).copy()
+        game.step(name)
+        x1 = game.pointing(hand)
+        turned = np.degrees(np.arccos(np.clip(x0 @ x1, -1, 1)))
+        assert turned == pytest.approx(np.degrees(bg.TILT_STEP), abs=4), (name, turned)
+        assert sign * (x1[axis] - x0[axis]) > 0.1, (name, x0, x1)  # it turned the named way
     game.close()

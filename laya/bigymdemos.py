@@ -1,10 +1,11 @@
 """BiGym human demonstrations as ``laya.bigymgames`` primitive labels.
 
 A demo is a 20 Hz stream of absolute joint targets (4 floating-base DOFs, 10 arm joints, 2 grippers). Laya picks
-one of 29 primitives per 0.1 s decision. ``follow`` bridges them closed-loop: the demo is replayed in BiGym's own
-settings to get ``waypoints`` (where the pelvis, both wrists, both wrist rolls and both grippers are every
+one of 37 primitives per 0.1 s decision. ``follow`` bridges them closed-loop: the demo is replayed in BiGym's own
+settings to get ``waypoints`` (where the pelvis, both wrists, their rolls, which way each gripper points and whether it is closed, every
 ``every`` demo steps), then a follower in the eval env (``make_env``: delta joints, 4 floating DOFs, 50 Hz) picks,
-each decision, the primitive whose predicted effect brings the robot closest to the current waypoint, advancing
+each decision, the primitive whose simulated effect (tried and undone, ``lookahead``) brings the robot closest to
+the current waypoint, advancing
 through the waypoints as it reaches them. The chosen primitives are the labels; whether the follower completes the
 task says whether those labels are good enough to learn from.
 
@@ -22,10 +23,12 @@ from . import bigymgames as bg
 EVERY = 2  # demo steps (20 Hz) per waypoint: 0.1 s, one decision
 # waypoint cost weights: metres per unit of each state error
 W_BASE, W_YAW, W_WRIST, W_GRIP = 0.5, 0.2, 0.05, 0.2
+W_POINT = 0.1  # per radian between the gripper's pointing direction and the demo's (30 degrees ~ 5 cm)
 REACHED = 0.06  # a waypoint counts as reached below this cost
 PATIENCE = 4  # decisions without a new best cost on a waypoint (by IMPROVE) before aiming at the next one
 IMPROVE = 0.002
-FIELDS = ("px", "py", "pz", "yaw", "lx", "ly", "lz", "rx", "ry", "rz", "wl", "wr", "gl", "gr")
+FIELDS = ("px", "py", "pz", "yaw", "lx", "ly", "lz", "rx", "ry", "rz", "wl", "wr", "gl", "gr",
+          "plx", "ply", "plz", "prx", "pry", "prz")  # the last six: each gripper's pointing direction
 
 
 def _yaw(xmat) -> float:
@@ -54,6 +57,7 @@ def demo_waypoints(task: str, amount: int = 20, seed: int = 0, every: int = EVER
                                   frequency=CONTROL_FREQUENCY_MIN)
     robot, data = env.robot, env.mojo.data
     pel = env.mojo.physics.bind(robot.pelvis.mjcf).element_id
+    sites = [env.mojo.physics.bind(robot._wrist_sites[side].mjcf).element_id for side in (HandSide.LEFT, HandSide.RIGHT)]
     nb = robot.floating_base.dof_amount
     wl, wr = nb + 4, nb + 9  # the wrists are each arm's fifth actuator
     out = []
@@ -67,7 +71,8 @@ def demo_waypoints(task: str, amount: int = 20, seed: int = 0, every: int = EVER
             a = st.executed_action
             rows.append([data.xpos[pel][0], data.xpos[pel][1], data.xpos[pel][2], _yaw(data.xmat[pel]),
                          *robot.get_hand_pos(HandSide.LEFT), *robot.get_hand_pos(HandSide.RIGHT),
-                         q[wl], q[wr], float(a[-2] > 0.5), float(a[-1] > 0.5)])
+                         q[wl], q[wr], float(a[-2] > 0.5), float(a[-1] > 0.5),
+                         *[v for i in sites for v in np.asarray(data.site_xmat[i]).reshape(3, 3)[:, 0]]])
             if env.success:
                 success = i
                 break
@@ -83,7 +88,7 @@ def _state(game: bg.BiGymGame) -> np.ndarray:
     wrist = [float(d.qpos[m.jnt_qposadr[m.dof_jntid[game._arm[h][1][-1]]]]) for h in ("left", "right")]
     p = d.xpos[game._pelvis]
     return np.array([p[0], p[1], p[2], _yaw(d.xmat[game._pelvis]), *game.hand_pos("left"), *game.hand_pos("right"),
-                     *wrist, *game._grip], np.float64)
+                     *wrist, *game._grip, *game.pointing("left"), *game.pointing("right")], np.float64)
 
 
 def cost(s: np.ndarray, w: np.ndarray) -> float:
@@ -91,36 +96,12 @@ def cost(s: np.ndarray, w: np.ndarray) -> float:
     dyaw = (s[3] - w[3] + np.pi) % (2 * np.pi) - np.pi
     return float(np.linalg.norm(s[4:7] - w[4:7]) + np.linalg.norm(s[7:10] - w[7:10])
                  + W_BASE * np.linalg.norm(s[0:3] - w[0:3]) + W_YAW * abs(dyaw)
-                 + W_WRIST * np.abs(s[10:12] - w[10:12]).sum() + W_GRIP * np.abs(s[12:14] - w[12:14]).sum())
+                 + W_WRIST * np.abs(s[10:12] - w[10:12]).sum() + W_GRIP * np.abs(s[12:14] - w[12:14]).sum()
+                 + W_POINT * (_angle(s[14:17], w[14:17]) + _angle(s[17:20], w[17:20])))
 
 
-def predict(game: bg.BiGymGame, s: np.ndarray, name: str) -> np.ndarray:
-    """First-order prediction of the state after primitive ``name`` (``laya.bigymgames.BiGymGame.predicted_move``
-    for hands and base steps; turns rotate the hands about the pelvis)."""
-    t = s.copy()
-    parts = name.split("_") + ["", ""]
-    if parts[1] == "HAND":
-        h = parts[0].lower()
-        i = 4 if h == "left" else 7
-        t[i:i + 3] += game.predicted_move(name, h)
-    elif name in ("BASE_FORWARD", "BASE_BACK", "BASE_LEFT", "BASE_RIGHT", "BASE_UP", "BASE_DOWN"):
-        d = game.predicted_move(name, "left")  # the whole robot moves: pelvis and both hands
-        t[0:3] += d
-        t[4:7] += d
-        t[7:10] += d
-    elif name in ("BASE_TURN_LEFT", "BASE_TURN_RIGHT"):
-        a = bg.TURN_STEP if name == "BASE_TURN_LEFT" else -bg.TURN_STEP
-        c, sn = np.cos(a), np.sin(a)
-        for i in (4, 7):
-            dx, dy = t[i] - s[0], t[i + 1] - s[1]
-            t[i], t[i + 1] = s[0] + c * dx - sn * dy, s[1] + sn * dx + c * dy
-        t[3] += a
-    elif parts[1] == "WRIST":
-        i = 10 if parts[0] == "LEFT" else 11
-        t[i] = np.clip(t[i] + (bg.WRIST_ROLL if parts[2] == "CW" else -bg.WRIST_ROLL), -np.pi / 2, np.pi / 2)
-    elif parts[1] == "GRIPPER":
-        t[12 if parts[0] == "LEFT" else 13] = 1.0 if parts[2] == "CLOSE" else 0.0
-    return t
+def _angle(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.arccos(np.clip(a @ b / max(1e-9, np.linalg.norm(a) * np.linalg.norm(b)), -1.0, 1.0)))
 
 
 def lookahead(game: bg.BiGymGame, target: np.ndarray) -> str:

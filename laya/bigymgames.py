@@ -5,7 +5,7 @@ base X, Y, yaw; five joints per arm; two grippers) at 50 Hz. Laya answers discre
 bridges the two in two ways:
 
 - **Control.** Each decision the model picks one of ``PRIMITIVES``, a named motion: move a wrist 3 cm along a
-  robot-frame axis, roll a wrist, open or close a gripper, step, sidestep, turn, crouch or stand, or stay.
+  robot-frame axis, tilt or roll a gripper, open or close it, step, sidestep, turn, crouch or stand, or stay.
   ``primitive_to_action`` turns a wrist move into joint deltas with damped least-squares IK on the wrist site; the
   action is applied once and the robot is left ``HOLD`` env steps to settle. A random policy and a privileged
   oracle play the same seeded episodes over the same primitives. The oracle greedily moves the relevant wrist
@@ -31,7 +31,9 @@ BASE_STEP = 0.05  # metres a base primitive moves the pelvis
 CROUCH_STEP = 0.03  # metres a crouch / stand primitive lowers or raises the pelvis (the demos crouch ~0.11 m)
 TURN_STEP = 0.2  # radians a turn primitive rotates the pelvis
 WRIST_ROLL = 0.25  # radians a wrist-roll primitive turns the wrist joint (about 14 degrees; its range is +-90)
+TILT_STEP = 0.26  # radians a tilt primitive turns the gripper's pointing direction (15 degrees)
 IK_DAMPING = 0.05
+TILT_HOLD = 0.3  # how hard a tilt holds the hand in place (a position row weight; the direction rows weigh 1)
 MAX_FRAMES = 4  # decision frames kept for multi-frame questions
 REACH_BINS = (0.3, 0.2, 0.1)  # wrist-target distance (m) thresholds for progress levels 1, 2, 3
 OPEN_BINS = (0.3, 0.6, 0.9)  # task-direction open fraction thresholds for progress levels 1, 2, 3
@@ -75,6 +77,13 @@ for _hand in ("LEFT", "RIGHT"):
 for _hand in ("LEFT", "RIGHT"):
     PRIMITIVES["%s_WRIST_CW" % _hand] = "roll the %s wrist clockwise" % _hand.lower()
     PRIMITIVES["%s_WRIST_CCW" % _hand] = "roll the %s wrist counterclockwise" % _hand.lower()
+# tilts aim the gripper (its pointing direction) 15 degrees up, down, left or right. H1's arms have no wrist pitch
+# or yaw joint (three shoulder joints, the elbow and the wrist roll), so with the hand held still the direction has
+# one degree of freedom left: a tilt turns the direction first and lets the hand shift a few cm. Hand moves leave
+# the direction free (holding it cost the reach oracle 40 points). The wrist roll turns the gripper about it.
+for _hand in ("LEFT", "RIGHT"):
+    for _dir in ("UP", "DOWN", "LEFT", "RIGHT"):
+        PRIMITIVES["%s_TILT_%s" % (_hand, _dir)] = "tilt the %s gripper to point %s" % (_hand.lower(), _dir.lower())
 PRIMITIVES.update({"BASE_FORWARD": "step the whole robot forward", "BASE_BACK": "step the whole robot back",
                    "BASE_TURN_LEFT": "turn the whole robot to the left",
                    "BASE_TURN_RIGHT": "turn the whole robot to the right",
@@ -83,7 +92,7 @@ PRIMITIVES.update({"BASE_FORWARD": "step the whole robot forward", "BASE_BACK": 
                    "BASE_DOWN": "crouch: lower the whole robot", "BASE_UP": "stand up: raise the whole robot",
                    "STAY": "do nothing and wait"})
 
-# The option text the model reads: 29 options share the head budget (``head_max_len``, 256 tokens) with the
+# The option text the model reads: 37 options share the head budget (``head_max_len``, 256 tokens) with the
 # instructions, so "NAME: description" (about 20 tokens each) would be cut and crowd the task out of the prompt.
 # Short phrases fit whole; ``model_policy`` maps the chosen phrase back to the primitive's name.
 OPTION_WORDS: Dict[str, str] = {}
@@ -96,6 +105,9 @@ for _hand in ("LEFT", "RIGHT"):
 for _hand in ("LEFT", "RIGHT"):
     OPTION_WORDS["%s_WRIST_CW" % _hand] = "roll %s wrist clockwise" % _hand.lower()
     OPTION_WORDS["%s_WRIST_CCW" % _hand] = "roll %s wrist counterclockwise" % _hand.lower()
+for _hand in ("LEFT", "RIGHT"):
+    for _dir in ("UP", "DOWN", "LEFT", "RIGHT"):
+        OPTION_WORDS["%s_TILT_%s" % (_hand, _dir)] = "tilt %s gripper %s" % (_hand.lower(), _dir.lower())
 OPTION_WORDS.update({"BASE_FORWARD": "step forward", "BASE_BACK": "step back", "BASE_TURN_LEFT": "turn left",
                      "BASE_TURN_RIGHT": "turn right", "BASE_LEFT": "sidestep left", "BASE_RIGHT": "sidestep right",
                      "BASE_DOWN": "crouch", "BASE_UP": "stand up",
@@ -249,16 +261,33 @@ class BiGymGame:
         t = self.obs.get("target_position")
         return None if t is None else np.array(t, np.float64)
 
-    def _jac(self, hand: str) -> np.ndarray:
-        jacp = np.zeros((3, self._model.nv))
-        self._mj.mj_jacSite(self._model, self._data, jacp, None, self._site[hand])
-        return jacp[:, self._arm[hand][1]]
+    def _jac(self, hand: str, rot: bool = False):
+        jacp, jacr = np.zeros((3, self._model.nv)), np.zeros((3, self._model.nv))
+        self._mj.mj_jacSite(self._model, self._data, jacp, jacr, self._site[hand])
+        cols = self._arm[hand][1]
+        return (jacp[:, cols], jacr[:, cols]) if rot else jacp[:, cols]
 
-    def ik_delta(self, hand: str, dx: np.ndarray) -> np.ndarray:
-        """Joint deltas (the arm's five joints) that move ``hand``'s wrist by ``dx`` (world, metres), clipped so
-        the joint targets stay inside their control ranges."""
-        J = self._jac(hand)
-        dq = J.T @ np.linalg.solve(J @ J.T + IK_DAMPING ** 2 * np.eye(3), dx)
+    def pointing(self, hand: str) -> np.ndarray:
+        """The direction ``hand``'s gripper points (the wrist site's x axis, world frame, unit length)."""
+        return np.array(self._data.site_xmat[self._site[hand]]).reshape(3, 3)[:, 0]
+
+    def ik_delta(self, hand: str, dx: np.ndarray, omega: Optional[np.ndarray] = None) -> np.ndarray:
+        """Joint deltas (the arm's five joints) for ``hand``, clipped so the joint targets stay inside their control
+        ranges. With ``omega`` None: move the wrist by ``dx`` (world, metres), damped least squares on position
+        only. With a rotation vector ``omega`` (world, radians): turn the gripper's pointing direction by it, over
+        the four joints before the wrist roll (the roll does not change the direction), holding the wrist at
+        ``dx`` with weight ``TILT_HOLD``."""
+        if omega is None:
+            J = self._jac(hand)
+            dq = J.T @ np.linalg.solve(J @ J.T + IK_DAMPING ** 2 * np.eye(3), dx)
+        else:
+            Jp, Jr = self._jac(hand, rot=True)
+            x = self.pointing(hand)
+            P = np.eye(3) - np.outer(x, x)  # rotation about the pointing axis itself is the wrist roll's job
+            A = np.vstack([TILT_HOLD * Jp[:, :4], P @ Jr[:, :4]])
+            b = np.concatenate([TILT_HOLD * dx, P @ omega])
+            dq = np.zeros(Jp.shape[1])
+            dq[:4] = np.linalg.solve(A.T @ A + IK_DAMPING ** 2 * np.eye(4), A.T @ b)
         acts = np.array(self._acts)[self._arm[hand][0]]
         ranges, ctrl = self._model.actuator_ctrlrange[acts], np.array(self._data.ctrl[acts])
         return np.clip(ctrl + dq, ranges[:, 0], ranges[:, 1]) - ctrl
@@ -270,6 +299,10 @@ class BiGymGame:
             if parts[0].lower() != hand:
                 return np.zeros(3)
             return self._jac(hand) @ self.ik_delta(hand, WRIST_STEP * self.world_dir(parts[2]))
+        if parts[1] == "TILT":
+            if parts[0].lower() != hand:
+                return np.zeros(3)
+            return self._jac(hand) @ self.ik_delta(hand, np.zeros(3), self.tilt_vector(hand, parts[2]))
         if name in ("BASE_FORWARD", "BASE_BACK"):
             return self.world_dir("FORWARD") * (BASE_STEP if name == "BASE_FORWARD" else -BASE_STEP)
         if name in ("BASE_LEFT", "BASE_RIGHT"):
@@ -277,6 +310,17 @@ class BiGymGame:
         if name in ("BASE_UP", "BASE_DOWN"):
             return np.array([0.0, 0.0, CROUCH_STEP if name == "BASE_UP" else -CROUCH_STEP])
         return np.zeros(3)
+
+    def tilt_vector(self, hand: str, direction: str) -> np.ndarray:
+        """Rotation vector that tilts ``hand``'s gripper ``TILT_STEP`` toward ``direction`` (UP, DOWN, LEFT, RIGHT):
+        up/down about the horizontal axis across the pointing direction, left/right about the vertical."""
+        x, up = self.pointing(hand), np.array([0.0, 0.0, 1.0])
+        if direction in ("LEFT", "RIGHT"):
+            return (TILT_STEP if direction == "LEFT" else -TILT_STEP) * up
+        across = np.cross(x, up)
+        n = np.linalg.norm(across)
+        across = across / n if n > 1e-6 else self.world_dir("LEFT")  # pointing straight up or down
+        return (TILT_STEP if direction == "UP" else -TILT_STEP) * across
 
     # -- actions ---------------------------------------------------------------------------------------------
     def primitive_to_action(self, name: str) -> np.ndarray:
@@ -289,6 +333,10 @@ class BiGymGame:
             hand = parts[0].lower()
             idx = np.arange(self._n_base, self._n_base + len(self._acts))[self._arm[hand][0]]
             act[idx] = self.ik_delta(hand, WRIST_STEP * self.world_dir(parts[2]))
+        elif parts[1] == "TILT":
+            hand = parts[0].lower()
+            idx = np.arange(self._n_base, self._n_base + len(self._acts))[self._arm[hand][0]]
+            act[idx] = self.ik_delta(hand, np.zeros(3), self.tilt_vector(hand, parts[2]))
         elif parts[1] == "WRIST":
             hand = parts[0].lower()
             a = np.array(self._acts)[self._arm[hand][0]][-1]  # the arm's last actuator is its wrist
