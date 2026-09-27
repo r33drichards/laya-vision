@@ -595,3 +595,158 @@ def prepare_bigym_bc(tasks: str = ",".join(BC_TASKS), prefix: str = "bigym", max
     print("spawned bigym_bc_build: call %s; follow with `modal app logs <app-id>`" % call.object_id)
     if wait:
         print(json.dumps(call.get(), indent=1))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Cleaned behaviour-cloning data: undo pairs and repeated STAYs dropped, probe done=1 oversampled
+# ---------------------------------------------------------------------------------------------------------
+#
+#     modal run modal_bigym.py::clean_bigym_bc --src bigym_v2 --dst bigym_v2c
+#
+# Reads ``<src>_bc_f1``, ``<src>_bc_f4`` and ``<src>_probe`` and writes ``<dst>_bc_f1``, ``<dst>_bc_f4`` and
+# ``<dst>_probe`` (create-only: refuses if any exists). The control sets, train and val alike, get
+# ``laya.bigymclean.clean_control`` (undo chains and repeated STAYs dropped per episode, frames and windows as
+# recorded); the probe train split gets ``laya.bigymclean.oversample`` (done=1 duplicated to ``--done-target`` of
+# each task's done records); probe val is copied unchanged. The images the kept records use are hard-linked from
+# the source dataset where the volume allows it, else copied. Data only: no simulation.
+
+
+@app.function(image=image, cpu=8, memory=8192, timeout=2 * 60 * 60, volumes={"/data": data_vol})
+def bigym_clean_build(src: str, dst: str, code: dict = None, done_target: float = 0.15,
+                      max_drop_frac: float = 0.4) -> dict:
+    """Write the cleaned datasets in ``<name>.tmp`` dirs, check they load, rename them into /data/vqa, _READY last."""
+    import datetime
+    import shutil
+    from collections import Counter
+    from concurrent.futures import ThreadPoolExecutor
+
+    from laya import bigymclean as bc
+    from laya.bigymgames import FROM_WORDS, PRIMITIVES
+    from laya.vlm_train import load_jsonl_examples
+
+    t0 = time.time()
+    srcs, dsts = _bc_names(src), _bc_names(dst)
+    root = "/data/vqa"
+    data_vol.reload()
+    missing = [n for n in srcs.values() if not os.path.exists(os.path.join(root, n, "_READY"))]
+    if missing:
+        raise RuntimeError("source datasets not ready: %s" % missing)
+    taken = [n for n in dsts.values() if os.path.exists(os.path.join(root, n))]
+    if taken:
+        raise RuntimeError("refusing: %s already exist (datasets are create-only; pass a new --dst)" % taken)
+    created = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    prims = list(PRIMITIVES)
+    summary = {}
+    for key in ("f1", "f4", "probe"):
+        s_dir, name = os.path.join(root, srcs[key]), dsts[key]
+        tmp = os.path.join(root, name + ".tmp")
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(os.path.join(tmp, "images"))
+        with open(os.path.join(s_dir, "meta.json")) as f:
+            src_meta = json.load(f)
+        recs, reports = {}, {}
+        for split in ("train", "val"):
+            with open(os.path.join(s_dir, split + ".jsonl")) as f:
+                rows = [json.loads(line) for line in f if line.strip()]
+            if key != "probe":
+                for r in rows:
+                    if prims[r["label"]] != r["primitive"]:
+                        raise RuntimeError("%s: label %d is not %s in the source" % (r["id"], r["label"],
+                                                                                       r["primitive"]))
+                recs[split], reports[split] = bc.clean_control(rows, prims, max_drop_frac)
+            elif split == "train":
+                recs[split], reports[split] = bc.oversample(rows, "done", 1, done_target)
+                reports[split] = {"before": len(rows), "after": len(recs[split]), "done": reports[split]}
+            else:
+                labels = Counter("%s %s=%d" % (*bc.probe_question(r["id"]), r["label"]) for r in rows)
+                recs[split], reports[split] = rows, {"before": len(rows), "after": len(rows), "unchanged": True,
+                                                     "labels": dict(sorted(labels.items()))}
+            with open(os.path.join(tmp, split + ".jsonl"), "w") as f:
+                for r in recs[split]:
+                    f.write(json.dumps(r) + "\n")
+        paths = sorted({p for split in recs for r in recs[split] for p in (r.get("images") or [r["image"]])})
+        linked = Counter()
+
+        def place(p):
+            a, b = os.path.join(s_dir, p), os.path.join(tmp, p)
+            try:
+                os.link(a, b)
+                return "hardlink"
+            except OSError:
+                shutil.copyfile(a, b)
+                return "copy"
+
+        with ThreadPoolExecutor(32) as ex:
+            linked.update(ex.map(place, paths))
+        rules = (dict(bc.CONTROL_RULES, max_drop_frac_flag=max_drop_frac)
+                 if key != "probe" else
+                 {"oversample": "train only: per task, done=1 records duplicated (ids <id>-dup<N>) until they are "
+                                "%.2f of that task's done records (round(t*n0/(1-t)) positives, spread evenly over "
+                                "the originals); progress records and val unchanged" % done_target,
+                  "done_target": done_target})
+        meta = {"dataset": name, "kind": key, "source_dataset": srcs[key], "source_meta": src_meta,
+                "question": src_meta.get("question"), "primitives": prims, "rules": rules,
+                "records": {s: len(recs[s]) for s in recs}, "report": reports, "images": len(paths),
+                "image_placement": dict(linked), "laya_commit": (code or {}).get("commit"),
+                "laya_dirty": (code or {}).get("dirty"), "code": "laya/bigymclean.py, modal_bigym.py::"
+                                                                 "bigym_clean_build", "created_utc": created}
+        with open(os.path.join(tmp, "meta.json"), "w") as f:
+            json.dump(meta, f, indent=2)
+        with open(os.path.join(tmp, "manifest.json"), "w") as f:
+            json.dump({"sources": {srcs[key]: src_meta.get("laya_commit")}, "laya_commit": meta["laya_commit"],
+                       "params": {"done_target": done_target, "max_drop_frac": max_drop_frac},
+                       "files": {s + ".jsonl": {"sha256": _file_sha256(os.path.join(tmp, s + ".jsonl")),
+                                                "records": len(recs[s])} for s in recs},
+                       "images": len(paths), "created_utc": created}, f, indent=2)
+        data_vol.commit()
+
+        # check before publishing: all records load (with next targets: no duplicate game frames), images exist,
+        # ids are unique and control labels still decode to the recorded primitive
+        for split in ("train", "val"):
+            exs = load_jsonl_examples(root, name + ".tmp", split, next_targets=True)
+            if len(exs) != len(recs[split]):
+                raise RuntimeError("%s/%s: %d of %d records load" % (name, split, len(exs), len(recs[split])))
+            ids = [r["id"] for r in recs[split]]
+            if len(set(ids)) != len(ids):
+                raise RuntimeError("%s/%s: duplicate ids" % (name, split))
+            for r, e in zip(recs[split], exs):
+                for p in r.get("images") or [r["image"]]:
+                    if not os.path.exists(os.path.join(tmp, p)):
+                        raise RuntimeError("%s: missing %s" % (r["id"], p))
+                if e["label"] != r["label"] or e["id"] != r["id"]:
+                    raise RuntimeError("%s: example does not match its record" % r["id"])
+                if key != "probe" and (FROM_WORDS[list(r["question"]["criteria"])[r["label"]]] != r["primitive"]
+                                       or prims[r["label"]] != r["primitive"]):
+                    raise RuntimeError("%s: label %d does not decode to %s" % (r["id"], r["label"], r["primitive"]))
+        summary[key] = {"dataset": name, "records": meta["records"], "images": len(paths),
+                        "placement": dict(linked), "report": reports}
+        print("%s: %s records load, %d images (%s), %.0f s" % (name, meta["records"], len(paths), dict(linked),
+                                                               time.time() - t0))
+
+    data_vol.reload()
+    taken = [n for n in dsts.values() if os.path.exists(os.path.join(root, n))]
+    if taken:
+        raise RuntimeError("refusing: %s appeared while building; data left in the .tmp dirs" % taken)
+    for name in dsts.values():
+        os.rename(os.path.join(root, name + ".tmp"), os.path.join(root, name))
+    for name in dsts.values():
+        open(os.path.join(root, name, "_READY"), "w").close()
+    data_vol.commit()
+    summary["minutes"] = round((time.time() - t0) / 60, 1)
+    print(json.dumps(summary, indent=1))
+    return summary
+
+
+@app.local_entrypoint()
+def clean_bigym_bc(src: str = "bigym_v2", dst: str = "bigym_v2c", done_target: float = 0.15,
+                   max_drop_frac: float = 0.4, out: str = ""):
+    """Build ``<dst>_bc_f1``, ``<dst>_bc_f4`` and ``<dst>_probe`` from ``<src>_*``; see the section comment above
+    ``bigym_clean_build``. ``--out`` also saves the summary JSON locally."""
+    code = _git_state()
+    print("%s -> %s from laya %s%s" % (list(_bc_names(src).values()), list(_bc_names(dst).values()),
+                                       code["commit"][:10], " (dirty)" if code["dirty"] else ""))
+    summary = bigym_clean_build.remote(src, dst, code, done_target, max_drop_frac)
+    if out:
+        with open(out, "w") as f:
+            json.dump(summary, f, indent=1)
+        print("wrote", out)
