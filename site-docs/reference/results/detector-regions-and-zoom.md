@@ -221,9 +221,37 @@ machine and are not reported as latency results.
 
 ## Two-branch search
 
-<!-- BEAM2_RESULTS -->
+`beam2` keeps the top 2 quadrants at the first level instead of 1, runs levels 2 and 3 in each, keeps the branch
+whose best level-3 score is higher, and centres the same square crop as `hier3`: 20 scored crops, 1344 image tokens.
 
-*Placeholder: results of a still-running experiment go here.*
+```
+python benchmarks/zoom_search_probe.py --data /tmp/vstar --variant beam2 --threads 4 \
+    --c1-rows /tmp/zoom_probe.jsonl --compare-rows /tmp/hier3.jsonl --out /tmp/beam2.jsonl
+```
+
+| | `hier3` (one branch) | `beam2` (two branches) |
+|---|---|---|
+| Accuracy | 48.7% [39.8, 57.7] | 51.3% [42.3, 60.2] |
+| Final crop holds the target | 52% | 63.5% |
+| Accuracy when it does / does not | 66.7% / 29.1% | 67.1% / 23.8% |
+| ECE | 0.183 | 0.172 |
+| Image tokens / scored crops | 832 / 12 | 1344 / 20 |
+| CPU time per question (4 threads) | 9.2 s | 15.1 s |
+
+| Level (given the previous one was right) | `hier3` | `beam2` |
+|---|---|---|
+| 1: true quadrant picked (`beam2`: in the kept top 2) | 59% (68/115) | 85% (98/115) |
+| 2 | 81% | 74% |
+| 3 | 80% | 78% |
+| All three levels right in the chosen branch | 38% (44/115) | 45% (52/115) |
+
+- Keeping two branches fixes most of the first-level misses. The final crop holds the target more often: paired
+  with `hier3`, 19 items gained a hit and 6 lost one (exact sign test p ≈ 0.015).
+- Choosing between the branches at the bottom mostly works: when the true branch was right at all three levels it
+  won 52 of 56 times.
+- The answer barely moves: 51.3% against 48.7%, 11 items gained and 8 lost (p = 0.65). The extra hits come from the
+  harder items (the quadrant the model ranked second), and the result is still well short of the 66.1% ceiling
+  for this crop. It costs 60% more crops than `hier3` for a gain that n = 115 cannot separate from noise.
 
 ## Takeaways
 
@@ -241,8 +269,9 @@ machine and are not reported as latency results.
 
 **Open questions and next steps**
 
-- Two-branch search: keep the top 2 cells at the first level, since the true quadrant is in the top 2 85% of the time
-  (see [Two-branch search](#two-branch-search)).
+- Two-branch search raised the find rate (52% to 63.5%) but not clearly the accuracy (48.7% to 51.3%, within noise;
+  see [Two-branch search](#two-branch-search)). The first level is still the weak step: a larger first view of the
+  target is more promising than more branches.
 - A finer first level (for example 3×3 or overlapping cells) so the target is larger at the first look.
 - Detector proposals as the first level instead of fixed quadrants.
 - Training on marks and on detector crops.
