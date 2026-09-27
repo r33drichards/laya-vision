@@ -78,6 +78,7 @@ def main():
     ap.add_argument("--c1-rows", help="zoom_probe.py rows, for the paired comparison with the full image")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--threads", type=int, default=1)
+    ap.add_argument("--oracle-grid", type=int, default=4, help="grid size for oracle_tile (8: one level below hier)")
     ap.add_argument("--out")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
@@ -111,7 +112,8 @@ def main():
         centre = ((tb[0] + tb[2]) / 2.0, (tb[1] + tb[3]) / 2.0)
         trace, calls = {}, 0
         if args.variant == "oracle_tile":
-            cell = next(sub(full, 4, i, j) for i in range(4) for j in range(4) if contains(sub(full, 4, i, j), centre))
+            g = args.oracle_grid
+            cell = next(sub(full, g, i, j) for i in range(g) for j in range(g) if contains(sub(full, g, i, j), centre))
         elif args.variant == "choice":
             k1, p1 = where(img, target)
             q1 = quads(full)[k1]
