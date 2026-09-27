@@ -2628,7 +2628,6 @@ def paint_shard_dagger(tmp_dir: str, split: str, shard: int, specs: list, judge_
     return _paint_shard(tmp_dir, split, shard, specs, judge_every, model, beta)
 
 
-@app.function(image=paint_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
 def _get_retrying(call, tries: int = 8):
     """``call.get()``, retrying transient client/connection errors (a lost connection while waiting on a long
     fan-out cancelled a 48-shard prep once); errors raised by the function itself are not retried."""
@@ -2642,6 +2641,7 @@ def _get_retrying(call, tries: int = 8):
             time.sleep(10 * (k + 1))
 
 
+@app.function(image=paint_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
 def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int = 24, shards: int = 32, seed: int = 0,
                   judge_every: int = 3, model: str = "", beta: float = 0.5, categories: str = "",
                   per_category: int = 10, val_per_category: int = 2, resume: bool = False):
