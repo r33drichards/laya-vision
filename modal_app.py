@@ -2629,9 +2629,22 @@ def paint_shard_dagger(tmp_dir: str, split: str, shard: int, specs: list, judge_
 
 
 @app.function(image=paint_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
+def _get_retrying(call, tries: int = 8):
+    """``call.get()``, retrying transient client/connection errors (a lost connection while waiting on a long
+    fan-out cancelled a 48-shard prep once); errors raised by the function itself are not retried."""
+    for k in range(tries):
+        try:
+            return call.get()
+        except (modal.exception.ConnectionError, TimeoutError, OSError) as e:
+            if k == tries - 1:
+                raise
+            print("waiting on %s again after %r" % (call.object_id, e), flush=True)
+            time.sleep(10 * (k + 1))
+
+
 def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int = 24, shards: int = 32, seed: int = 0,
                   judge_every: int = 3, model: str = "", beta: float = 0.5, categories: str = "",
-                  per_category: int = 10, val_per_category: int = 2):
+                  per_category: int = 10, val_per_category: int = 2, resume: bool = False):
     """Write /data/vqa/<name>/{train,val}.jsonl + images/: labelled JSPaint circle episodes. Refuses to replace an
     existing prepared dataset (they are create-only; ``paint_circle`` was the first, fixed-target labeller).
 
@@ -2651,6 +2664,10 @@ def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int 
     the episodes are doodles instead: ``per_category`` train and ``val_per_category`` val episodes per category, each
     following a different human doodle (train uses the category's doodles 0..per_category-1, val the next ones;
     the independent classifier trains on doodles from 500 on). ``n_train`` / ``n_val`` are then ignored.
+
+    Shards run as independent calls; waiting on them retries a lost connection (``_get_retrying``). With
+    ``resume`` an earlier attempt's ``.tmp`` directory is kept and shards whose file is already there are skipped
+    (the same arguments give the same shards).
     """
     import random
     import shutil
@@ -2660,8 +2677,9 @@ def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int 
     if os.path.exists(final_dir):
         raise SystemExit("%s exists; prepared datasets are create-only, pass a new --name" % final_dir)
     tmp_dir = final_dir + ".tmp"
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-    os.makedirs(os.path.join(tmp_dir, "images"))
+    if not resume:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"), exist_ok=True)
     data_vol.commit()
     rng = random.Random(seed)
     from laya.quickdraw import TRAIN_CATEGORIES
@@ -2688,7 +2706,12 @@ def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int 
                 jobs.append((tmp_dir, split, s, specs[s::k], judge_every) + ((model, beta) if model else ()))
     summaries = {"train": [], "val": []}
     shard_fn = paint_shard_dagger if model else paint_shard
-    for job, res in zip(jobs, list(shard_fn.starmap(jobs))):
+    done_files = set(os.listdir(tmp_dir))
+    todo = [j for j in jobs if "%s-%03d.jsonl" % (j[1], j[2]) not in done_files]
+    print("%d shards, %d already written" % (len(jobs), len(jobs) - len(todo)), flush=True)
+    calls = [(job, shard_fn.spawn(*job)) for job in todo]
+    for job, call in calls:
+        res = _get_retrying(call)
         split = job[1]
         summaries[split].extend(res)
     data_vol.reload()
