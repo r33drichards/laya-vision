@@ -1,13 +1,13 @@
 """BiGym human demonstrations as ``laya.bigymgames`` primitive labels.
 
 A demo is a 20 Hz stream of absolute joint targets (4 floating-base DOFs, 10 arm joints, 2 grippers). Laya picks
-one of 37 primitives per 0.1 s decision. ``follow`` bridges them closed-loop: the demo is replayed in BiGym's own
-settings to get ``waypoints`` (where the pelvis, both wrists, their rolls, which way each gripper points and whether it is closed, every
-``every`` demo steps), then a follower in the eval env (``make_env``: delta joints, 4 floating DOFs, 50 Hz) picks,
-each decision, the primitive whose simulated effect (tried and undone, ``lookahead``) brings the robot closest to
-the current waypoint, advancing
-through the waypoints as it reaches them. The chosen primitives are the labels; whether the follower completes the
-task says whether those labels are good enough to learn from.
+one of 37 primitives per 0.1 s decision. ``follow`` bridges them closed-loop. The demo is replayed in BiGym's own
+settings to get ``waypoints``: every ``every`` demo steps, where the pelvis and both wrists are, the wrist rolls,
+which way each gripper points and whether it is closed. A follower in the eval env (``make_env``: delta joints,
+4 floating DOFs, 50 Hz) then picks, each decision, the primitive whose simulated effect (tried and undone,
+``lookahead``) brings the robot closest to the current waypoint, advancing through the waypoints as it reaches
+them. The chosen primitives are the labels; whether the follower completes the task says whether those labels are
+good enough to learn from.
 
 The demos also crouch (the pelvis drops up to ~0.11 m); the eval env has the same four floating DOFs, so the
 follower crouches with ``BASE_DOWN`` / ``BASE_UP``.
@@ -57,7 +57,8 @@ def demo_waypoints(task: str, amount: int = 20, seed: int = 0, every: int = EVER
                                   frequency=CONTROL_FREQUENCY_MIN)
     robot, data = env.robot, env.mojo.data
     pel = env.mojo.physics.bind(robot.pelvis.mjcf).element_id
-    sites = [env.mojo.physics.bind(robot._wrist_sites[side].mjcf).element_id for side in (HandSide.LEFT, HandSide.RIGHT)]
+    sites = [env.mojo.physics.bind(robot._wrist_sites[side].mjcf).element_id
+             for side in (HandSide.LEFT, HandSide.RIGHT)]
     nb = robot.floating_base.dof_amount
     wl, wr = nb + 4, nb + 9  # the wrists are each arm's fifth actuator
     out = []
