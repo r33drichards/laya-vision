@@ -120,6 +120,30 @@ def test_questions_fit_the_budgets_whole(frames):
             assert not tr["options"] and not tr["instructions_tokens_dropped"], (task, qid, tr)
 
 
+def test_training_items_follow_the_checkpoints_head_budget():
+    """``make_item`` (training and ``collect_logits``) cuts by the agent's ``head_max_len`` (left on the processor
+    as ``laya_head_max_len``), as ``predict`` does, rather than a fixed 256."""
+    transformers = pytest.importorskip("transformers")
+    from laya.vlm import VLMAgent
+    from laya.vlm_train import make_item
+
+    try:
+        proc = transformers.AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-256M-Instruct")
+    except Exception as e:  # offline without a cached processor
+        pytest.skip("SmolVLM processor unavailable: %r" % e)
+    q = VLMAgent._to_internal(bg.bigym_question("DrawerTopClose", 4)["action"])
+    ex = {"state": {"images": [np.zeros((64, 64, 3), np.uint8)] * 4}, "q": q, "target": [1.0] + [0.0] * 36}
+    rng = __import__("random").Random(0)
+    whole = make_item(proc, ex, rng, shuffle=False)["truncation"]  # no attribute: the 256 default, which fits
+    assert not whole["options"] and not whole["instructions_tokens_dropped"]
+    proc.laya_head_max_len = 160
+    cut = make_item(proc, ex, rng, shuffle=False)["truncation"]
+    assert cut["options"] or cut["instructions_tokens_dropped"]
+    proc.laya_head_max_len = 320
+    assert make_item(proc, ex, rng, shuffle=False)["ids"] == make_item(proc, dict(ex), rng, shuffle=False,
+                                                                        head_max_len=256)["ids"]
+
+
 @sim
 def test_frame_history_pads_then_rolls():
     game = bg.BiGymGame("ReachTarget", seed=0)

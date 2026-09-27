@@ -373,8 +373,42 @@ def finetune(
     return {k: log[k] for k in ("run", "steps", "loss_first50", "loss_last50", "temperature", "val_raw", "val_calibrated")}
 
 
+# finetune_long's image: the repo code plus what ``--game-frac`` needs to regenerate the autoresearch recipes' game
+# replay (``autoresearch/toolkit.py``: Maze, Snake and the Gymnasium classic-control games)
+train_image = (base_image.pip_install("gymnasium[classic-control,box2d]")
+               .env({"SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy"}))
+train_image = _with_local_code(train_image).add_local_file("autoresearch/toolkit.py", "/root/autoresearch/toolkit.py")
+
+# The game replay of the autoresearch recipes (autoresearch/experiment.py ``build``, e.g. the long-sep24-b64 run behind
+# thaitea/laya-vision): recorded expert frames (the harness's ``GAME_DATASETS``) plus toolkit-generated examples
+REPLAY_GAME_SETS = {"game_atari_freeway": ("/data/atari/expert", "Freeway"),
+                    "game_atari_breakout": ("/data/atari/expert", "Breakout"),
+                    "game_doom_basic": ("/data/vqa", "doom_basic")}
+REPLAY_CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
+
+
+def _game_replay() -> list:
+    """The recipe's game examples: every train frame of ``REPLAY_GAME_SETS`` (read lazily from the volume) plus
+    ``toolkit.maze_examples(20000)``, ``snake_examples(20000)`` and ``control_examples(g, 5000)`` per classic-control
+    game (in memory; seeds far below the eval's ``GRID_SEED``)."""
+    from laya.vlm_train import load_jsonl_examples
+
+    sys.path.insert(0, "/root/autoresearch")
+    import toolkit
+
+    t0 = time.time()
+    games = []
+    for name, (root, prepared) in REPLAY_GAME_SETS.items():
+        games += [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train")]
+    games += toolkit.maze_examples(20000) + toolkit.snake_examples(20000)
+    for g in REPLAY_CONTROL_GAMES:
+        games += toolkit.control_examples(g, 5000)
+    print("game replay: %d examples in %.1f min" % (len(games), (time.time() - t0) / 60), flush=True)
+    return games
+
+
 @app.function(
-    image=image,
+    image=train_image,
     gpu="A100",
     cpu=24,
     memory=65536,
@@ -407,6 +441,8 @@ def finetune_long(
     mix_alpha: float = 0.0,
     split_edge: int = 0,
     max_len: int = 0,
+    head_max_len: int = 0,
+    game_frac: float = 0.0,
     max_train: int = 0,
     max_val: int = 0,
     restart: bool = False,
@@ -450,8 +486,18 @@ def finetune_long(
     * ``split_edge`` > 0 turns on the processor's image splitting (``laya.preprocess``): each image is resized to
       that longest edge and cut into 512 tiles plus a global view, up to 17 views at 2048 against 1 without.
       Needs ``preprocess="processor"``. ``max_len`` (0: ``laya.vlm.default_max_len``, 1024 without splitting)
-      is the sequence cap; both are saved in the checkpoint. Neither applies with ``init_from``, which keeps the
-      checkpoint's.
+      is the sequence cap; both are saved in the checkpoint. ``split_edge`` does not apply with ``init_from``,
+      which keeps the checkpoint's.
+    * ``head_max_len`` (0: the checkpoint's, 256 for a fresh head) is the question + options budget, and
+      ``max_len`` > 0 with ``init_from`` overrides the checkpoint's sequence cap; either is saved in the new
+      checkpoint, and training, eval and ``predict`` all cut by it (``laya.vlm.build_vlm_inputs``). Raise it for
+      long option lists (the BiGym control question, 37 options, takes 253 of 256).
+    * ``game_frac`` > 0 adds the autoresearch recipes' game replay (``_game_replay``: Atari Freeway / Breakout
+      and ViZDoom expert frames, toolkit Maze, Snake and classic control) and gives it that share of the draws,
+      split equally between the nine game sets (``toolkit.game_mix``); ``mix`` / ``mix_alpha`` then set the
+      proportions of ``datasets`` within the rest. Use it to limit forgetting of game play when fine-tuning a
+      checkpoint that was trained on games (the long-sep24-b64 recipe gave games 0.45). Game sets have no
+      val split or calibration holdout here and are left out of the train-eval probe.
     * ``max_train`` / ``max_val`` > 0 keep the first records per dataset (file order) for a quicker run on a
       subset; ``max_train`` does not count the ``n_calib`` holdout.
     * Durability: every ``state_every_min`` minutes (clamped to ``vlm_train.MIN_STATE_MINUTES``, and backed off
@@ -475,10 +521,18 @@ def finetune_long(
     print("GPU:", torch.cuda.get_device_name(0), "| torch", torch.__version__)
     out_dir = os.path.join(_ckpt_root(backbone), run_name)
     train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, max_train, max_val, {}, val_datasets)
+    mix_weights = _parse_mix(mix)
+    probe_names = sorted({ex["dataset"] for ex in train_ex})  # the train-eval probe: the jsonl sets, not the games
+    if game_frac > 0:
+        sys.path.insert(0, "/root/autoresearch")
+        import toolkit
+
+        train_ex, mix_weights = toolkit.game_mix(train_ex, _game_replay(), game_frac, base_weights=mix_weights,
+                                                 alpha=mix_alpha)
     names = sorted({ex["dataset"] for ex in train_ex})
     val_names = sorted({ex["dataset"] for ex in val_ex})
     train_eval = []
-    for name in names:
+    for name in probe_names:
         train_eval += [ex for ex in train_ex if ex["dataset"] == name][:train_eval_n]
 
     scale = math.sqrt(batch_size / lr_ref_batch)
@@ -487,21 +541,22 @@ def finetune_long(
     eval_every = max(1, int(round(steps / (epochs * evals_per_epoch))))
     warmup = max(1, int(warmup_frac * steps))
     sizes = {n: sum(ex["dataset"] == n for ex in train_ex) for n in names}
-    mix_weights = _parse_mix(mix)
     probs = mix_probabilities({n: range(sizes[n]) for n in names}, mix_weights, mix_alpha)
     print("plan: %d steps x batch %d (%.1f epochs of %d), warmup %d, eval every %d, lr head %.2e backbone %.2e"
           % (steps, batch_size, epochs, len(train_ex), warmup, eval_every, lr_h, lr_b))
     print("expected passes per dataset with the sampling mix (before max_passes=%s): %s"
           % (max_passes or None, {n: round(epochs * len(train_ex) * probs[n] / sizes[n], 2) for n in names}))
 
+    budgets = dict(({"max_len": max_len} if max_len else {}), **({"head_max_len": head_max_len} if head_max_len else {}))
     if init_from:
-        agent = VLMAgent(_ckpt_path(init_from), device="cuda")
+        agent = VLMAgent(_ckpt_path(init_from), device="cuda", **budgets)
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
         agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention,
-                         image_split_edge=split_edge, **({"max_len": max_len} if max_len else {}))
-    print("backbone %s, readout %s, preprocess %s, split_edge %d, max_len %d" % (
-        agent.cfg["backbone"], agent.model.readout, agent.prep.backend, agent.prep.split_edge, agent.cfg["max_len"]))
+                         image_split_edge=split_edge, **budgets)
+    print("backbone %s, readout %s, preprocess %s, split_edge %d, max_len %d, head_max_len %d" % (
+        agent.cfg["backbone"], agent.model.readout, agent.prep.backend, agent.prep.split_edge, agent.cfg["max_len"],
+        agent.cfg.get("head_max_len", 256)))
     init_temps = list(agent.temperature)
     hf_vol.commit()
     model, proc = agent.model, agent.processor
@@ -515,7 +570,8 @@ def finetune_long(
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
                                          split_edge=agent.prep.split_edge, max_len=agent.cfg["max_len"],
-                                         max_train=max_train, max_val=max_val,
+                                         head_max_len=agent.cfg.get("head_max_len", 256), init_from=init_from,
+                                         game_frac=game_frac, max_train=max_train, max_val=max_val,
                                          option_attention=agent.model.option_attention,
                                          w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
                                          epochs=epochs, max_minutes=max_minutes, batch_size=batch_size, lr_head=lr_h,
@@ -576,7 +632,7 @@ def finetune_long(
         print("[eval step %d, epoch %.2f] mean val acc %.4f | val: %s | train (seen): %s" % (
             step, row["epoch"], score,
             " | ".join("%s %.3f ece %.3f nll %.3f" % (n, val_m[n]["acc"], val_m[n]["ece"], val_m[n]["nll"]) for n in val_names),
-            " | ".join("%s %.3f" % (n, tr_m[n]["acc"]) for n in names)), flush=True)
+            " | ".join("%s %.3f" % (n, tr_m[n]["acc"]) for n in probe_names)), flush=True)
         agent.save(os.path.join(out_dir, "last"))
         if score > best["score"]:
             best.update(score=score, step=step, state={k: v.detach().cpu().clone() for k, v in model.state_dict().items()})

@@ -120,10 +120,11 @@ def synthetic_examples(n: int = 8, seed: int = 0) -> List[Dict]:
 
 def make_item(
     processor, ex: Dict, rng: random.Random, shuffle: bool = True, max_len: Optional[int] = None,
-    head_max_len: int = 256, order: Optional[List[int]] = None,
+    head_max_len: Optional[int] = None, order: Optional[List[int]] = None,
 ) -> Dict:
     """Tokenize one example with a random (or the given) option order; the target is permuted to marker order.
-    ``max_len`` defaults to the agent's (``laya.vlm.build_vlm_inputs``)."""
+    ``max_len`` and ``head_max_len`` default to the agent's (``laya.vlm.build_vlm_inputs``), so training and
+    ``collect_logits`` cut questions exactly as ``predict`` does."""
     k = len(render_options(ex["q"]))
     if order is None:
         order = list(range(k))
