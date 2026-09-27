@@ -82,3 +82,13 @@ def test_stray_ink_is_off_track():
 def test_drawn_options_cover_training_categories_and_nothing():
     opts = drawn_options(("house", "apple"))
     assert list(opts) == ["house", "apple", "nothing"] and opts["apple"].startswith("a doodle of an apple")
+
+
+def test_grouped_choice_moves_when_moving_is_likelier_than_any_pen_action():
+    from laya.paintenv import COMPASS, grouped_choice
+
+    probs = {d: 0.02 for d in COMPASS}  # moving: 0.66 in total, spread thin
+    probs.update(E=0.04, PEN_DOWN=0.0, PEN_UP=0.30, DONE=0.02)
+    assert max(probs, key=probs.get) == "PEN_UP" and grouped_choice(probs) == "E"
+    probs.update(PEN_UP=0.9)
+    assert grouped_choice(probs) == "PEN_UP"

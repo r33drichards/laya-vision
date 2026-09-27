@@ -442,12 +442,25 @@ def judge_canvas(agent, image, task: str = "circle", questions=("drawn", "progre
     return summarize_judgements(agent.predict({"image": image}, qs, strict=True)["answers"])
 
 
+def grouped_choice(probs: Dict[str, float]) -> str:
+    """Decide in two steps: move or a pen action (``PEN_DOWN`` / ``PEN_UP`` / ``DONE``), with the moves' probability
+    summed; then, to move, the most likely direction. Taking the single most likely of all 35 options instead
+    fails when the next direction is uncertain: the moves' probability spreads over many compass points, so a
+    pen action wins although moving is more likely (a doodle model toggled the pen for whole episodes that way)."""
+    pen = {a: probs[a] for a in PEN_ACTIONS if a in probs}
+    moves = {a: p for a, p in probs.items() if a not in PEN_ACTIONS}
+    if moves and sum(moves.values()) >= max(pen.values(), default=0.0):
+        return max(moves, key=moves.get)
+    return max(pen, key=pen.get)
+
+
 class ModelPolicy:
     """The model's most likely action from ``env.state()`` (two frames plus pen state and recent actions), via
     ``predict``, with the judgement questions (``laya.games.paint_judgements``) asked about the same state in the
     same call.
 
-    ``last`` keeps the latest action answer (probabilities over ``env.actions``, and ``act_probability``, the
+    The action is chosen with ``grouped_choice`` (move vs pen action first, then the direction) unless
+    ``grouped=False``. ``last`` keeps the latest action answer (probabilities over ``env.actions``, and ``act_probability``, the
     checkpoint's act-vs-escalate gate); ``last_judgement`` the latest judgements. With ``judge_stop``, the policy
     answers ``DONE`` when the pen is up and the model judges the task complete (P(progress = 4) >= ``stop_at``),
     so its own judgement decides when to stop.
@@ -456,8 +469,9 @@ class ModelPolicy:
     ``strict=True`` and raises rather than silently cut a question."""
 
     def __init__(self, agent, task: str = "circle", judge: bool = True, judge_stop: bool = False,
-                 stop_at: float = 0.5):
+                 stop_at: float = 0.5, grouped: bool = True):
         self.agent, self.task, self.judge, self.judge_stop, self.stop_at = agent, task, judge, judge_stop, stop_at
+        self.grouped = grouped
         self.last, self.last_judgement, self.provenance, self._questions = None, None, None, {}
 
     def questions(self, env: JSPaintEnv) -> Dict:
@@ -479,7 +493,7 @@ class ModelPolicy:
         if (self.judge and self.judge_stop and not env.pen
                 and self.last_judgement["progress_probs"]["4"] >= self.stop_at):
             return "DONE"
-        return self.last["choice"]
+        return grouped_choice(self.last["probabilities"]) if self.grouped else self.last["choice"]
 
 
 def model_policy(agent, task: str = "circle", **kwargs) -> ModelPolicy:
@@ -512,4 +526,5 @@ __all__ = ["PAINT_HEAD_MAX_LEN", "PAINT_MAX_LEN", "ACTIONS", "MOVES", "COMPASS",
            "compass_moves", "TASKS", "TOOLS",
            "JSPaintServer",
            "JSPaintEnv", "circle_expert", "random_policy",
-           "ModelPolicy", "model_policy", "judge_canvas", "summarize_judgements", "play_episodes", "default_chromium"]
+           "ModelPolicy", "model_policy", "grouped_choice", "judge_canvas", "summarize_judgements", "play_episodes",
+           "default_chromium"]
