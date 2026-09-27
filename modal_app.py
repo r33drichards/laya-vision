@@ -2554,7 +2554,7 @@ def full_eval(model: str, parts: str = ",".join(FULL_EVAL_PARTS), datasets: str 
 JSPAINT_REPO = "https://github.com/r33drichards/jspaint"
 JSPAINT_COMMIT = "53be67ab8c47cc0d2168899e7481bc04839c4c81"
 paint_image = _with_local_code(
-    base_image.pip_install("playwright==1.63.0").run_commands(
+    base_image.apt_install("git").pip_install("playwright==1.63.0").run_commands(
         "playwright install --with-deps chromium",
         "git clone %s /jspaint && cd /jspaint && git checkout %s" % (JSPAINT_REPO, JSPAINT_COMMIT),
     )
