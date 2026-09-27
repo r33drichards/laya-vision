@@ -2619,7 +2619,7 @@ def prepare_paint(n_train: int = 240, n_val: int = 24, shards: int = 32, seed: i
             if specs[s::k]:
                 jobs.append((tmp_dir, split, s, specs[s::k], judge_every))
     summaries = {"train": [], "val": []}
-    for (_, split, _, _, _), res in zip(jobs, paint_shard.starmap(jobs)):
+    for (_, split, _, _, _), res in zip(jobs, list(paint_shard.starmap(jobs))):
         summaries[split].extend(res)
     data_vol.reload()
     meta = {"source": "JSPaint %s@%s in headless Chromium, state-based circle labeller (laya/paintdata.py)"
