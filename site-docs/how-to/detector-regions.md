@@ -9,10 +9,9 @@ ways:
 
 Both can run over a stream of frames. This is a draft; the design is still being discussed.
 
-!!! note
-    No released checkpoint was trained on numbered marks or on detector crops, so nobody has measured how accurate
-    these modes are on your task. Label a few hundred examples and measure it. After that,
-    [calibrate](calibrate.md) if you act on thresholds.
+> **Note:** No released checkpoint was trained on numbered marks or on detector crops, so nobody has measured how
+> accurate these modes are on your task. Label a few hundred examples and measure it. After that,
+> [calibrate](calibrate.md) if you act on thresholds.
 
 ## Plug in a detector
 
@@ -60,6 +59,11 @@ out["index"], out["click"], out["confidence"]   # the chosen region, its centre,
 out["probabilities"]                             # {"1": 0.02, "2": 0.81, ..., "none": 0.05}, keyed by mark number
 ```
 
+> **Caution:** on the released checkpoint, numbered marks mostly are not read. In an exploratory probe it read an
+> 18 px digit 99% of the time, but picked the right one of 4 marked boxes only 40.5% of the time (chance 25%) and
+> mostly answered "box 2"; 64 px tags raised that to 62.5%. The probe's options were the numbers only, as with
+> `describe=False`. See [Detector regions and zoom search](../reference/results/detector-regions-and-zoom.md).
+
 Each box is drawn on the image as a numbered outline. Each box also becomes one option of a `choice` question,
 written `box N: <label>`, where the label is the detector's class or OmniParser's OCR text or caption. To send
 the numbers only, pass `describe=False`.
@@ -88,6 +92,15 @@ Each crop is the box padded by `pad` of its own size and grown to at least `min_
 exactly what `predict` returns for that crop. `with_label=True` puts the detector's label in the state text. That
 helps with a rubric about "this forklift", but it can also pull the answer toward the detector's guess.
 `laya.regions.imap_regions` yields the records one at a time instead of building a list.
+
+## Zoom search
+
+The checkpoint sees an image as one 512 px tile, so small objects in a large image are lost. On V*Bench, asking
+`noul` "Is there a &lt;target&gt; in this image?" over quadrants and then sub-quadrants, and answering on the best crop,
+raised attribute accuracy from 22% to 48% in an exploratory probe. Asking "where is the &lt;target&gt;?" as a `choice`
+did not work. There is no API for this in `laya/regions.py` yet (the probe scores the crops with
+`laya.search.score_states`); see
+[Detector regions and zoom search](../reference/results/detector-regions-and-zoom.md) for the probes and scripts.
 
 ## Run on a stream
 
