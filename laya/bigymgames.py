@@ -5,12 +5,12 @@ base X, Y, yaw; five joints per arm; two grippers) at 50 Hz. Laya answers discre
 bridges the two in two ways:
 
 - **Control.** Each decision the model picks one of ``PRIMITIVES``, a named motion: move a wrist 3 cm along a
-  robot-frame axis, open or close a gripper, step or turn the base, or stay. ``primitive_to_action`` turns a wrist
-  move into joint deltas with damped least-squares IK on the wrist site; the action is applied once and the robot
-  is left ``HOLD`` env steps to settle. A random policy and a privileged oracle play the same seeded episodes
-  over the same primitives. The oracle greedily moves the relevant wrist toward the target on the reach tasks, and
-  on the cupboard tasks it is replaced by the success rate of BiGym's human demonstrations replayed in the sim,
-  which is reported as a reference only.
+  robot-frame axis, roll a wrist, open or close a gripper, step or turn the base, or stay.
+  ``primitive_to_action`` turns a wrist move into joint deltas with damped least-squares IK on the wrist site; the
+  action is applied once and the robot is left ``HOLD`` env steps to settle. A random policy and a privileged
+  oracle play the same seeded episodes over the same primitives. The oracle greedily moves the relevant wrist
+  toward the target on the reach tasks, and on the cupboard tasks it is replaced by the success rate of BiGym's
+  human demonstrations replayed in the sim, which is reported as a reference only.
 - **Probe.** Frames whose ground truth the simulator knows (task success, how far the drawer or door is open or
   how far the wrist is from the target, which wrist is closer) are put to the model as ``noul``, ``score`` and
   ``choice`` questions (``probe_questions``) and scored for accuracy and calibration.
@@ -29,6 +29,7 @@ RESOLUTION = (256, 256)
 WRIST_STEP = 0.03  # metres a wrist primitive moves the wrist
 BASE_STEP = 0.05  # metres a base primitive moves the pelvis
 TURN_STEP = 0.2  # radians a turn primitive rotates the pelvis
+WRIST_ROLL = 0.25  # radians a wrist-roll primitive turns the wrist joint (about 14 degrees; its range is +-90)
 IK_DAMPING = 0.05
 MAX_FRAMES = 4  # decision frames kept for multi-frame questions
 REACH_BINS = (0.3, 0.2, 0.1)  # wrist-target distance (m) thresholds for progress levels 1, 2, 3
@@ -68,11 +69,16 @@ for _hand in ("LEFT", "RIGHT"):
 for _hand in ("LEFT", "RIGHT"):
     PRIMITIVES["%s_GRIPPER_CLOSE" % _hand] = "close the %s gripper" % _hand.lower()
     PRIMITIVES["%s_GRIPPER_OPEN" % _hand] = "open the %s gripper" % _hand.lower()
+# the wrist joint rolls the gripper about the forearm; it does not move the wrist point, so the hand moves never
+# turn it. Positive rotation is clockwise as the head camera sees it (right-hand rule about the forward axis).
+for _hand in ("LEFT", "RIGHT"):
+    PRIMITIVES["%s_WRIST_CW" % _hand] = "roll the %s wrist clockwise" % _hand.lower()
+    PRIMITIVES["%s_WRIST_CCW" % _hand] = "roll the %s wrist counterclockwise" % _hand.lower()
 PRIMITIVES.update({"BASE_FORWARD": "step the whole robot forward", "BASE_BACK": "step the whole robot back",
                    "BASE_TURN_LEFT": "turn the whole robot to the left",
                    "BASE_TURN_RIGHT": "turn the whole robot to the right", "STAY": "do nothing and wait"})
 
-# The option text the model reads: 21 options share the head budget (``head_max_len``, 256 tokens) with the
+# The option text the model reads: 25 options share the head budget (``head_max_len``, 256 tokens) with the
 # instructions, so "NAME: description" (about 20 tokens each) would be cut and crowd the task out of the prompt.
 # Short phrases fit whole; ``model_policy`` maps the chosen phrase back to the primitive's name.
 OPTION_WORDS: Dict[str, str] = {}
@@ -82,6 +88,9 @@ for _hand in ("LEFT", "RIGHT"):
 for _hand in ("LEFT", "RIGHT"):
     OPTION_WORDS["%s_GRIPPER_CLOSE" % _hand] = "close %s gripper" % _hand.lower()
     OPTION_WORDS["%s_GRIPPER_OPEN" % _hand] = "open %s gripper" % _hand.lower()
+for _hand in ("LEFT", "RIGHT"):
+    OPTION_WORDS["%s_WRIST_CW" % _hand] = "roll %s wrist clockwise" % _hand.lower()
+    OPTION_WORDS["%s_WRIST_CCW" % _hand] = "roll %s wrist counterclockwise" % _hand.lower()
 OPTION_WORDS.update({"BASE_FORWARD": "step forward", "BASE_BACK": "step back", "BASE_TURN_LEFT": "turn left",
                      "BASE_TURN_RIGHT": "turn right", "STAY": "wait"})
 FROM_WORDS = {v: k for k, v in OPTION_WORDS.items()}
@@ -265,6 +274,13 @@ class BiGymGame:
             hand = parts[0].lower()
             idx = np.arange(self._n_base, self._n_base + len(self._acts))[self._arm[hand][0]]
             act[idx] = self.ik_delta(hand, WRIST_STEP * self.world_dir(parts[2]))
+        elif parts[1] == "WRIST":
+            hand = parts[0].lower()
+            a = np.array(self._acts)[self._arm[hand][0]][-1]  # the arm's last actuator is its wrist
+            lo, hi = self._model.actuator_ctrlrange[a]
+            ctrl = float(self._data.ctrl[a])
+            want = WRIST_ROLL if parts[2] == "CW" else -WRIST_ROLL
+            act[self._n_base + list(self._acts).index(a)] = float(np.clip(ctrl + want, lo, hi) - ctrl)
         elif parts[1] == "GRIPPER":
             self._grip[0 if parts[0] == "LEFT" else 1] = 1.0 if parts[2] == "CLOSE" else 0.0
         elif name in ("BASE_FORWARD", "BASE_BACK"):

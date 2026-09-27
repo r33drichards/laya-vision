@@ -103,7 +103,7 @@ def test_multi_frame_question():
 
 @pytest.mark.parametrize("frames", [1, 4])
 def test_questions_fit_the_budgets_whole(frames):
-    """21 options share head_max_len with the instructions: nothing (least of all the task) may be cut."""
+    """25 options share head_max_len with the instructions: nothing (least of all the task) may be cut."""
     transformers = pytest.importorskip("transformers")
     from laya.vlm import VLMAgent, build_vlm_inputs
 
@@ -132,4 +132,24 @@ def test_frame_history_pads_then_rolls():
     assert game.frames(2) == fr[-2:]
     with pytest.raises(ValueError):
         game.frames(bg.MAX_FRAMES + 1)
+    game.close()
+
+
+@sim
+def test_wrist_roll_turns_only_the_wrist():
+    game = bg.BiGymGame("ReachTarget", seed=0)
+    m, d = game._model, game._data
+    qadr = {h: m.jnt_qposadr[m.dof_jntid[game._arm[h][1][-1]]] for h in ("left", "right")}
+    for _ in range(3):
+        game.step("STAY")  # let the reset pose settle
+    before = {h: (float(d.qpos[qadr[h]]), game.hand_pos(h).copy()) for h in ("left", "right")}
+    for _ in range(4):
+        game.step("LEFT_WRIST_CW")
+    turned = float(d.qpos[qadr["left"]]) - before["left"][0]
+    assert turned == pytest.approx(4 * bg.WRIST_ROLL, abs=0.05)
+    assert abs(float(d.qpos[qadr["right"]]) - before["right"][0]) < 0.02
+    assert np.linalg.norm(game.hand_pos("left") - before["left"][1]) < 0.005  # the roll does not move the wrist point
+    for _ in range(12):
+        game.step("LEFT_WRIST_CW")
+    assert float(d.qpos[qadr["left"]]) <= m.jnt_range[m.dof_jntid[game._arm["left"][1][-1]]][1] + 1e-3
     game.close()
