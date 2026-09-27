@@ -2689,7 +2689,8 @@ def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int 
 @app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=3 * 60 * 60,
               volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol})
 def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int = 5, seed: int = 900_000,
-               policies: str = "model,labeller,expert,random", judge_stop: bool = False, name: str = ""):
+               policies: str = "model,labeller,expert,random", judge_stop: bool = False, name: str = "",
+               task: str = "circle"):
     """Play the JSPaint circle task with a checkpoint (a run under /ckpt, or a Hub id) and the reference policies:
     ``labeller`` (the state-based labeller the training data comes from), ``expert`` (the older scripted circle
     centred on the canvas) and ``random``.
@@ -2714,14 +2715,15 @@ def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int 
     del probe
     agent = VLMAgent(src, device="cuda", **budgets)
     names = [p for p in policies.split(",") if p]
-    out = {"model": model, "budgets": budgets, "episodes": episodes, "seed": seed, "judge_stop": judge_stop,
+    out = {"model": model, "task": task, "budgets": budgets, "episodes": episodes, "seed": seed,
+           "judge_stop": judge_stop,
            "jspaint": JSPAINT_COMMIT, "policies": {}}
     on_volume = os.path.exists(os.path.join(path, "vlm_agent_config.json"))
     img_dir = os.path.join(path, "paint_eval", name or time.strftime("%Y%m%d-%H%M%S"))
-    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, canvas_size=agent.prep.image_size,
+    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, task=task, canvas_size=agent.prep.image_size,
                                                          keep_frames=True) as env:
         for pname in names:
-            pol = {"model": lambda: model_policy(agent, judge_stop=judge_stop), "expert": circle_expert,
+            pol = {"model": lambda: model_policy(agent, task, judge_stop=judge_stop), "expert": circle_expert,
                    "labeller": LabellerPolicy, "random": lambda: random_policy(seed)}[pname]()
             steps_log = []
 

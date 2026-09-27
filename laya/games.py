@@ -88,7 +88,8 @@ PAINT_PEN = {
     "PEN_DOWN": "press the mouse button to start drawing", "PEN_UP": "release the mouse button to stop drawing",
     "DONE": "the drawing is finished",
 }
-PAINT_GOALS = {"circle": "draw one round, closed circle, about as big as a third of the canvas height"}
+PAINT_GOALS = {"circle": "draw one round, closed circle, about as big as a third of the canvas height",
+               "square": "draw one closed square with straight sides, about a third of the canvas across"}
 
 
 def paint_question(task: str = "circle", directions: int = 32, step_px: int = 6) -> Dict:

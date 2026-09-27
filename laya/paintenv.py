@@ -69,7 +69,7 @@ def compass_moves(directions: int = 32) -> Dict[str, Tuple[float, float]]:
 
 MOVES = compass_moves(32)
 ACTIONS = tuple(MOVES) + PEN_ACTIONS
-TASKS = {"circle": "Draw a circle on the canvas."}
+TASKS = {"circle": "Draw a circle on the canvas.", "square": "Draw a square on the canvas."}
 
 TOOLS = [
     {"name": "move_mouse", "description": "Move the mouse by (dx, dy) canvas pixels. If the button is held down, "
