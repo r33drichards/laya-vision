@@ -42,7 +42,7 @@ from laya import load_vlm  # noqa: E402
 from laya.common import ece_score  # noqa: E402
 from laya.search import score_states  # noqa: E402
 
-VARIANTS = ("oracle_tile", "choice", "hier", "grid")
+VARIANTS = ("oracle_tile", "choice", "hier", "grid", "hier3", "oracle_centred")
 QUADS = ["top left", "top right", "bottom left", "bottom right"]
 TOKENS_PER_VIEW = 64
 
@@ -63,6 +63,15 @@ def grow(box, frac, size):
     dx, dy = (x1 - x0) * frac, (y1 - y0) * frac
     W, H = size
     return (int(max(0, x0 - dx)), int(max(0, y0 - dy)), int(min(W, x1 + dx)), int(min(H, y1 + dy)))
+
+
+def centred(pt, side, size):
+    """A ``side`` x ``side`` box centred on ``pt``, shifted to stay inside ``size``."""
+    W, H = size
+    side = int(min(side, W, H))
+    x0 = int(max(0, min(pt[0] - side / 2.0, W - side)))
+    y0 = int(max(0, min(pt[1] - side / 2.0, H - side)))
+    return (x0, y0, x0 + side, y0 + side)
 
 
 def contains(box, pt):
@@ -128,12 +137,29 @@ def main():
             s2 = noul_scores([img.crop(grow(b, 0.1, img.size)) for b in level2], target)
             cell = level2[int(s2.argmax())]
             calls, trace = 8, {"step1": [round(float(v), 4) for v in s1], "step2": [round(float(v), 4) for v in s2]}
+        elif args.variant in ("hier3", "oracle_centred"):
+            side = 1.5 * max(W, H) / 8  # an 8x8 cell's long side, grown 25% per side
+            if args.variant == "oracle_centred":
+                point = centre
+            else:
+                box, steps = full, []
+                for _ in range(3):
+                    level = quads(box)
+                    sc = noul_scores([img.crop(grow(b, 0.1, img.size)) for b in level], target)
+                    steps.append([round(float(v), 4) for v in sc])
+                    box = level[int(sc.argmax())]
+                # centre the crop on the score-weighted centroid of the last level's four cells
+                w = np.maximum(sc - sc.min(), 1e-6)
+                cs = [((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0) for b in level]
+                point = (float(np.dot(w, [c[0] for c in cs]) / w.sum()), float(np.dot(w, [c[1] for c in cs]) / w.sum()))
+                calls, trace = 12, {"steps": steps, "point": [round(point[0]), round(point[1])]}
+            cell = centred(point, side, img.size)
         else:
             cells = [sub(full, 4, i, j) for i in range(4) for j in range(4)]
             s = noul_scores([img.crop(grow(b, 0.1, img.size)) for b in cells], target)
             cell = cells[int(s.argmax())]
             calls, trace = 16, {"scores": [round(float(v), 4) for v in s]}
-        final = grow(cell, args.grow, img.size)
+        final = cell if args.variant in ("hier3", "oracle_centred") else grow(cell, args.grow, img.size)
         q = {"type": "choice", "instructions": it["question"], "criteria": it["criteria"]}
         a = agent.predict({"image": img.crop(final)}, {"q": q})["answers"]["q"]
         row = {"id": it["id"], "variant": args.variant, "target": target, "answer": it["answer"], "choice": a["choice"],
