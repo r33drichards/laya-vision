@@ -2950,3 +2950,66 @@ def doodle_eval(model: str = "paint-circle-v3/best", tasks: str = "train,heldout
             json.dump(out, f, indent=2)
         ckpt_vol.commit()
     return summary
+
+
+@app.function(image=image, gpu="L4", cpu=8, memory=32768, timeout=2 * 60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol})
+def prompt_sensitivity(model: str, dataset: str, tasks: str = "circle,square,triangle,line", n: int = 200,
+                       name: str = "", seed: int = 0):
+    """Does the drawing policy read the task? For ``n`` action records from ``dataset``'s val split (states whose
+    task is one of ``tasks``), ask the action question once per task prompt, same state, and report:
+
+    * ``tv``: mean total-variation distance between the action distributions under two different prompts (0: the
+      prompt changes nothing; 1: disjoint);
+    * ``p_label_true`` / ``p_label_other``: mean probability of the labelled action under the state's own prompt
+      and under the other prompts. A model that uses the task gives the label more probability with the right one.
+    Written to ``<run>/prompt_sensitivity/<name>.json`` for a run on the volume."""
+    import itertools
+    import random
+
+    from PIL import Image
+
+    from laya.games import paint_goal, paint_question
+    from laya.paintenv import PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN
+    from laya.vlm import VLMAgent
+
+    names = [t.strip() for t in tasks.split(",") if t.strip()]
+    root = "/data/vqa/" + dataset
+    recs = []
+    with open(os.path.join(root, "val.jsonl")) as f:
+        for line in f:
+            r = json.loads(line)
+            if not r["id"].endswith("-action"):
+                continue
+            own = [t for t in names if paint_goal(t) in r["question"]["instructions"]]
+            if own:
+                recs.append((r, own[0]))
+    random.Random(seed).shuffle(recs)
+    recs = recs[:n]
+    agent = VLMAgent(_ckpt_path(model), device="cuda", head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN)
+    qs = {t: paint_question(t)["action"] for t in names}
+    tv, p_true, p_other, rows = [], [], [], []
+    for r, own in recs:
+        state = {"images": [Image.open(os.path.join(root, p)).convert("RGB") for p in r["images"]],
+                 "context": r["state_text"]}
+        out = agent.predict(state, qs, strict=True)["answers"]
+        dist = {t: out[t]["probabilities"] for t in names}
+        label = list(qs[own]["criteria"])[r["label"]]
+        for a, b in itertools.combinations(names, 2):
+            tv.append(0.5 * sum(abs(dist[a][k] - dist[b][k]) for k in dist[a]))
+        p_true.append(dist[own][label])
+        p_other.extend(dist[t][label] for t in names if t != own)
+        rows.append({"id": r["id"], "task": own, "label": label,
+                     "top": {t: max(dist[t], key=dist[t].get) for t in names}})
+    out = {"model": model, "dataset": dataset, "tasks": names, "n": len(recs),
+           "tv": round(sum(tv) / len(tv), 4), "p_label_true": round(sum(p_true) / len(p_true), 4),
+           "p_label_other": round(sum(p_other) / len(p_other), 4),
+           "top_differs": round(sum(len(set(x["top"].values())) > 1 for x in rows) / len(rows), 4)}
+    print(json.dumps(out, indent=2))
+    if _ckpt_exists(model):
+        d = os.path.join(_ckpt_path(model), "prompt_sensitivity")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, (name or dataset) + ".json"), "w") as f:
+            json.dump(dict(out, rows=rows), f, indent=2)
+        ckpt_vol.commit()
+    return out
