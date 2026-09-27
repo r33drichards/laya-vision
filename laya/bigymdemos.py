@@ -27,6 +27,7 @@ W_POINT = 0.1  # per radian between the gripper's pointing direction and the dem
 REACHED = 0.06  # a waypoint counts as reached below this cost
 PATIENCE = 4  # decisions without a new best cost on a waypoint (by IMPROVE) before aiming at the next one
 IMPROVE = 0.002
+END_PATIENCE = 100  # decisions on the last waypoint without a new best cost before giving up (no labels from idling)
 # Grasps. A demo closes a gripper where its fingers straddle the handle; closing a few cm off closes on air or on the
 # door face (the follower reaches the gripper-closed waypoint by cost, and W_GRIP alone outweighs REACHED). So a
 # gripper may only close within GRASP_TOL (m) and GRASP_ANGLE (rad) of the demo's pose at its closing waypoint, and
@@ -35,10 +36,19 @@ IMPROVE = 0.002
 GRASP_TOL = 0.02
 GRASP_ANGLE = 0.26
 GRASP_PATIENCE = 40
+# Within FINE_RADIUS (m) of a grasp the base does not step or turn: a 5 cm base step shifts both hands at once and
+# lands a finger on the handle bar (a 6 mm bar 2.7 cm off the door), which then blocks the hand short of the grasp
+# (it may still crouch: the demos crouch onto the drawer handle). And a hand whose gripper is closed (the demo's
+# too) neither tilts nor rolls: those turn the arm about the grasp and lever the handle out of the fingers (a 4 cm
+# hand drop from one tilt, measured).
+FINE_RADIUS = 0.05
+_BASE_MOVES = ("BASE_FORWARD", "BASE_BACK", "BASE_LEFT", "BASE_RIGHT", "BASE_TURN_LEFT", "BASE_TURN_RIGHT")
 # The follower also sees the part (door / drawer open fraction, 0..1) and, choosing a move, pays W_PART per unit it
 # is off the demo's at the waypoint: a move that knocks a held door shut or lets it slip back costs, one that
-# pulls it along the demo's arc pays. (Only the choice: REACHED and PATIENCE still use ``cost``.)
-W_PART = 0.0
+# pulls it along the hinge's arc pays. Following the demo's wrist path alone, a straight 3 cm-step pull loses the
+# handle at ~0.35 open (the arc turns away from the line); with it the doors reach the demo's ~0.8 before the
+# release. (Only the choice: REACHED and PATIENCE still use ``cost``.)
+W_PART = 1.0
 FIELDS = ("px", "py", "pz", "yaw", "lx", "ly", "lz", "rx", "ry", "rz", "wl", "wr", "gl", "gr",
           "plx", "ply", "plz", "prx", "pry", "prz")  # the last six: each gripper's pointing direction
 
@@ -152,29 +162,38 @@ def grasp_waypoints(w: np.ndarray) -> List[List[int]]:
     return [[k for k in range(len(w)) if w[k][g] > 0.5 and (k == 0 or w[k - 1][g] < 0.5)] for _, g, _, _ in _HANDS]
 
 
-def _grasp_gate(game: bg.BiGymGame, w: np.ndarray, k: int, grasps, waited: int):
+def _grasp_gate(game: bg.BiGymGame, w: np.ndarray, k: int, grasps, waited: int, done=frozenset()):
     """(banned primitives, the last waypoint the follower may aim at, whether a grasp is gated). Gripper commands
     already held are banned (no-ops). An open gripper whose demo closes it at waypoint ``g <= k`` holds the
     follower at ``g`` and may close only once lined up (``GRASP_TOL``, ``GRASP_ANGLE``) or after
-    ``GRASP_PATIENCE`` decisions there (``waited``)."""
+    ``GRASP_PATIENCE`` decisions there (``waited``). ``done`` holds the (hand index, waypoint) grasps already
+    closed on, which do not hold the follower again once let go."""
     banned, limit, gated = set(), len(w) - 1, False
     for i, (hand, gi, pi, di) in enumerate(_HANDS):
+        H = hand.upper()
         # a gripper command that is already held changes nothing but lasts GRIP_HOLD: a long STAY, not a label
-        banned.add("%s_GRIPPER_%s" % (hand.upper(), "CLOSE" if game._grip[i] > 0.5 else "OPEN"))
+        banned.add("%s_GRIPPER_%s" % (H, "CLOSE" if game._grip[i] > 0.5 else "OPEN"))
         if game._grip[i] > 0.5:
+            if w[k][gi] > 0.5:  # holding: keep the grasp's orientation
+                banned.update("%s_TILT_%s" % (H, d) for d in ("UP", "DOWN", "LEFT", "RIGHT"))
+                banned.update(("%s_WRIST_CW" % H, "%s_WRIST_CCW" % H))
             continue
         due = [g for g in grasps[i] if g <= k]
         nxt = [g for g in grasps[i] if g > k]
-        if nxt:
-            limit = min(limit, nxt[0])
-        if not due or any(w[j][gi] < 0.5 for j in range(due[-1], k + 1)):  # no grasp pending (the demo let go)
+        pending = (bool(due) and (i, due[-1]) not in done  # not if closed on already, nor if the demo let go
+                   and all(w[j][gi] > 0.5 for j in range(due[-1], k + 1)))
+        if not pending and not nxt:
             continue
-        g = due[-1]
+        g = due[-1] if pending else nxt[0]
         limit = min(limit, g)
-        lined_up = (np.linalg.norm(game.hand_pos(hand) - w[g][pi:pi + 3]) < GRASP_TOL
-                    and _angle(game.pointing(hand), w[g][di:di + 3]) < GRASP_ANGLE)
+        dist = np.linalg.norm(game.hand_pos(hand) - w[g][pi:pi + 3])
+        if dist < FINE_RADIUS:
+            banned.update(_BASE_MOVES)
+        if not pending:
+            continue
+        lined_up = dist < GRASP_TOL and _angle(game.pointing(hand), w[g][di:di + 3]) < GRASP_ANGLE
         if not lined_up and waited < GRASP_PATIENCE:
-            banned.add("%s_GRIPPER_CLOSE" % hand.upper())
+            banned.add("%s_GRIPPER_CLOSE" % H)
             gated = True
     return banned, limit, gated
 
@@ -188,7 +207,7 @@ def follow(task: str, demo: Dict, max_decisions: Optional[int] = None, env=None)
     cap = max_decisions or 20 * len(w) + 200  # one part at a time is many times slower than the demo
     k, labels, skipped = 0, [], 0
     best_c, since = np.inf, 0  # best cost reached on waypoint k, and decisions since it last improved
-    grasps, waited = grasp_waypoints(w), 0  # decisions spent held at a grasp waypoint
+    grasps, waited, done = grasp_waypoints(w), 0, set()  # decisions held at a grasp waypoint; grasps made
 
     def advance(limit):
         nonlocal k, best_c, since
@@ -199,15 +218,17 @@ def follow(task: str, demo: Dict, max_decisions: Optional[int] = None, env=None)
 
     while not game.done and game.decisions < cap:
         s = _state(game)
-        banned, limit, gated = _grasp_gate(game, w, k, grasps, waited)
+        banned, limit, gated = _grasp_gate(game, w, k, grasps, waited, done)
         while cost(s, w[k]) < REACHED and advance(limit):
-            banned, limit, gated = _grasp_gate(game, w, k, grasps, waited)
+            banned, limit, gated = _grasp_gate(game, w, k, grasps, waited, done)
         c = cost(s, w[k])
         if c < best_c - IMPROVE:
             best_c, since = c, 0
+        elif k == len(w) - 1 and since >= END_PATIENCE:  # at the end and getting nowhere: stop
+            break
         elif since >= PATIENCE and advance(limit):  # oscillating or stalled on this waypoint: move on
             skipped += 1
-            banned, limit, gated = _grasp_gate(game, w, k, grasps, waited)
+            banned, limit, gated = _grasp_gate(game, w, k, grasps, waited, done)
         waited = waited + 1 if k == limit and gated else 0
         best = lookahead(game, w[k], banned, None if parts is None else parts[k])
         while best == "STAY":  # no move gets closer to this waypoint: aim at the next one
@@ -217,8 +238,11 @@ def follow(task: str, demo: Dict, max_decisions: Optional[int] = None, env=None)
                 waited = GRASP_PATIENCE
             else:
                 break
-            banned, limit, gated = _grasp_gate(game, w, k, grasps, waited)
+            banned, limit, gated = _grasp_gate(game, w, k, grasps, waited, done)
             best = lookahead(game, w[k], banned, None if parts is None else parts[k])
+        for i, (hand, _, _, _) in enumerate(_HANDS):
+            if best == "%s_GRIPPER_CLOSE" % hand.upper():
+                done.update((i, g) for g in grasps[i] if g <= k)
         labels.append({"decision": game.decisions, "primitive": best, "waypoint": k})
         game.step(best)
         since += 1

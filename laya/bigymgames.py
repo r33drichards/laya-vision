@@ -41,8 +41,8 @@ TILT_HOLD = 0.3  # how hard a tilt holds the hand in place (a position row weigh
 # and cannot close, and when the contact gives, the stored lead yanks the hand. Before each primitive the targets
 # are pulled back to within these leads of where the joints actually are (in free space the lead after a move has
 # settled is well inside them, so free moves are unchanged).
-ARM_LEAD = 0.15  # radians an arm joint's target may lead its position (45 Nm at kp 300)
-BASE_LEAD = 0.03  # metres the pelvis x / y / height targets may lead the pelvis (300 N at 1e4 N/m)
+ARM_LEAD = 0.1  # radians an arm joint's target may lead its position (30 Nm at kp 300)
+BASE_LEAD = 0.01  # metres the pelvis x / y / height targets may lead the pelvis (100 N at 1e4 N/m)
 YAW_LEAD = 0.1  # radians the pelvis yaw target may lead the pelvis yaw
 MAX_FRAMES = 4  # decision frames kept for multi-frame questions
 REACH_BINS = (0.3, 0.2, 0.1)  # wrist-target distance (m) thresholds for progress levels 1, 2, 3
@@ -412,6 +412,10 @@ class BiGymGame:
             self.terminated, self.truncated = bool(e.terminate), bool(e.truncate)
             if self.done:
                 break
+        # mj_step leaves the kinematics (site poses, Jacobians) one integration behind qpos; restore() recomputes
+        # them from qpos. Refresh them here too, so the next primitive's IK sees the same numbers whether or not a
+        # lookahead tried and undid moves in between (otherwise the probed and unprobed runs drift apart)
+        self._mj.mj_forward(self._model, self._data)
         self.obs = e.get_observation()
         if "rgb_head" in self.obs:
             self._history = (self._history + [self.frame()])[-MAX_FRAMES:]
@@ -420,20 +424,25 @@ class BiGymGame:
 
     # -- lookahead -------------------------------------------------------------------------------------------
     def snapshot(self):
-        """Everything ``step`` changes: the MuJoCo state plus the Python-side floating-base and gripper commands and
-        this game's counters. ``restore`` puts it back, so a planner can try a primitive and undo it."""
+        """Everything ``step`` changes: the MuJoCo state, the model's body poses the animated legs rewrite, the
+        Python-side floating-base and gripper commands and this game's counters. ``restore`` puts it back, so a
+        planner can try a primitive and undo it; the episode then goes on bit for bit as if it had not
+        (``tests/test_bigymgames.py``)."""
         m, d, mj = self._model, self._data, self._mj
         spec = mj.mjtState.mjSTATE_INTEGRATION
         state = np.empty(mj.mj_stateSize(m, spec))
         mj.mj_getState(m, d, state, spec)
         fb = self.env.robot.floating_base
+        # BiGym's animated legs pose the leg bodies by writing the *model's* body_quat every step (from the pelvis
+        # height and the sim time), outside mjData, so those are kept too
         return (state, fb._accumulated_actions.copy(), fb._last_action.copy(), self._grip.copy(),
                 (self.steps, self.decisions, self.success, self.terminated, self.truncated, self.obs,
-                 self._frame, self._prev, list(self._history)))
+                 self._frame, self._prev, list(self._history)), m.body_quat.copy())
 
     def restore(self, snap) -> None:
         m, d, mj = self._model, self._data, self._mj
-        state, acc, last, grip, counters = snap
+        state, acc, last, grip, counters, body_quat = snap
+        m.body_quat[:] = body_quat
         mj.mj_setState(m, d, state, mj.mjtState.mjSTATE_INTEGRATION)
         mj.mj_forward(m, d)
         fb = self.env.robot.floating_base
