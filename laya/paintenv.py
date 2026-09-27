@@ -461,9 +461,9 @@ class ModelPolicy:
 
     The action is chosen with ``grouped_choice`` (move vs pen action first, then the direction) unless
     ``grouped=False``. ``last`` keeps the latest action answer (probabilities over ``env.actions``, and
-    ``act_probability``, the checkpoint's act-vs-escalate gate); ``last_judgement`` the latest judgements. With ``judge_stop``, the policy
-    answers ``DONE`` when the pen is up and the model judges the task complete (P(progress = 4) >= ``stop_at``),
-    so its own judgement decides when to stop.
+    ``act_probability``, the checkpoint's act-vs-escalate gate); ``last_judgement`` the latest judgements. With
+    ``judge_stop``, the policy answers ``DONE`` when the pen is up and the model judges the task complete
+    (P(progress = 4) >= ``stop_at``), so its own judgement decides when to stop.
 
     Load the agent with ``head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN``: ``predict`` runs with
     ``strict=True`` and raises rather than silently cut a question."""
