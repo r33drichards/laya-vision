@@ -2696,7 +2696,8 @@ def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int 
 
     The model runs with the raised token budgets (``paintenv.PAINT_HEAD_MAX_LEN`` / ``PAINT_MAX_LEN``) or the
     checkpoint's if larger, the full drawing question, two-frame state and the judgement questions each step.
-    Seeds start at 900,000, disjoint from ``prepare_paint``'s. The summary (verifier score, pass rate, steps,
+    Seeds start at 900,000, disjoint from ``prepare_paint``'s. Each episode's final frame and a GIF go to
+    ``<run>/paint_eval/<name>/<policy>-seed<N>.{png,gif}``. The summary (verifier score, pass rate, steps,
     action mix and per-step judgements) is written to ``<run>/paint_eval/<name or timestamp>.json`` for a run on the
     volume and returned.
     """
@@ -2715,13 +2716,22 @@ def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int 
     names = [p for p in policies.split(",") if p]
     out = {"model": model, "budgets": budgets, "episodes": episodes, "seed": seed, "judge_stop": judge_stop,
            "jspaint": JSPAINT_COMMIT, "policies": {}}
-    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, canvas_size=agent.prep.image_size) as env:
+    on_volume = os.path.exists(os.path.join(path, "vlm_agent_config.json"))
+    img_dir = os.path.join(path, "paint_eval", name or time.strftime("%Y%m%d-%H%M%S"))
+    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, canvas_size=agent.prep.image_size,
+                                                         keep_frames=True) as env:
         for pname in names:
             pol = {"model": lambda: model_policy(agent, judge_stop=judge_stop), "expert": circle_expert,
                    "labeller": LabellerPolicy, "random": lambda: random_policy(seed)}[pname]()
             steps_log = []
 
             def on_step(env, action, pol=pol, pname=pname, steps_log=steps_log):
+                if env.done and on_volume:  # the final frame and the whole episode, for looking at
+                    os.makedirs(img_dir, exist_ok=True)
+                    stem = os.path.join(img_dir, "%s-seed%d" % (pname, env.seed))
+                    env.frames[-1].save(stem + ".png")
+                    env.frames[0].save(stem + ".gif", save_all=True, append_images=env.frames[1:], duration=80,
+                                       loop=0)
                 if pname == "model":
                     steps_log.append({"seed": env.seed, "step": env.steps, "action": action,
                                       "top_p": max(pol.last["probabilities"].values()),
@@ -2739,7 +2749,7 @@ def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int 
             print("%-7s mean score %.3f  pass rate %.2f  mean steps %.1f  actions %s  (%.0fs)" % (
                 pname, res["mean_score"], res["pass_rate"], res["mean_steps"],
                 dict(sorted(res["actions"].items(), key=lambda kv: -kv[1])[:6]), res["seconds"]), flush=True)
-    if os.path.exists(os.path.join(path, "vlm_agent_config.json")):
+    if on_volume:
         d = os.path.join(path, "paint_eval")
         os.makedirs(d, exist_ok=True)
         fn = os.path.join(d, (name or time.strftime("%Y%m%d-%H%M%S")) + ".json")
