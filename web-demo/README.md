@@ -1,27 +1,16 @@
-# Laya Vision in the browser
+# Browser runtime (not deployed)
 
-A static page that runs [thaitea/laya-vision](https://huggingface.co/thaitea/laya-vision) on the visitor's device
-with [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/): WebGPU when the browser has it, WASM (CPU)
-otherwise. There is no server, API, database or telemetry, and no build step; the image never leaves the page.
+The static page that ran the model in the browser with [ONNX Runtime Web](https://onnxruntime.ai/docs/tutorials/web/).
+It was taken down because the browser's image decoding and the smaller exports moved the answers too far
+([What didn't work](https://r33drichards.github.io/laya-vision/reference/results/what-didnt-work/)), and its model repo
+on the Hub was deleted. It is kept as the JavaScript reference for the on-device ports:
 
-**Live: <https://r33drichards.github.io/laya-vision/demo/>**, deployed with the documentation site
-(`.github/workflows/deploy-docs.yml`, which places this folder's page under `demo/`). The model files load from
-[thaitea/laya-vision-web](https://huggingface.co/thaitea/laya-vision-web).
+- `laya.js`: `predict`'s token sequence, image resize and answers in plain JavaScript. The iOS app's
+  [`ios/LayaCore`](../ios/LayaCore) is ported from it.
+- `fixtures/parity.json`: token ids, markers and option spans from Python for 5 cases in two option orders.
+  `tests/test_web_demo.py` regenerates it from Python and checks it; `tests/test_ios_core.py` checks the Swift port
+  against it.
 
-The documentation is on the site, built from `site-docs/`:
-
-- [Run it in your browser](https://r33drichards.github.io/laya-vision/tutorials/browser-demo/): using the page.
-- [Export for the browser](https://r33drichards.github.io/laya-vision/how-to/export-for-the-web/): export a
-  checkpoint with `scripts/export_onnx.py`, publish it, serve the page locally, run the tests.
-- [The browser runtime](https://r33drichards.github.io/laya-vision/concepts/browser-runtime/): how the page
-  reproduces `predict`, and why the fp16 export keeps its normalisations in float32.
-- [Browser demo files and checks](https://r33drichards.github.io/laya-vision/reference/web-demo/): the exported
-  files, the pinned runtime, and how closely each precision matches PyTorch.
-
-Quick local run, after an export into `web-demo/models/laya-vision` (git-ignored), or with no export (the page then
-loads the Hub copy):
-
-```bash
-cd web-demo && python3 -m http.server 8080          # http://localhost:8080
-python -m pytest -q tests/test_web_demo.py          # from the repository root
-```
+To run the page locally, export a checkpoint into `web-demo/models/laya-vision` (git-ignored) with
+`python scripts/export_onnx.py thaitea/laya-vision --out web-demo/models/laya-vision --quantize fp16,q8 --validate`, then
+`cd web-demo && python3 -m http.server 8080`.

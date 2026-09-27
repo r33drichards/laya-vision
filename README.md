@@ -28,6 +28,7 @@ Inputs are cut to fit the checkpoint's token budgets: each option to 48 tokens (
 Laya Vision is an independent fork of [Laya](https://github.com/NandhaKishorM/laya) that replaces its ModernBERT text encoder with a small vision-language model. Laya's `predict(state, questions)` API, output schema, RLCD training objective and temperature calibration are unchanged. It is an experimental research project, not affiliated with Convai Innovations, the authors of Laya.
 
 - **Try it:** [thaitea/laya-vision-demo](https://huggingface.co/spaces/thaitea/laya-vision-demo), a Space on free CPU, about 3 s per image. Source in `space/`.
+- **On an iPhone:** [`ios/`](ios/) runs the model on the phone's CPU, GPU or Neural Engine, for testing the hardware: [Run on an iPhone](https://r33drichards.github.io/laya-vision/how-to/run-on-iphone/).
 - **Install:** `pip install -e .` plus `torchvision`, which the image processor needs. ModernVBERT needs `transformers >= 5.3`.
 - **Documentation:** <https://r33drichards.github.io/laya-vision/>, built from [`site-docs/`](site-docs/).
 - **Community:** join the [Discord](https://discord.gg/HMmYn62pmK) for questions, results and discussion.

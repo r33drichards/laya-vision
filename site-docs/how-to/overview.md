@@ -14,6 +14,8 @@ These are **task-oriented** recipes for getting specific things done. They assum
   a scorecard.
 - [Play games with a checkpoint](play-games.md): watch a checkpoint play in a local window, and score it on the games
   suite.
+- [Run on an iPhone](run-on-iphone.md): build the test app, run the model on the phone's CPU, GPU or Neural Engine,
+  and benchmark it.
 
 ## See also
 

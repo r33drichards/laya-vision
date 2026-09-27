@@ -1,0 +1,7 @@
+# the ONNX export (ios/scripts/export_models.sh) and what XcodeGen and Xcode generate
+Models/
+.venv/
+LayaVision.xcodeproj/
+App/Info.plist
+LayaCore/.build/
+LayaCore/.swiftpm/

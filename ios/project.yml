@@ -1,0 +1,59 @@
+# XcodeGen spec for the on-device test app: `brew install xcodegen && xcodegen` in this folder writes
+# LayaVision.xcodeproj (not committed). See ios/README.md.
+name: LayaVision
+options:
+  bundleIdPrefix: fyi.laya
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+packages:
+  # ONNX Runtime's Swift package, pinned: its main branch at ONNX Runtime 1.24.2 (the package has no tag past 1.19.2)
+  onnxruntime:
+    url: https://github.com/microsoft/onnxruntime-swift-package-manager
+    revision: b7fb7f7dea8a2469e6335d95a61b8f36d0dc83b2
+  LayaCore:
+    path: LayaCore
+targets:
+  LayaVision:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+      - path: ../site-docs/tutorials/example.jpg
+        buildPhase: resources
+      # the export from scripts/export_models.sh, copied into the app as a folder
+      - path: Models
+        type: folder
+        buildPhase: resources
+        optional: true
+    dependencies:
+      - package: onnxruntime
+        product: onnxruntime
+      - package: LayaCore
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Laya Vision
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        # Finder can copy a new export into Documents/Models without a rebuild
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        # a free Apple ID needs a bundle id no one else has registered
+        PRODUCT_BUNDLE_IDENTIFIER: fyi.laya.vision.$(USER:rfc1034identifier)
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+schemes:
+  LayaVision:
+    build:
+      targets:
+        LayaVision: all
+    # Release even from Xcode's Run button: the resize and tokenizer are plain Swift loops, ~10x slower unoptimised
+    run:
+      config: Release
+    profile:
+      config: Release
