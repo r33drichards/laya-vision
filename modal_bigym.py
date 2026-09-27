@@ -4,6 +4,15 @@
     modal run modal_bigym.py::bigym_eval --tasks ReachTarget,DrawerTopClose --parts control --episodes 3
     modal run modal_bigym.py::bigym_eval --parts control --frames 2,4       # the model sees its last 2 / 4 views
     modal run modal_bigym.py::bigym_eval --model thaitea/laya-vision --revision <sha> --out eval-results/x.json
+    modal run modal_bigym.py::bigym_eval --model <run>/best --parts control --frames 4 [--head-max-len 320]
+                                                     # a checkpoint on laya-checkpoints (resolved like
+                                                     # modal_app._ckpt_path: under /ckpt/smolvlm, then /ckpt)
+
+Models: ``--model`` is a run on the laya-checkpoints volume (``<run>/best`` under /ckpt/smolvlm, or
+``<family>/<run>/best`` such as ``autoresearch/full/long-sep24-b64/best``, mounted read-only) when one exists there,
+else a Hugging Face id loaded at ``--revision``, which a volume run ignores. ``--head-max-len`` / ``--max-len``
+override the checkpoint's token budgets (0: keep them), so a model can be scored with the budgets it was trained
+with; ``predict(strict=True)`` raises rather than cut a question.
 
 Parts:
     probe    ``--probe-n`` head-camera frames per task with simulator ground truth, asked ``done`` (noul),
@@ -28,6 +37,8 @@ import modal
 app = modal.App("laya-bigym")
 
 hf_vol = modal.Volume.from_name("laya-hf-cache")
+ckpt_vol = modal.Volume.from_name("laya-checkpoints")
+CKPT_ROOTS = ("/ckpt/smolvlm", "/ckpt")  # modal_app._ckpt_path's search order
 
 MODEL = "thaitea/laya-vision"
 REVISION = "f2fe3c12cb6d04c59d8a190250bf3fb40fc828dc"  # thaitea/laya-vision main on 2026-09-25
@@ -71,14 +82,42 @@ def _versions() -> dict:
     return {"mujoco": mujoco.__version__, "bigym": BIGYM, "gl": os.environ.get("MUJOCO_GL")}
 
 
-def _agent(model: str, revision: str):
+def _ckpt_run(model: str) -> str:
+    """The checkpoint directory of a laya-checkpoints run name (``<run>/best``, ``<family>/<run>/best``), resolved
+    like ``modal_app._ckpt_path``; ``""`` when there is none, i.e. ``model`` is a Hugging Face id."""
+    if model.startswith("/") or ".." in model.split("/"):
+        return ""
+    for root in CKPT_ROOTS:
+        path = os.path.join(root, model)
+        if os.path.exists(os.path.join(path, "vlm_agent_config.json")):
+            return path
+    return ""
+
+
+def _agent(model: str, revision: str, head_max_len: int = 0, max_len: int = 0):
     from laya.vlm import VLMAgent
 
-    return VLMAgent(model, revision=revision or None, device="cuda", dtype="bf16")
+    budgets = dict(({"head_max_len": head_max_len} if head_max_len else {}), **({"max_len": max_len} if max_len else {}))
+    path = _ckpt_run(model)
+    if path:
+        agent = VLMAgent(path, device="cuda", dtype="bf16", **budgets)
+    else:
+        agent = VLMAgent(model, revision=revision or None, device="cuda", dtype="bf16", **budgets)
+    print("loaded %s from %s (head_max_len %d, max_len %d)" % (model, path or "the Hub@%s" % revision,
+                                                                agent.cfg.get("head_max_len", 256),
+                                                                agent.cfg.get("max_len", 1024)), flush=True)
+    return agent
 
 
-@app.function(image=image, gpu="L4", cpu=4, timeout=120 * 60, volumes={"/cache/hf": hf_vol})
-def bigym_probe(task: str, model: str = MODEL, revision: str = REVISION, n: int = 200) -> dict:
+def _source(model: str, revision: str) -> dict:
+    """What was loaded: the volume path, or the Hub id and revision."""
+    path = _ckpt_run(model)
+    return {"checkpoint": path, "revision": None} if path else {"checkpoint": None, "revision": revision}
+
+
+@app.function(image=image, gpu="L4", cpu=4, timeout=120 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
+def bigym_probe(task: str, model: str = MODEL, revision: str = REVISION, n: int = 200, head_max_len: int = 0,
+                max_len: int = 0) -> dict:
     """The perception probe on one task: ``n`` frames from ``laya.bigymgames.probe_frames``, all of
     ``probe_questions(task)`` in one ``predict`` per frame."""
     gl = _pick_gl()
@@ -87,7 +126,7 @@ def bigym_probe(task: str, model: str = MODEL, revision: str = REVISION, n: int 
     t0 = time.time()
     frames = bg.probe_frames(task, n)
     qs = bg.probe_questions(task)
-    agent = _agent(model, revision)
+    agent = _agent(model, revision, head_max_len, max_len)
     rows = []
     for i, fr in enumerate(frames):
         ans = agent.predict({"image": fr["image"]}, qs, strict=True)["answers"]
@@ -95,7 +134,8 @@ def bigym_probe(task: str, model: str = MODEL, revision: str = REVISION, n: int 
         for qid, q in qs.items():
             rows.append({"task": task, "frame": i, "seed": fr["seed"], "qid": qid, "label": fr["labels"][qid],
                          "probs": [round(float(p), 5) for p in bg.answer_probs(ans[qid], q)], "truth": truth})
-    out = {"task": task, "model": model, "revision": revision, "n": len(frames), "questions": qs,
+    out = {"task": task, "model": model, "revision": revision, "source": _source(model, revision),
+           "budgets": {k: agent.cfg.get(k) for k in ("head_max_len", "max_len")}, "n": len(frames), "questions": qs,
            "metrics": bg.probe_metrics(rows), "rows": rows, "versions": _versions(), "gl": gl,
            "seconds": round(time.time() - t0, 1)}
     print(json.dumps({"task": task, "metrics": out["metrics"]}))
@@ -103,30 +143,35 @@ def bigym_probe(task: str, model: str = MODEL, revision: str = REVISION, n: int 
 
 
 def _play(task: str, policy: str, episodes: int, seed: int, model: str = "", revision: str = "",
-          frames: int = 1) -> dict:
+          frames: int = 1, head_max_len: int = 0, max_len: int = 0) -> dict:
     gl = _pick_gl()
     from laya import bigymgames as bg
 
     t0 = time.time()
+    extra = {}
     if policy == "model":
-        fn = bg.model_policy(_agent(model, revision), task, frames)
+        agent = _agent(model, revision, head_max_len, max_len)
+        fn = bg.model_policy(agent, task, frames)
+        extra = {"source": _source(model, revision),
+                 "budgets": {k: agent.cfg.get(k) for k in ("head_max_len", "max_len")}}
     elif policy == "oracle":
         fn = bg.oracle_policy
     else:
         fn = bg.random_policy(seed)
     out = bg.play_episodes(task, fn, episodes, seed)
-    out.update(policy="model:%s@%s" % (model, revision[:7]) if policy == "model" else policy, frames=frames,
+    label = "model:%s" % model + ("" if extra.get("source", {}).get("checkpoint") else "@%s" % revision[:7])
+    out.update(extra, policy=label if policy == "model" else policy, frames=frames,
                versions=_versions(), gl=gl, seconds=round(time.time() - t0, 1))
     print(json.dumps({k: v for k, v in out.items() if k != "results"}))
     return out
 
 
-@app.function(image=image, gpu="L4", cpu=4, timeout=180 * 60, volumes={"/cache/hf": hf_vol})
+@app.function(image=image, gpu="L4", cpu=4, timeout=180 * 60, volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()})
 def bigym_play(task: str, model: str = MODEL, revision: str = REVISION, episodes: int = 20,
-               seed: int = 300_000, frames: int = 1) -> dict:
+               seed: int = 300_000, frames: int = 1, head_max_len: int = 0, max_len: int = 0) -> dict:
     """The model plays ``episodes`` seeded episodes of ``task``, one ``predict`` per primitive, seeing the last
     ``frames`` decision frames."""
-    return _play(task, "model", episodes, seed, model, revision, frames)
+    return _play(task, "model", episodes, seed, model, revision, frames, head_max_len, max_len)
 
 
 @app.function(image=image, cpu=4, timeout=180 * 60)
@@ -214,9 +259,10 @@ def _git_state() -> dict:
 @app.local_entrypoint()
 def bigym_eval(tasks: str = ",".join(TASKS), parts: str = "probe,control", model: str = MODEL,
                revision: str = REVISION, episodes: int = 20, probe_n: int = 200, demos: int = 20,
-               seed: int = 300_000, frames: str = "1", out: str = ""):
+               seed: int = 300_000, frames: str = "1", out: str = "", head_max_len: int = 0, max_len: int = 0):
     """Everything in parallel on one checkpoint; see the module docstring. ``--frames 1,2,4`` plays the model once
-    per frame count (results under ``model``, ``model_2f``, ``model_4f``)."""
+    per frame count (results under ``model``, ``model_2f``, ``model_4f``). ``--model`` is a laya-checkpoints run
+    (``<run>/best``) or a Hub id at ``--revision``; ``--head-max-len`` / ``--max-len`` override its budgets."""
     task_list = [t for t in tasks.split(",") if t]
     frame_counts = [int(n) for n in frames.split(",") if n]
     if not frame_counts or any(not 1 <= n <= 4 for n in frame_counts):
@@ -231,9 +277,10 @@ def bigym_eval(tasks: str = ",".join(TASKS), parts: str = "probe,control", model
     calls = {"probe": {}, "control": {}}
     for t in task_list:
         if "probe" in want:
-            calls["probe"][t] = bigym_probe.spawn(t, model, revision, probe_n)
+            calls["probe"][t] = bigym_probe.spawn(t, model, revision, probe_n, head_max_len, max_len)
         if "control" in want:
-            c = {_model_key(n): bigym_play.spawn(t, model, revision, episodes, seed, n) for n in frame_counts}
+            c = {_model_key(n): bigym_play.spawn(t, model, revision, episodes, seed, n, head_max_len, max_len)
+                 for n in frame_counts}
             c["random"] = bigym_baseline.spawn(t, "random", episodes, seed)
             if t in REACH:
                 c["oracle"] = bigym_baseline.spawn(t, "oracle", episodes, seed)
@@ -255,7 +302,10 @@ def bigym_eval(tasks: str = ",".join(TASKS), parts: str = "probe,control", model
         _print_probe(probes)
     if control:
         _print_control(control, frame_counts)
-    result = {"model": model, "revision": revision, "tasks": task_list, "parts": sorted(want), "episodes": episodes,
+    loaded = next((r.get("source") for r in probes + [m for c in control.values() for m in c.values()
+                                                      if isinstance(m, dict) and m.get("source")]), None)
+    result = {"model": model, "revision": None if loaded and loaded.get("checkpoint") else revision,
+              "source": loaded, "head_max_len": head_max_len or None, "max_len": max_len or None, "tasks": task_list, "parts": sorted(want), "episodes": episodes,
               "probe_n": probe_n, "demos": demos, "seed": seed, "frames": frame_counts, "code": _git_state(),
               "date": time.strftime("%Y-%m-%d"), "errors": _ERRORS, "probe": probes, "control": control}
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

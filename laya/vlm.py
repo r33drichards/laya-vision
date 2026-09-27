@@ -259,7 +259,7 @@ def build_vlm_inputs(
     state: Any,
     q: Dict,
     max_len: Optional[int] = None,
-    head_max_len: int = 256,
+    head_max_len: Optional[int] = None,
     option_order: Optional[List[int]] = None,
     truncate_left: bool = False,
     prefix: Optional[Dict[str, Any]] = None,
@@ -276,10 +276,13 @@ def build_vlm_inputs(
     (``processor_readout``). ``prefix`` (from ``vlm_prefix``) may be passed to reuse image preprocessing across
     questions; the state's images are then ignored in favour of it. ``prep`` picks the preprocessing path (see
     ``laya.preprocess``); it is ignored when ``prefix`` is given, which already carries the choice. ``max_len``
-    defaults to the checkpoint's, which the agent leaves on the processor as ``laya_max_len`` (1024 without one).
+    defaults to the checkpoint's, which the agent leaves on the processor as ``laya_max_len`` (1024 without one);
+    ``head_max_len`` likewise, as ``laya_head_max_len`` (256 without one).
     """
     if max_len is None:
         max_len = getattr(processor, "laya_max_len", 1024)
+    if head_max_len is None:
+        head_max_len = getattr(processor, "laya_head_max_len", 256)
     if readout is None:
         readout = processor_readout(processor)
     if readout not in READOUTS:
@@ -917,6 +920,7 @@ class VLMAgent:
         self.cfg["readout"] = self.processor.laya_readout = self.model.readout
         self.cfg["option_attention"] = self.model.option_attention
         self.processor.laya_max_len = self.cfg.get("max_len", 1024)
+        self.processor.laya_head_max_len = self.cfg.get("head_max_len", 256)
         self.prep.check(self.processor)
         self.temperature = self.cfg.get("temperature", [1.0, 1.0, 1.0])
         self.temperature_by_options = self.cfg.get("temperature_by_options", {})
