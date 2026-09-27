@@ -2559,13 +2559,12 @@ paint_image = _with_local_code(
         "git clone %s /jspaint && cd /jspaint && git checkout %s" % (JSPAINT_REPO, JSPAINT_COMMIT),
     )
 )
-PAINT_DATASET = "paint_circle"
 
 
 @app.function(image=paint_image, cpu=2, memory=4096, timeout=2 * 60 * 60, volumes={"/data": data_vol},
               retries=modal.Retries(max_retries=2, initial_delay=5.0))
 def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int = 3) -> list:
-    """Play the episodes in ``specs`` (``[seed, eps, random_prefix]``) and write ``<split>-<shard>.jsonl`` plus
+    """Play the episodes in ``specs`` (``[seed, eps, random_prefix, messy]``) and write ``<split>-<shard>.jsonl`` plus
     the frames under ``tmp_dir``. Returns one summary per episode."""
     from laya.paintdata import play_labelled_episode
     from laya.paintenv import JSPaintEnv, JSPaintServer
@@ -2580,9 +2579,9 @@ def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: 
     out, summaries = os.path.join(tmp_dir, "%s-%03d.jsonl" % (split, shard)), []
     with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, executable_path=None) as env, \
             open(out + ".part", "w") as f:
-        for seed, eps, prefix in specs:
+        for seed, eps, prefix, messy in specs:
             recs, summ = play_labelled_episode(env, seed, "%s-%d" % (split, seed), save_frame, eps=eps,
-                                               random_prefix=prefix, judge_every=judge_every)
+                                               random_prefix=prefix, judge_every=judge_every, messy=messy)
             f.writelines(json.dumps(r) + "\n" for r in recs)
             summaries.append(summ)
     os.rename(out + ".part", out)
@@ -2591,13 +2590,16 @@ def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: 
 
 
 @app.function(image=paint_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
-def prepare_paint(n_train: int = 240, n_val: int = 24, shards: int = 32, seed: int = 0, judge_every: int = 3):
-    """Write /data/vqa/paint_circle/{train,val}.jsonl + images/: labelled JSPaint circle episodes.
+def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int = 24, shards: int = 32, seed: int = 0,
+                  judge_every: int = 3):
+    """Write /data/vqa/<name>/{train,val}.jsonl + images/: labelled JSPaint circle episodes. Refuses to replace an
+    existing prepared dataset (they are create-only; ``paint_circle`` was the first, fixed-target labeller).
 
     Each episode runs a behaviour policy in headless Chromium: the state-based labeller (``laya.paintdata``) with
     probability ``1 - eps``, else a random action, after ``random_prefix`` purely random steps. ``eps`` is drawn from
     (0, 0.1, 0.2, 0.3) and ``random_prefix`` from (0, 0, 10, 30, 60), so the data covers clean circles, noisy ones,
-    and recoveries from a messy start. Every step is labelled with the labeller's action for that state (soft
+    and recoveries from another start; a third of the episodes with a random start are ``messy`` (the random steps
+    may draw, leaving stray ink). Every step is labelled with the labeller's action for that state (soft
     over the neighbouring compass points); every ``judge_every`` steps also with progress, on track and what is
     drawn. Train and val use disjoint seeds. Episodes are split over ``shards`` containers.
     """
@@ -2605,7 +2607,9 @@ def prepare_paint(n_train: int = 240, n_val: int = 24, shards: int = 32, seed: i
     import shutil
     from collections import Counter
 
-    final_dir = "/data/vqa/" + PAINT_DATASET
+    final_dir = "/data/vqa/" + name
+    if os.path.exists(final_dir):
+        raise SystemExit("%s exists; prepared datasets are create-only, pass a new --name" % final_dir)
     tmp_dir = final_dir + ".tmp"
     shutil.rmtree(tmp_dir, ignore_errors=True)
     os.makedirs(os.path.join(tmp_dir, "images"))
@@ -2613,7 +2617,10 @@ def prepare_paint(n_train: int = 240, n_val: int = 24, shards: int = 32, seed: i
     rng = random.Random(seed)
     jobs = []
     for split, n, seed0 in (("train", n_train, seed), ("val", n_val, seed + 1_000_000)):
-        specs = [[seed0 + i, rng.choice((0.0, 0.1, 0.2, 0.3)), rng.choice((0, 0, 10, 30, 60))] for i in range(n)]
+        specs = []
+        for i in range(n):
+            prefix = rng.choice((0, 0, 10, 30, 60))
+            specs.append([seed0 + i, rng.choice((0.0, 0.1, 0.2, 0.3)), prefix, bool(prefix) and rng.random() < 1 / 3])
         k = max(1, min(shards, n))
         for s in range(k):
             if specs[s::k]:
@@ -2645,7 +2652,6 @@ def prepare_paint(n_train: int = 240, n_val: int = 24, shards: int = 32, seed: i
         json.dump(summaries, f)
     _write_manifest(tmp_dir, {JSPAINT_REPO: JSPAINT_COMMIT},
                     dict(n_train=n_train, n_val=n_val, shards=shards, seed=seed, judge_every=judge_every))
-    shutil.rmtree(final_dir, ignore_errors=True)
     os.rename(tmp_dir, final_dir)
     open(os.path.join(final_dir, "_READY"), "w").close()
     data_vol.commit()
@@ -2655,8 +2661,10 @@ def prepare_paint(n_train: int = 240, n_val: int = 24, shards: int = 32, seed: i
 @app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=3 * 60 * 60,
               volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol})
 def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int = 5, seed: int = 900_000,
-               policies: str = "model,expert,random", judge_stop: bool = False, name: str = ""):
-    """Play the JSPaint circle task with a checkpoint (a run under /ckpt, or a Hub id) and the reference policies.
+               policies: str = "model,labeller,expert,random", judge_stop: bool = False, name: str = ""):
+    """Play the JSPaint circle task with a checkpoint (a run under /ckpt, or a Hub id) and the reference policies:
+    ``labeller`` (the state-based labeller the training data comes from), ``expert`` (the older scripted circle
+    centred on the canvas) and ``random``.
 
     The model runs with the raised token budgets (``paintenv.PAINT_HEAD_MAX_LEN`` / ``PAINT_MAX_LEN``) or the
     checkpoint's if larger, the full drawing question, two-frame state and the judgement questions each step.
@@ -2664,6 +2672,7 @@ def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int 
     action mix and per-step judgements) is written to ``<run>/paint_eval/<name or timestamp>.json`` for a run on the
     volume and returned.
     """
+    from laya.paintdata import LabellerPolicy
     from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, circle_expert,
                                model_policy, play_episodes, random_policy)
     from laya.vlm import VLMAgent
@@ -2681,7 +2690,7 @@ def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int 
     with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, canvas_size=agent.prep.image_size) as env:
         for pname in names:
             pol = {"model": lambda: model_policy(agent, judge_stop=judge_stop), "expert": circle_expert,
-                   "random": lambda: random_policy(seed)}[pname]()
+                   "labeller": LabellerPolicy, "random": lambda: random_policy(seed)}[pname]()
             steps_log = []
 
             def on_step(env, action, pol=pol, pname=pname, steps_log=steps_log):

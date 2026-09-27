@@ -1,11 +1,12 @@
 """Check whether Laya Vision's judgements track what is really happening on the JSPaint canvas.
 
-The scripted circle expert and a random policy play; every --every steps the model answers the judgement questions
-(`laya.games.paint_judgements`: progress 0-4, on track or off track, what is drawn) about the same two-frame state
-the drawing policy sees. The truth for progress is the share of the 36 angular sectors around the target circle's
-centre that the cursor has passed through with the pen down (0 before drawing, 1 for a full turn). Reported:
+The state-based labeller (``laya.paintdata.LabellerPolicy``) and a random policy play; every --every steps the
+model answers the judgement questions (`laya.games.paint_judgements`: progress 0-4, on track or off track, what is
+drawn) about the same two-frame state the drawing policy sees. The truth for progress is the share of the 36
+angular sectors of the circle the drawing implies (``laya.paintdata.implied_circle``) that hold ink (0 before
+drawing, 1 for a full ring). Reported:
 
-* how judged progress rises with true progress along the expert's circles (Spearman rank correlation, and the mean
+* how judged progress rises with true progress along the labeller's circles (Spearman rank correlation, and the mean
   judged progress per quarter of true progress);
 * judged progress and P(on track) for the random policy, which should stay low;
 * what the model says the clean final canvas shows, per policy.
@@ -16,7 +17,6 @@ Writes a new directory under --out: judgements.jsonl (one row per check) and sum
 """
 import argparse
 import json
-import math
 import os
 import time
 
@@ -24,18 +24,16 @@ import numpy as np
 from PIL import Image
 
 from laya.games import paint_judgements
-from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, circle_expert, judge_canvas,
-                           random_policy, summarize_judgements)
-
-SECTORS = 36
+from laya.paintdata import LabellerPolicy, implied_circle, ring_state
+from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, judge_canvas, random_policy,
+                           summarize_judgements)
 
 
 def true_progress(env) -> float:
-    """Share of the 36 sectors around the canvas centre that pen-down cursor positions have covered."""
-    cx, cy = env.width / 2.0, env.height / 2.0
-    hit = {int((math.atan2(t["y"] - cy, t["x"] - cx) + math.pi) / (2 * math.pi) * SECTORS) % SECTORS
-           for t in env.trajectory if t["pen"]}
-    return len(hit) / SECTORS
+    """Share of the sectors of the circle the drawing implies that hold ink (0 with nothing drawn)."""
+    px = env.visible_pixels()
+    circle = implied_circle(px, None, env.canvas_size)
+    return 0.0 if circle is None else ring_state(px, circle)["coverage"]
 
 
 def spearman(a, b) -> float:
@@ -66,7 +64,7 @@ def main():
     rows, finals = [], {}
     with JSPaintServer(args.jspaint) as server, JSPaintEnv(server.url, canvas_size=agent.prep.image_size,
                                                            executable_path=args.chromium) as env:
-        for name, make in (("expert", lambda: circle_expert()), ("random", lambda: random_policy(args.seed))):
+        for name, make in (("expert", LabellerPolicy), ("random", lambda: random_policy(args.seed))):
             policy = make()
             finals[name] = []
             for i in range(args.episodes):
