@@ -20,6 +20,21 @@
                                                      # Cauldron + the score sets (group names expand, see DATASET_GROUPS);
                                                      # add --backbone ModernVBERT/modernvbert for the bidirectional one,
                                                      # or --option-attention block to un-causal SmolVLM's option block
+    modal run --detach modal_app.py::finetune_long --run-name bigym-ft-<date> \
+        --init-from autoresearch/full/long-sep24-b64/best \
+        --datasets bigym_v2c_bc_f4,bigym_v2c_bc_f1,bigym_v2c_probe,cauldron,score \
+        --mix bigym_v2c_bc_f4=30,bigym_v2c_bc_f1=10,bigym_v2c_probe=5,score_vlfeedback=3 --game-frac 0.225 \
+        --val-datasets bigym_v2c_bc_f4,bigym_v2c_bc_f1,bigym_v2c_probe,vqa \
+        --head-max-len 320 --max-len 1024 --batch-size 64 --lr-head 5e-5 --lr-backbone 1e-5 --lr-ref-batch 64 \
+        --epochs 0.55 --evals-per-epoch 12 --train-eval-n 200 --max-minutes 90
+                                                     # BiGym fine-tune of the thaitea/laya-vision weights (A100,
+                                                     # ~1 step/s at batch 64, ~2.2 h wall): draws ~50% BiGym (control
+                                                     # on 4 / 1 frames, probe), ~28% the original VQA + score sets,
+                                                     # 22.5% the recipe's game replay; the long-sep24-b64 recipe's LRs
+                                                     # and batch; head_max_len 320 for the 37-option question. Score it
+                                                     # with modal_bigym.py::bigym_eval --model bigym-ft-<date>/best
+                                                     # --frames 1,4 and modal_app.py::full_eval for forgetting.
+                                                     # Smoke (2026-09-27, 58 steps): bigym-smoke-20260927b.
     modal run --detach modal_app.py::split_bench      # SmolVLM2, image splitting off vs 1024 vs 2048 on a 6-set subset:
                                                      # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
     modal run modal_app.py::bench_prefix_cache       # predict latency, prefix cache off vs on, L4 bf16
