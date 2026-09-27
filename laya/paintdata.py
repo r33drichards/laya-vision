@@ -184,7 +184,7 @@ def _question_record(q: Dict) -> Dict:
 
 def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0, random_prefix: int = 0,
                           judge_every: int = 3, task: str = "circle", messy: bool = False, driver=None,
-                          beta: float = 0.5) -> Tuple[List[Dict], Dict]:
+                          beta: float = 0.5, labeller=None) -> Tuple[List[Dict], Dict]:
     """Play one episode and return (training records, episode summary).
 
     ``save_frame(name, image) -> path`` stores an observation and returns the path the records should reference.
@@ -194,15 +194,21 @@ def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0
 
     ``driver(env) -> action`` (e.g. a trained ``paintenv.ModelPolicy``) takes the step with probability ``1 - beta``
     instead of the labeller (DAgger): the episode then visits the states the model itself reaches, including its
-    mistakes, and every one of them is still labelled with the labeller's action."""
-    from laya.games import paint_judgements, paint_question
+    mistakes, and every one of them is still labelled with the labeller's action.
 
+    ``labeller`` supplies the labels: ``reset(env)`` after the environment resets, ``action(env, pixels)``,
+    ``judgements(pixels)`` and ``questions(task)`` (the judgement questions). ``CircleLabeller`` by default;
+    ``laya.quickdraw.DoodleLabeller`` follows a human Quick, Draw! doodle."""
+    from laya.games import paint_question
+
+    labeller = labeller or CircleLabeller()
     rng = random.Random(seed)
     q_act = paint_question(task, env.directions, env.step_px)["action"]
     options = list(q_act["criteria"])
-    q_judge = paint_judgements(task)
+    q_judge = labeller.questions(task)
     records: List[Dict] = []
     env.reset(seed)
+    labeller.reset(env)
     frame_paths: List[str] = []
 
     def frame_path(i: int) -> str:
@@ -212,7 +218,7 @@ def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0
         return frame_paths[i]
 
     def judge_records(base, pixels, t):
-        for name, lab in label_judgements(pixels).items():
+        for name, lab in labeller.judgements(pixels).items():
             if lab is None:
                 continue
             q = q_judge[name]
@@ -228,7 +234,7 @@ def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0
         t = env.steps
         pixels = env.visible_pixels()  # includes the stroke in progress (canvas_pixels would not)
         base = base_state(t)
-        label = label_action(env, pixels)
+        label = labeller.action(env, pixels)
         records.append(dict(base, id="%s-%03d-action" % (rid, t), question=_question_record(q_act),
                             label=options.index(label), target=direction_target(options, label)))
         if t % judge_every == 0:
@@ -249,8 +255,27 @@ def play_labelled_episode(env, seed: int, rid: str, save_frame, eps: float = 0.0
     summary = {"seed": seed, "eps": eps, "random_prefix": random_prefix, "messy": messy,
                "driver": driver is not None, "beta": beta if driver is not None else None, "steps": env.steps,
                "records": len(records), "verifier": env.result["score"],
-               "final": label_judgements(env.visible_pixels())}
+               "final": labeller.judgements(env.visible_pixels())}
     return records, summary
+
+
+class CircleLabeller:
+    """The circle labeller (``label_action`` / ``label_judgements``) in the interface ``play_labelled_episode``
+    takes."""
+
+    def reset(self, env) -> None:
+        pass
+
+    def action(self, env, pixels: np.ndarray) -> str:
+        return label_action(env, pixels)
+
+    def judgements(self, pixels: np.ndarray) -> Dict[str, Optional[str]]:
+        return label_judgements(pixels)
+
+    def questions(self, task: str) -> Dict:
+        from laya.games import paint_judgements
+
+        return paint_judgements(task)
 
 
 class LabellerPolicy:
@@ -262,4 +287,4 @@ class LabellerPolicy:
 
 __all__ = ["SECTORS", "RADIUS_FRAC", "radius", "implied_circle", "fits", "start_point", "target_circle",
            "ring_state", "label_action", "label_judgements", "direction_target",
-           "play_labelled_episode", "LabellerPolicy"]
+           "play_labelled_episode", "CircleLabeller", "LabellerPolicy"]

@@ -92,6 +92,15 @@ PAINT_GOALS = {"circle": "draw one round, closed circle, about as big as a third
                "square": "draw one closed square with straight sides, about a third of the canvas across"}
 
 
+def paint_goal(task: str) -> str:
+    """The task sentence for a drawing task: the hand-written goals for ``circle`` / ``square``, otherwise a simple
+    doodle of the named thing (any Quick, Draw! category, e.g. ``house`` or ``smiley face``)."""
+    if task in PAINT_GOALS:
+        return PAINT_GOALS[task]
+    article = "an" if task[:1].lower() in "aeiou" else "a"
+    return "draw %s %s as a simple line doodle, about two fifths of the canvas across" % (article, task)
+
+
 def paint_question(task: str = "circle", directions: int = 32, step_px: int = 6) -> Dict:
     """The question for ``laya.paintenv.JSPaintEnv``: a paint canvas, a red cursor, and mouse-only actions (a
     ``step_px`` move toward each of ``directions`` compass points, then pen down / pen up / done)."""
@@ -105,7 +114,7 @@ def paint_question(task: str = "circle", directions: int = 32, step_px: int = 6)
         "instructions": "You are using a paint program with only the mouse. You see the canvas a few steps ago "
                         "and now. The white area is the canvas and the red mark is the mouse cursor: a hollow ring "
                         "with a cross means the button is up, a filled dot means it is held down and moving draws a "
-                        "black line. Your task: %s. Which mouse action should you take now?" % PAINT_GOALS[task],
+                        "black line. Your task: %s. Which mouse action should you take now?" % paint_goal(task),
         "criteria": {**moves, **PAINT_PEN},
     }}
 
@@ -118,7 +127,7 @@ PAINT_SHAPES = {
 }
 
 
-def paint_judgements(task: str = "circle") -> Dict:
+def paint_judgements(task: str = "circle", shapes: Optional[Dict[str, str]] = None) -> Dict:
     """The judgement questions asked with ``paint_question`` each step (same state, same ``predict`` call):
 
     * ``progress`` (``score``, 0-4): how far the canvas is toward the task, the model's own dense signal;
@@ -126,8 +135,10 @@ def paint_judgements(task: str = "circle") -> Dict:
       line drawings the model's yes/no (``noul``) answers were unreliable while named choices were not;
     * ``drawn`` (``choice`` over ``PAINT_SHAPES``): what the canvas shows now, whatever the task. At the end of an
       episode this labels what was actually drawn, so a failed attempt can be relabelled as an example of that.
+      ``shapes`` replaces ``PAINT_SHAPES`` as its options (e.g. the Quick, Draw! training categories plus
+      ``nothing``).
     """
-    goal = PAINT_GOALS[task]
+    goal = paint_goal(task)
     return {
         "progress": {
             "type": "score",
@@ -144,7 +155,7 @@ def paint_judgements(task: str = "circle") -> Dict:
         "drawn": {
             "type": "choice",
             "instructions": "What is drawn on this white canvas?",
-            "criteria": dict(PAINT_SHAPES),
+            "criteria": dict(shapes or PAINT_SHAPES),
         },
     }
 

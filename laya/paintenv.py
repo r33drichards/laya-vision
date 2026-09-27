@@ -71,6 +71,11 @@ MOVES = compass_moves(32)
 ACTIONS = tuple(MOVES) + PEN_ACTIONS
 TASKS = {"circle": "Draw a circle on the canvas.", "square": "Draw a square on the canvas."}
 
+
+def task_text(task: str) -> str:
+    """One sentence naming the task; any Quick, Draw! category works (``laya.quickdraw``)."""
+    return TASKS.get(task) or "Draw %s %s on the canvas." % ("an" if task[:1].lower() in "aeiou" else "a", task)
+
 TOOLS = [
     {"name": "move_mouse", "description": "Move the mouse by (dx, dy) canvas pixels. If the button is held down, "
                                           "this draws a brush stroke along the way.",
@@ -129,9 +134,9 @@ class JSPaintEnv:
     def __init__(self, url: str, task: str = "circle", step_px: int = 6, directions: int = 32, max_steps: int = 260,
                  reward: str = "terminal", headless: bool = True, executable_path: Optional[str] = None,
                  viewport: Tuple[int, int] = (900, 720), keep_frames: bool = False, canvas_size: int = 512,
-                 frame_gap: int = 8, history: int = 12):
-        if task not in TASKS:
-            raise ValueError("unknown task %r (one of %s)" % (task, ", ".join(TASKS)))
+                 frame_gap: int = 8, history: int = 12, scorer=None):
+        if not task:
+            raise ValueError("task must name what to draw")
         if reward not in ("terminal", "shaped"):
             raise ValueError("reward must be 'terminal' or 'shaped'")
         from playwright.sync_api import sync_playwright
@@ -139,6 +144,7 @@ class JSPaintEnv:
         self.url, self.task, self.step_px, self.max_steps, self.reward_mode = url, task, step_px, max_steps, reward
         self.keep_frames, self.directions = keep_frames, directions
         self.frame_gap, self.history = frame_gap, history
+        self.scorer = scorer  # scorer(pixels, task) -> {"score", "passed", ...}; None: the circle verifier
         self._recent_obs: deque = deque(maxlen=frame_gap + 1)
         self.moves = compass_moves(directions)
         self.actions = tuple(self.moves) + PEN_ACTIONS
@@ -230,8 +236,12 @@ class JSPaintEnv:
         return obs, reward, self.done, info
 
     def verify(self) -> Dict:
+        """The episode's grade: ``scorer`` if one was given (e.g. ``laya.quickdraw.DoodleScorer`` for any
+        category), else the circle verifier."""
         from laya.circle_verifier import score_circle
 
+        if self.scorer is not None:
+            return self.scorer(self.canvas_pixels(), self.task)
         return score_circle(self.canvas_pixels())
 
     # -- mouse-only tool API ------------------------------------------------------------------------------------
@@ -311,7 +321,7 @@ class JSPaintEnv:
         return {"images": [self._recent_obs[0], self._recent_obs[-1]], "context": self.state_text()}
 
     def note(self) -> str:
-        return "Task: %s The pen is %s. Step %d of %d." % (TASKS[self.task], "down (drawing)" if self.pen else
+        return "Task: %s The pen is %s. Step %d of %d." % (task_text(self.task), "down (drawing)" if self.pen else
                                                           "up (not drawing)", self.steps + 1, self.max_steps)
 
     def canvas_pixels(self) -> np.ndarray:
@@ -453,7 +463,7 @@ class ModelPolicy:
     def questions(self, env: JSPaintEnv) -> Dict:
         from laya.games import paint_judgements, paint_question
 
-        key = (env.directions, env.step_px)
+        key = (self.task, env.directions, env.step_px)
         if key not in self._questions:
             q = paint_question(self.task, env.directions, env.step_px)
             if self.judge:
