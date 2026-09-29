@@ -1,0 +1,81 @@
+{
+ "picks": {
+  "as_run": {
+   "drive.x": {
+    "backward": 168
+   },
+   "drive.yaw": {
+    "none": 167,
+    "turn_left": 1
+   },
+   "task": {
+    "continue": 167,
+    "finished": 1
+   }
+  },
+  "as_run_perm6": {
+   "drive.x": {
+    "backward": 168
+   },
+   "drive.yaw": {
+    "none": 168
+   },
+   "task": {
+    "continue": 155,
+    "finished": 13
+   }
+  },
+  "full_json_criteria": {
+   "drive.x": {
+    "forward": 168
+   },
+   "drive.yaw": {
+    "turn_left": 166,
+    "turn_right": 2
+   },
+   "task": {
+    "continue": 138,
+    "finished": 30
+   }
+  },
+  "labels_only": {
+   "drive.x": {
+    "forward": 148,
+    "backward": 20
+   },
+   "drive.yaw": {
+    "turn_left": 79,
+    "turn_right": 89
+   },
+   "task": {
+    "finished": 168
+   }
+  },
+  "no_task_prose": {
+   "drive.x": {
+    "forward": 147,
+    "backward": 21
+   },
+   "drive.yaw": {
+    "none": 168
+   },
+   "task": {
+    "finished": 96,
+    "continue": 72
+   }
+  }
+ },
+ "yaw_oracle_n": 33,
+ "yaw_agree": {
+  "as_run": 2,
+  "as_run_perm6": 2,
+  "full_json_criteria": 9,
+  "labels_only": 25,
+  "no_task_prose": 2
+ },
+ "yaw_oracle_dist": {
+  "turn_right": 22,
+  "turn_left": 9,
+  "none": 2
+ }
+}
