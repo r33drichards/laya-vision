@@ -12,3 +12,4 @@ fd53b63	0.1495	0.0833	0.6882	0.7084	0.0201	0.3636	201.1613	0.8366	discard	bigym	
 f1f7b2d	-0.0067	0.0365	0.6870	0.7050	0.0180	0.3182	201.1613	0.8219	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.22 0.00 0.00	1-frame recipe, GAME_FRAC 0.12
 1bf2ceb	0.2590	0.1927	0.6734	0.7012	0.0277	0.3099	201.1613	0.8329	discard	bigym	autoresearch/experiment_bigym.py	0.69 0.47 0.00 0.00 0.00 0.00	repeat of 1-frame recipe (noise)
 7d52516	0.1460	0.0729	0.6788	0.7061	0.0273	0.3221	201.1613	0.8327	discard	bigym	autoresearch/experiment_bigym.py	0.38 0.06 0.00 0.00 0.00 0.00	1-frame recipe + EMA (2nd half, 0.99/5 steps)
+fe88ffd	0.1762	0.1094	0.6792	0.7019	0.0227	0.3662	201.1613	0.8301	discard	bigym	autoresearch/experiment_bigym.py	0.62 0.03 0.00 0.00 0.00 0.00	1-frame recipe, LR_BACKBONE 1e-5

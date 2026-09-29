@@ -31,14 +31,15 @@ HEAD_MAX_LEN = 320        # question + options budget: the 37-option BiGym quest
 BIGYM_FRAMES = 1          # head frames the benchmark shows the model per decision (written to the saved config)
 
 # sampling weights within the non-game draws (as the fine-tune: BiGym 45 of 70 -> ~50% of all draws)
-MIX: Dict[str, float] = {"bigym_v2c_bc_f1": 30.0, "bigym_v2c_probe": 5.0,
+MIX: Dict[str, float] = {"bigym_v2c_bc_f1": 40.0, "bigym_v2c_probe": 5.0,
                          "score_vlfeedback": 3.0}
 GAME_FRAC = 0.225         # share of draws for the game replay (toolkit + the pool's expert frames)
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
-FREEZE = "full"           # everything but the vision tower
+FREEZE = "last_n"         # head + the last N_LAST decoder layers: cheaper steps, the lower layers (and quality) kept
+N_LAST = 10
 LR_HEAD = 1e-4
-LR_BACKBONE = 2e-5
+LR_BACKBONE = 3e-5
 BATCH_SIZE = 64           # fits an H100's 80 GB with 4-image records (a 40 GB A100 does not)
 WARMUP_STEPS = 40
 NUM_WORKERS = 26
@@ -82,7 +83,7 @@ def train(agent, ctx):
     workers, prefetch = _loader_fit(BATCH_SIZE, NUM_WORKERS, PREFETCH, images=BIGYM_FRAMES)
     print("loader: %d workers, prefetch %d" % (workers, prefetch), flush=True)
     stats = {}
-    train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
+    train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE, n_last=N_LAST,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
                max_minutes=ctx.time_budget_s / 60, num_workers=workers, prefetch_factor=prefetch, log_every=50,
                device=ctx.device, stats=stats)
