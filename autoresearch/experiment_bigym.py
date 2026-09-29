@@ -42,6 +42,13 @@ LR_BACKBONE = 2e-5
 BATCH_SIZE = 64           # fits an H100's 80 GB with 4-image records (a 40 GB A100 does not)
 WARMUP_STEPS = 40
 NUM_WORKERS = 26
+
+# the saved model is an exponential moving average of the trainable weights over the second half of training
+# (updated every EMA_EVERY steps): single 15-minute runs land on very different policies, and averaging should
+# smooth out where the last few hundred steps happened to leave the head
+EMA_START = 0.5           # fraction of the time budget before the average starts
+EMA_EVERY = 5
+EMA_DECAY = 0.99          # per update: a horizon of ~100 updates = ~500 steps
 PREFETCH = 2
 
 
@@ -81,10 +88,36 @@ def train(agent, ctx):
 
     workers, prefetch = _loader_fit(BATCH_SIZE, NUM_WORKERS, PREFETCH, images=BIGYM_FRAMES)
     print("loader: %d workers, prefetch %d" % (workers, prefetch), flush=True)
+    import time
+
+    import torch
+
     stats = {}
+    t0 = time.time()
+    params = [p for p in agent.model.parameters() if p.is_floating_point()]
+    ema = {"avg": None, "n": 0}
+
+    def ema_update(step):
+        if time.time() - t0 < EMA_START * ctx.time_budget_s:
+            return False
+        with torch.no_grad():
+            live = [p for p in params if p.requires_grad]  # the loop sets requires_grad by FREEZE
+            if ema["avg"] is None:
+                ema["live"] = live
+                ema["avg"] = [p.detach().float().clone() for p in live]
+            else:
+                torch._foreach_lerp_(ema["avg"], [p.detach().float() for p in live], 1 - EMA_DECAY)
+        ema["n"] += 1
+        return False
+
     train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
                lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
                max_minutes=ctx.time_budget_s / 60, num_workers=workers, prefetch_factor=prefetch, log_every=50,
-               device=ctx.device, stats=stats)
+               device=ctx.device, stats=stats, eval_fn=ema_update, eval_every=EMA_EVERY)
+    if ema["avg"] is not None:
+        with torch.no_grad():
+            for p, a in zip(ema["live"], ema["avg"]):
+                p.copy_(a.to(p.dtype))
+    print("ema: %d updates copied into the model" % ema["n"], flush=True)
     print("train stats: %s" % {k: v for k, v in stats.items() if k != "samples_per_dataset"}, flush=True)
     print("samples: %s" % stats.get("samples_per_dataset"), flush=True)

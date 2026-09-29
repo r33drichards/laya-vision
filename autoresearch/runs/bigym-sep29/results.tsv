@@ -9,3 +9,4 @@ be3ec0b	0.0332	0.0000	0.6926	0.7078	0.0152	0.3221	201.1613	0.8176	discard	bigym	
 3d940d4	0.0317	0.0000	0.6910	0.7056	0.0145	0.3401	201.1613	0.8338	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	DART + soft lookahead-cost targets (T 0.005)
 fd53b63	0.1495	0.0833	0.6882	0.7084	0.0201	0.3636	201.1613	0.8366	discard	bigym	autoresearch/experiment_bigym.py	0.09 0.41 0.00 0.00 0.00 0.00	1-frame recipe + reach-oracle rollouts (100 s, w 0.3)
 7b6044c	0.1128	0.0469	0.6781	0.6999	0.0218	0.3555	201.1613	0.8295	discard	bigym	autoresearch/experiment_bigym.py	0.19 0.09 0.00 0.00 0.00 0.00	1-frame recipe + soft-target DART cupboard data
+f1f7b2d	-0.0067	0.0365	0.6870	0.7050	0.0180	0.3182	201.1613	0.8219	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.22 0.00 0.00	1-frame recipe, GAME_FRAC 0.12
