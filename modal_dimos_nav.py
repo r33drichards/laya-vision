@@ -78,7 +78,8 @@ nav_image = (
 )
 
 
-@app.function(image=nav_image, volumes={"/data": habitat_vol}, timeout=6 * 3600, cpu=8)
+@app.function(image=nav_image, volumes={"/data": habitat_vol}, timeout=6 * 3600, cpu=8,
+              secrets=[modal.Secret.from_name("huggingface-thaitea")])  # anonymous listing hits 429
 def prepare_hssd(revision: str = "main") -> dict:
     """HSSD's dataset config, every object/stage config, and the meshes the suite's scenes use."""
     from huggingface_hub import HfApi, snapshot_download
