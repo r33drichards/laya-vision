@@ -34,7 +34,7 @@ BIGYM_FRAMES = 1          # head frames the benchmark shows the model per decisi
 # the 1-frame BC set split by task: under the eval's 150-decision cap the demo follower itself finishes
 # DrawerTopClose (median 103 decisions) but rarely WallCupboardClose (172) and never the two Open tasks (258, 295),
 # so the reachable one gets half the weight
-BC_TASK_WEIGHTS = {"DrawerTopClose": 30.0, "WallCupboardClose": 10.0}   # the Open tasks' records are left out
+BC_TASK_WEIGHTS = {"DrawerTopClose": 20.0, "WallCupboardClose": 10.0, "DrawerTopOpen": 5.0, "WallCupboardOpen": 5.0}
 MIX: Dict[str, float] = {**{"bigym_bc_f1:" + t: w for t, w in BC_TASK_WEIGHTS.items()}, "bigym_v2c_probe": 5.0,
                          "score_vlfeedback": 3.0}
 GAME_FRAC = 0.225         # share of draws for the game replay (toolkit + the pool's expert frames)
@@ -54,7 +54,7 @@ REACH_TASKS = ("ReachTarget", "ReachTargetSingle")
 REACH_ROLLOUT_S = 150     # wall seconds of rollouts, counted in the 15-minute budget
 REACH_PROCS = 30          # rollout processes (OSMesa rendering, CPU only)
 REACH_EXPLORE = 0.3       # chance of playing a random primitive instead of the oracle's (the label stays the oracle's)
-REACH_WEIGHT = 1.0        # sampling weight relative to bigym_v2c_bc_f1
+REACH_WEIGHT = 1.5        # sampling weight relative to bigym_v2c_bc_f1
 
 _REACH_WORKER = r"""
 import io, os, pickle, random, sys, time
@@ -162,8 +162,6 @@ def build(ctx):
     agent.cfg["bigym_frames"] = BIGYM_FRAMES
     bigym = [dict(ex, dataset="bigym_bc_f1:" + str(ex["id"]).split("-")[0]) if ex["dataset"] == "bigym_v2c_bc_f1"
              else ex for ex in ctx.bigym_examples(names=("bigym_v2c_bc_f1", "bigym_v2c_probe"))]
-    bigym = [ex for ex in bigym if not ex["dataset"].startswith("bigym_bc_f1:")
-             or ex["dataset"].split(":")[1] in BC_TASK_WEIGHTS]
     data = ctx.train_examples() + bigym
     games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
     for g in CONTROL_GAMES:
