@@ -57,7 +57,7 @@ nav_image = (
         f"cd /app && git checkout {DIMOS_COMMIT} && git fetch origin {GROUND_TRUTH_COMMIT} "
         f"&& git checkout {GROUND_TRUTH_COMMIT} -- misc/habitat/ground_truth",
     )
-    .run_commands(f"cd /app && {UV} sync --no-dev")
+    .run_commands(f"cd /app && {UV} sync --frozen --no-dev")
     .run_commands("cd /app/dimos/simulation/habitat/nix && ./install.sh")
     .run_commands("cd /app/dimos/navigation/nav_3d/mls_planner/rust && . /root/.cargo/env && cargo build --release")
     .run_commands(
