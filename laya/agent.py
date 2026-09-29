@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from .common import (
+    OPTION_MAX_TOKENS,
     QTYPES,
     amp_dtype,
     build_model,
@@ -210,17 +211,19 @@ class Agent:
         items = []
         max_len = self.cfg.get("max_len", 512)
         head_max_len = self.cfg.get("head_max_len", 192)
+        option_max_len = self.cfg.get("option_max_len", OPTION_MAX_TOKENS)
         truncated = {}
 
         for qid in ids:
             q = self._to_internal(questions[qid])
             report = {}
-            seq, markers = build_sequence(self.tok, state, q, max_len, head_max_len, report=report)
+            seq, markers = build_sequence(self.tok, state, q, max_len, head_max_len, report=report,
+                                          option_max_len=option_max_len)
             if len(markers) != len(render_options(q)):
                 raise ValueError("question %r options exceed head_max_len=%d" % (qid, head_max_len))
             truncated[qid] = truncation_answer(report, q)
             if strict and truncated[qid]:
-                raise truncation_error(qid, truncated[qid], max_len, head_max_len)
+                raise truncation_error(qid, truncated[qid], max_len, head_max_len, option_max_len)
             items.append({"ids": seq, "markers": markers, "qtype": QTYPES[q["t"]]})
 
         b = collate_items([items], self.tok.pad_token_id)

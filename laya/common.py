@@ -18,6 +18,10 @@ def serialize_state(state: Union[str, dict, list]) -> str:
     return json.dumps(state, ensure_ascii=False)
 
 
+#: Tokens each option keeps before any other cut (the checkpoint's ``option_max_len``, 48 unless it sets one).
+OPTION_MAX_TOKENS = 48
+
+
 def render_options(q: Dict) -> List[str]:
     """Render option texts in label-index order. Noul is always [false, true]."""
     t, crit = q["t"], q.get("crit")
@@ -80,12 +84,13 @@ def truncation_answer(report: Dict, q: Dict) -> Optional[Dict]:
     }
 
 
-def truncation_error(qid: str, truncated: Dict, max_len: int, head_max_len: int) -> ValueError:
+def truncation_error(qid: str, truncated: Dict, max_len: int, head_max_len: int,
+                     option_max_len: int = OPTION_MAX_TOKENS) -> ValueError:
     """The error ``predict(..., strict=True)`` raises instead of truncating question ``qid``."""
     what = []
     if truncated["options"]:
-        what.append("options %s cut (48 tokens each at most, options + question within head_max_len=%d)"
-                    % (truncated["options"], head_max_len))
+        what.append("options %s cut (%d tokens each at most, options + question within head_max_len=%d)"
+                    % (truncated["options"], option_max_len, head_max_len))
     if truncated["indistinguishable"]:
         what.append("options %s identical once cut" % truncated["indistinguishable"])
     if truncated["instructions"]:
@@ -105,6 +110,7 @@ def build_sequence(
     option_order: Optional[List[int]] = None,
     truncate_left: bool = False,
     report: Optional[Dict] = None,
+    option_max_len: int = OPTION_MAX_TOKENS,
 ):
     """Format: [CLS] <type> instructions [SEP] [MASK] opt0 [MASK] opt1 ... [SEP] state [SEP].
 
@@ -116,7 +122,7 @@ def build_sequence(
     head_ids = tok("%s question: %s" % (q["t"], ins), add_special_tokens=False)["input_ids"]
     full = [[tok.mask_token_id] + tok(" " + opts[i].replace(mask_tok, " "), add_special_tokens=False)["input_ids"]
             for i in order]
-    opt_ids = [o[:49] for o in full]  # [MASK] + 48 option tokens
+    opt_ids = [o[:option_max_len + 1] for o in full]  # [MASK] + option_max_len option tokens
     opt_budget = head_max_len - sum(len(o) for o in opt_ids)
     if opt_budget < 16:
         per = max(4, (head_max_len - 16) // max(1, len(opt_ids)))

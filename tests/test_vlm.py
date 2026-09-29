@@ -758,6 +758,24 @@ def test_predict_reports_truncation(agent):
     assert res3["answers"]["long_option"]["truncated"] == a["long_option"]["truncated"]
 
 
+def test_option_max_len(agent):
+    """Options keep ``option_max_len`` tokens (48 by default, the same ids as before the key existed); a larger
+    cap with room in ``head_max_len`` keeps a long option whole, and the processor carries the checkpoint's."""
+    img = square((220, 20, 20))
+    q = agent._to_internal(TRUNCATION_QUESTIONS["long_option"])
+    default = build_vlm_inputs(agent.processor, {"image": img}, q)
+    assert build_vlm_inputs(agent.processor, {"image": img}, q, option_max_len=48)["ids"] == default["ids"]
+    assert default["truncation"]["options"] == [1]
+    wide = build_vlm_inputs(agent.processor, {"image": img}, q, head_max_len=512, option_max_len=256)
+    assert wide["truncation"]["options"] == [] and len(wide["ids"]) > len(default["ids"])
+    old = agent.processor.laya_option_max_len
+    try:
+        agent.processor.laya_option_max_len = 256
+        assert build_vlm_inputs(agent.processor, {"image": img}, q, head_max_len=512)["ids"] == wide["ids"]
+    finally:
+        agent.processor.laya_option_max_len = old
+
+
 def test_predict_strict_refuses_to_truncate(agent):
     img = square((220, 20, 20))
     check_schema(agent.predict({"image": img, "note": "short"}, QUESTIONS, strict=True), QUESTIONS)

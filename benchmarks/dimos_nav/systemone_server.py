@@ -12,7 +12,8 @@ Every call is appended to `--log` (one JSON line: latency, truncation per questi
 say how much of each WorldState the checkpoint actually saw.
 
     python benchmarks/dimos_nav/systemone_server.py --model thaitea/laya-vision --revision <sha> --port 8765 \
-        [--max-len 4096 --head-max-len 1024]   # the checkpoint's budgets (1024 / 256) cut every WorldState
+        [--max-len 4096 --head-max-len 1024 --option-max-len 256]   # the checkpoint's budgets (1024 / 256 / 48) cut
+                                                                      # every WorldState and the long option texts
 """
 
 from __future__ import annotations
@@ -64,11 +65,13 @@ def main() -> None:
     ap.add_argument("--log", default=None)
     ap.add_argument("--max-len", type=int, default=None, help="override the checkpoint's sequence budget")
     ap.add_argument("--head-max-len", type=int, default=None, help="override its question+options budget")
+    ap.add_argument("--option-max-len", type=int, default=None, help="override the tokens each option keeps (48)")
     args = ap.parse_args()
 
     import laya
 
-    overrides = {k: v for k, v in (("max_len", args.max_len), ("head_max_len", args.head_max_len)) if v}
+    overrides = {k: v for k, v in (("max_len", args.max_len), ("head_max_len", args.head_max_len),
+                                   ("option_max_len", args.option_max_len)) if v}
     agent = laya.load_vlm(args.model, revision=args.revision, device=args.device, **overrides)
     lock = threading.Lock()  # one GPU, one predict at a time
     log = open(args.log, "a") if args.log else None

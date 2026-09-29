@@ -81,11 +81,12 @@ def probe(sample, overrides=None):
 
 
 @app.local_entrypoint()
-def main(sample: str, out: str, max_len: int = 0, head_max_len: int = 0):
+def main(sample: str, out: str, max_len: int = 0, head_max_len: int = 0, option_max_len: int = 0):
     import os
     if os.path.exists(out):
         raise SystemExit(f"{out} exists (create-only)")
     sample = json.load(open(sample))
-    res = probe.remote(sample, {k: v for k, v in (("max_len", max_len), ("head_max_len", head_max_len)) if v})
+    res = probe.remote(sample, {k: v for k, v in (("max_len", max_len), ("head_max_len", head_max_len),
+                                                  ("option_max_len", option_max_len)) if v})
     print(json.dumps(res, indent=1))
     json.dump(res, open(out, "w"), indent=1)
