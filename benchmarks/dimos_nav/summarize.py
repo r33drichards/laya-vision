@@ -6,7 +6,8 @@ Per case, from dimos's own `nav_metrics.json` (success radius 1 m) and the case'
 arrival, SPL = arrival * geodesic / max(path, geodesic), SoftSPL = (1 - final / start distance, floored at 0)
 * geodesic / max(path, geodesic), time to target, and the checkpoint's call latency and how much of each
 WorldState it had to cut (from the server's call log). A case without `nav_metrics.json` (crash, timeout
-before grading) counts as a failure with SPL 0 and is listed under `errors`.
+before grading) counts as a failure with SPL 0 and is listed under `errors`. `answers` counts the model's picks
+over every call (and, for `noul` questions, how often P(true) reached the agent's 0.7 stop threshold).
 """
 
 from __future__ import annotations
@@ -85,6 +86,16 @@ def main() -> None:
         rows.append(row)
 
     n = len(rows)
+    picks: dict = {}
+    for path in sorted(glob.glob(os.path.join(args.run_dir, "*.tar.gz"))):
+        for call in read_case(path)["calls"]:
+            for q, a in call["answers"].items():
+                if a["type"] == "choice" and q != "target":
+                    picks.setdefault(q, {}).setdefault(a["choice"], 0)
+                    picks[q][a["choice"]] += 1
+                elif a["type"] == "noul":
+                    picks.setdefault(q, {}).setdefault("above_0.7", 0)
+                    picks[q]["above_0.7"] += a["noul"] >= 0.7
     arrived = [r for r in rows if r["arrived"]]
     tot = {
         "cases": n, "errors": len(errors),
@@ -101,7 +112,7 @@ def main() -> None:
             sub = [r for r in rows if str(r[key]) == v]
             by.setdefault(key, {})[v] = {"n": len(sub), "arrival": sum(r["arrived"] for r in sub) / len(sub),
                                          "mean_spl": sum(r["spl"] for r in sub) / len(sub)}
-    print(json.dumps({"totals": tot, "by": by, "errors": errors}, indent=2))
+    print(json.dumps({"totals": tot, "by": by, "errors": errors, "answers": picks}, indent=2))
     print("\n| case | difficulty | geodesic m | arrived | SPL | SoftSPL | final m | calls |")
     print("|---|---|---|---|---|---|---|---|")
     for r in rows:
@@ -111,7 +122,7 @@ def main() -> None:
     if args.json:
         if os.path.exists(args.json):
             raise SystemExit(f"{args.json} exists (create-only)")
-        json.dump({"totals": tot, "by": by, "errors": errors, "rows": rows}, open(args.json, "w"), indent=1)
+        json.dump({"totals": tot, "by": by, "errors": errors, "answers": picks, "rows": rows}, open(args.json, "w"), indent=1)
 
 
 if __name__ == "__main__":
