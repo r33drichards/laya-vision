@@ -116,6 +116,34 @@ loader was the bottleneck, 37% data wait); a BiGym container takes 1.5 min (reac
 running, but one of twelve took 12.4 min on a slow host, and a new deployment's first run pays the snapshots and
 L4 queueing: 47 min end to end for the first run.
 
+## Findings of `bigym-sep29` (24 experiments + 3 baselines)
+
+Kept chain (`autoresearch/runs/bigym-sep29/results.tsv`), each on top of the last:
+
+| commit | change | bigym | success [RT RTS DTO DTC WCO WCC] | quality |
+|---|---|---|---|---|
+| 837f06a | baseline (4 frames, `experiment_bigym.py` as started) | 0.036 | 0 everywhere | 0.685 |
+| 5c1f85d | 1 frame (bc_f1 only), LRs x2, 26 loader workers | 0.225 | .53 .19 0 .34 0 0 | 0.676 |
+| 8a3db45 | + reach-oracle rollouts in the budget at bc_f1's weight, backbone LR 1.5e-5 | 0.307 | .62 .78 0 0 0 0 | 0.680 |
+| 826bf70 | + BC split by task, weights 20/10/5/5 toward DrawerTopClose | 0.351 | .59 .94 0 .25 0 0 | 0.688 |
+| a17717e | + backbone LR 2e-5, batch 32 | 0.452 | .72 .97 0 1.00 0 0 | 0.678 |
+
+Read these with the noise in mind. Baselines at the floor repeat within 0.003, but above it one recipe spreads
+widely: 5c1f85d scored 0.225 then 0.259, and a17717e's repeat scored 0.340 (DrawerTopClose 0/32, quality 0.674
+under the guard). The last keep is partly a lucky draw; the recipe's expected score is nearer 0.35-0.40. The keep
+margin (0.03) fits the floor's noise, not this; a next tag should repeat a candidate before keeping it, or play more
+episodes.
+
+What did not help: 4-frame recipes with any data change (reach oracle, per-primitive rebalancing + smoothing, DART
+with one-hot or soft lookahead-cost targets: all stayed at ~0.03); EMA of the weights; lower backbone LR; a smaller
+BiGym share or game share; training only the last 10 layers; DART on DrawerTopClose only; batch 16.
+
+**The cap makes three cupboard tasks unreachable.** Under `CAPS` (150 decisions) the demo follower itself finishes
+DrawerTopClose (median 103 decisions on the val demos) but rarely WallCupboardClose (median 172) and never
+DrawerTopOpen (258) or WallCupboardOpen (295). With `CUPBOARD_EXPERT = 1.0`, those three tasks cap the benchmark at
+about half its range whatever the model does. A next tag should raise their caps (e.g. 350) or normalise against
+the follower's success at the cap.
+
 ## Ideas to start from
 
 - **DAgger with the lookahead follower as the expert.** Roll the current model out (greedy, or with some

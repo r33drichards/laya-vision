@@ -25,3 +25,4 @@ d8fbb73	0.2985	0.2292	0.6846	0.7041	0.0195	0.3342	201.1613	0.8310	discard	bigym	
 3888414	0.3624	0.2917	0.6873	0.7051	0.0178	0.3313	201.1613	0.8249	discard	bigym	autoresearch/experiment_bigym.py	0.81 0.94 0.00 0.00 0.00 0.00	exp19 recipe, LR_HEAD 2e-4
 a17717e	0.4518	0.4479	0.6778	0.7087	0.0308	0.3198	201.1613	0.8331	keep	bigym	autoresearch/experiment_bigym.py	0.72 0.97 0.00 1.00 0.00 0.00	exp19 recipe, batch 32
 ca32957	0.3725	0.3177	0.6798	0.7009	0.0211	0.3108	201.1613	0.8342	discard	bigym	autoresearch/experiment_bigym.py	0.84 0.78 0.00 0.28 0.00 0.00	kept recipe at batch 16
+f1e5e5c	0.3400	0.2812	0.6739	0.7006	0.0267	0.3019	201.1613	0.8438	discard	bigym	autoresearch/experiment_bigym.py	0.78 0.91 0.00 0.00 0.00 0.00	repeat of kept batch-32 recipe (robustness)
