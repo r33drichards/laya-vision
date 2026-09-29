@@ -31,14 +31,14 @@ HEAD_MAX_LEN = 320        # question + options budget: the 37-option BiGym quest
 BIGYM_FRAMES = 1          # head frames the benchmark shows the model per decision (written to the saved config)
 
 # sampling weights within the non-game draws (as the fine-tune: BiGym 45 of 70 -> ~50% of all draws)
-MIX: Dict[str, float] = {"bigym_v2c_bc_f1": 40.0, "bigym_v2c_probe": 5.0,
+MIX: Dict[str, float] = {"bigym_v2c_bc_f1": 30.0, "bigym_v2c_probe": 5.0,
                          "score_vlfeedback": 3.0}
 GAME_FRAC = 0.225         # share of draws for the game replay (toolkit + the pool's expert frames)
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 FREEZE = "full"           # everything but the vision tower
 LR_HEAD = 1e-4
-LR_BACKBONE = 1e-5
+LR_BACKBONE = 2e-5
 BATCH_SIZE = 64           # fits an H100's 80 GB with 4-image records (a 40 GB A100 does not)
 WARMUP_STEPS = 40
 NUM_WORKERS = 26
