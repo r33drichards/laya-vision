@@ -15,7 +15,10 @@ import sys
 import modal
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from modal_bigym import TASKS, _agent, _pick_gl, ckpt_vol, hf_vol, image  # noqa: E402
+from modal_bigym import TASKS, _agent, _pick_gl, ckpt_vol, hf_vol  # noqa: E402
+from modal_bigym import image as _image  # noqa: E402
+
+image = _image.add_local_python_source("modal_bigym")  # the container imports this file, and it imports modal_bigym
 
 app = modal.App("laya-bigym-record")
 SEED_BASE = 780_000  # autoresearch/bigym_eval.py
