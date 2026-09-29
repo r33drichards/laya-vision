@@ -44,12 +44,146 @@ WARMUP_STEPS = 40
 NUM_WORKERS = 14
 PREFETCH = 2
 
-# anti-collapse: the BC labels are dominated by a few moves (BASE_FORWARD ~ half the drawer labels), and the policy
-# collapses onto them. Split each BC set into one group per (task, primitive) and share the set's weight between them
-# in proportion to count ** BALANCE_ALPHA (1 = as is, 0 = every move equally), and smooth the one-hot targets.
-BC_SETS = ("bigym_v2c_bc_f4", "bigym_v2c_bc_f1")
-BALANCE_ALPHA = 0.5
-LABEL_SMOOTH = 0.1
+# DART-style data for the cupboard tasks, made while the model trains: subprocesses follow the train demos with
+# laya.bigymdemos.follow, but play a random primitive instead of the follower's with probability DART_EPS, and record
+# every visited state (4 head frames) labelled with the follower's choice there: states off the demo path, with
+# the move that recovers. Phase 1 trains on the pool while they run; phase 2 adds their frames.
+DART_TASKS = ("DrawerTopOpen", "DrawerTopClose", "WallCupboardOpen", "WallCupboardClose")
+DART_S = 420              # wall seconds of rollouts (phase 1 trains meanwhile)
+DART_PROCS = 16           # rollout processes (OSMesa); the loader keeps its 14 workers
+DART_EPS = 0.25
+DART_WEIGHT = 1.0         # sampling weight relative to bigym_v2c_bc_f4
+
+_DART_WORKER = r"""
+import io, os, pickle, random, sys, time
+os.environ["MUJOCO_GL"] = os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+from PIL import Image
+from laya import bigymgames as bg
+from laya import bigymdemos as bd
+from laya.bigymdata import label_index
+
+wid, deadline, frames, eps, out_path, jobs_path = (int(sys.argv[1]), float(sys.argv[2]), int(sys.argv[3]),
+                                                   float(sys.argv[4]), sys.argv[5], sys.argv[6])
+with open(jobs_path, "rb") as fh:
+    jobs = pickle.load(fh)
+rng = random.Random(wid)
+out, episodes, successes = [], 0, 0
+cur = {}
+orig_step = bg.BiGymGame.step
+
+
+class Out(Exception):
+    pass
+
+
+orig_look = bd.lookahead
+inlook = [False]
+
+
+def lookahead(game, *a, **k):
+    # the trial steps need no camera: hand them the last observation instead of rendering 37 frames
+    env, get = game.env, game.env.get_observation
+    env.get_observation = lambda: game.obs
+    inlook[0] = True
+    try:
+        return orig_look(game, *a, **k)
+    finally:
+        inlook[0] = False
+        env.get_observation = get
+
+
+def step(game, name):
+    if inlook[0]:
+        return orig_step(game, name)
+    if time.time() > deadline:
+        raise Out()
+    enc, imgs = cur.setdefault("enc", {}), []
+    for f in game.frames(frames):
+        if id(f) not in enc:
+            buf = io.BytesIO()
+            Image.fromarray(f).save(buf, format="JPEG", quality=90)
+            enc[id(f)] = buf.getvalue()
+        imgs.append(enc[id(f)])
+    out.append((game.task, game_seed[0], game.decisions, imgs, label_index(name)))
+    return orig_step(game, name if rng.random() >= eps else rng.choice(game.actions))
+
+
+bg.BiGymGame.step = step
+bd.lookahead = lookahead
+envs = {}
+game_seed = [0]
+for task, demo in jobs:
+    if time.time() > deadline:
+        break
+    if task not in envs:
+        envs[task] = bg.make_env(task, cameras=True)
+    cur.clear()
+    game_seed[0] = demo["seed"]
+    try:
+        r = bd.follow(task, demo, max_decisions=bg.TASKS[task]["max_decisions"], env=envs[task])
+        successes += r["success"]
+    except Out:
+        break
+    episodes += 1
+with open(out_path, "wb") as fh:
+    pickle.dump({"records": out, "episodes": episodes, "successes": successes}, fh)
+"""
+
+
+def start_dart(ctx, seconds: float, procs: int, frames: int, eps: float):
+    """Launch the rollout subprocesses; returns what ``collect_dart`` needs."""
+    import os
+    import pickle
+    import random
+    import subprocess
+    import sys
+    import tempfile
+    import time
+
+    rng = random.Random(0)
+    demos = [(t, d) for t in DART_TASKS for d in ctx.bigym_demos(t)]
+    assert all(ctx.bigym_seed_ok(d["seed"]) for _, d in demos)
+    tmp = tempfile.mkdtemp()
+    script = os.path.join(tmp, "dart_worker.py")
+    with open(script, "w") as f:
+        f.write(_DART_WORKER)
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+    deadline = time.time() + seconds
+    runs = []
+    for w in range(procs):
+        jobs = [demos[rng.randrange(len(demos))] for _ in range(200)]
+        jobs_path, out = os.path.join(tmp, "jobs-%d.pkl" % w), os.path.join(tmp, "out-%d.pkl" % w)
+        with open(jobs_path, "wb") as f:
+            pickle.dump(jobs, f)
+        runs.append((out, subprocess.Popen([sys.executable, script, str(w), str(deadline), str(frames), str(eps),
+                                            out, jobs_path], env=env)))
+    return runs, seconds, frames
+
+
+def collect_dart(started):
+    from laya.bigymgames import bigym_question
+    from laya.vlm import VLMAgent
+
+    runs, seconds, frames = started
+    qs = {t: VLMAgent._to_internal(bigym_question(t, frames)["action"]) for t in DART_TASKS}
+    exs, episodes, succ = [], 0, 0
+    for out, p in runs:
+        if p.wait(timeout=seconds + 300) != 0:
+            print("dart worker %s failed (exit %s)" % (out, p.returncode), flush=True)
+            continue
+        import pickle
+
+        with open(out, "rb") as f:
+            got = pickle.load(f)
+        episodes, succ = episodes + got["episodes"], succ + got["successes"]
+        for task, seed, d, imgs, label in got["records"]:
+            k = len(qs[task]["crit"])
+            state = {"images": imgs} if frames > 1 else {"image": imgs[-1]}
+            exs.append({"state": state, "q": qs[task], "target": [float(i == label) for i in range(k)],
+                        "label": label, "dataset": "bigym_dart_f4", "id": "%s-%d-%d" % (task, seed, d)})
+    print("dart rollouts: %d examples from %d finished episodes (%d successes)" % (len(exs), episodes, succ),
+          flush=True)
+    return exs
 
 
 def _loader_fit(batch_size: int, workers: int, prefetch: int, images: int = 4, side: int = 512):
@@ -75,54 +209,39 @@ def build(ctx):
 
     agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device, head_max_len=HEAD_MAX_LEN)
     agent.cfg["bigym_frames"] = BIGYM_FRAMES
-    data = ctx.train_examples() + rebalance(ctx.bigym_examples())
+    data = ctx.train_examples() + ctx.bigym_examples()
     games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
     for g in CONTROL_GAMES:
         games += toolkit.control_examples(g, 5000)
-    ctx.data, ctx.mix = toolkit.game_mix(data, games, GAME_FRAC, base_weights=split_weights(data))
+    ctx.data, ctx.mix = toolkit.game_mix(data, games, GAME_FRAC, base_weights=MIX)
     return agent
 
 
-def _bc_group(ex) -> str:
-    task = str(ex.get("id", "")).split("-")[0]
-    return "%s:%s:%d" % (ex["dataset"], task, ex["label"])
-
-
-def rebalance(exs):
-    """BC records regrouped per (set, task, primitive) with smoothed targets; the others unchanged."""
-    out = []
-    for ex in exs:
-        if ex.get("dataset") in BC_SETS:
-            k = len(ex["target"])
-            t = [(1 - LABEL_SMOOTH) * p + LABEL_SMOOTH / k for p in ex["target"]]
-            ex = dict(ex, target=t, dataset=_bc_group(ex))
-        out.append(ex)
-    return out
-
-
-def split_weights(data):
-    """MIX with each BC set's weight shared among its groups in proportion to count ** BALANCE_ALPHA."""
-    from collections import Counter
-
-    counts = Counter(ex["dataset"] for ex in data if ":" in ex.get("dataset", ""))
-    w = {k: v for k, v in MIX.items() if k not in BC_SETS}
-    for name in BC_SETS:
-        groups = {g: n for g, n in counts.items() if g.split(":")[0] == name}
-        z = sum(n ** BALANCE_ALPHA for n in groups.values())
-        for g, n in groups.items():
-            w[g] = MIX[name] * n ** BALANCE_ALPHA / z
-    return w
-
-
 def train(agent, ctx):
+    import time
+
     from laya.vlm_train import train as train_loop
 
+    t0 = time.time()
+    started = start_dart(ctx, DART_S, DART_PROCS, BIGYM_FRAMES, DART_EPS)
     workers, prefetch = _loader_fit(BATCH_SIZE, NUM_WORKERS, PREFETCH)
     print("loader: %d workers, prefetch %d" % (workers, prefetch), flush=True)
-    stats = {}
-    train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
-               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
-               max_minutes=ctx.time_budget_s / 60, num_workers=workers, prefetch_factor=prefetch, log_every=50,
-               device=ctx.device, stats=stats)
-    print("train stats: %s" % {k: v for k, v in stats.items() if k != "samples_per_dataset"}, flush=True)
-    print("samples: %s" % stats.get("samples_per_dataset"), flush=True)
+
+    def phase(data, mix, minutes, warmup):
+        stats = {}
+        train_loop(agent.model, agent.processor, data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
+                   lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=warmup, mix_weights=mix,
+                   max_minutes=minutes, num_workers=workers, prefetch_factor=prefetch, log_every=50,
+                   device=ctx.device, stats=stats)
+        print("train stats: %s" % {k: v for k, v in stats.items() if k != "samples_per_dataset"}, flush=True)
+        print("samples: %s" % stats.get("samples_per_dataset"), flush=True)
+
+    phase(ctx.data, ctx.mix, DART_S / 60, WARMUP_STEPS)
+    dart = collect_dart(started)
+    data, mix = list(ctx.data), dict(ctx.mix)
+    if dart:
+        data += dart
+        mix["bigym_dart_f4"] = DART_WEIGHT * mix["bigym_v2c_bc_f4"]
+    left = (ctx.time_budget_s - (time.time() - t0)) / 60
+    if left > 0.5:
+        phase(data, mix, left, 10)
