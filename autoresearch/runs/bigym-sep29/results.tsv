@@ -7,3 +7,5 @@ cec7ce0	0.0182	0.0000	0.6873	0.7053	0.0180	0.3329	201.1613	0.8343	discard	bigym	
 be3ec0b	0.0332	0.0000	0.6926	0.7078	0.0152	0.3221	201.1613	0.8176	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	DART cupboard data during phase 1 (eps 0.25, 420s, 16 procs), phase 2 adds it at bc_f4 weight
 5c1f85d	0.2254	0.1771	0.6758	0.7029	0.0271	0.3704	201.1613	0.8349	keep	bigym	autoresearch/experiment_bigym.py	0.53 0.19 0.00 0.34 0.00 0.00	1 frame (bc_f1 only, w40), LRs x2, 26 loader workers
 3d940d4	0.0317	0.0000	0.6910	0.7056	0.0145	0.3401	201.1613	0.8338	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	DART + soft lookahead-cost targets (T 0.005)
+fd53b63	0.1495	0.0833	0.6882	0.7084	0.0201	0.3636	201.1613	0.8366	discard	bigym	autoresearch/experiment_bigym.py	0.09 0.41 0.00 0.00 0.00 0.00	1-frame recipe + reach-oracle rollouts (100 s, w 0.3)
+7b6044c	0.1128	0.0469	0.6781	0.6999	0.0218	0.3555	201.1613	0.8295	discard	bigym	autoresearch/experiment_bigym.py	0.19 0.09 0.00 0.00 0.00 0.00	1-frame recipe + soft-target DART cupboard data

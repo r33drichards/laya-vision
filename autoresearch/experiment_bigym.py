@@ -33,7 +33,7 @@ BIGYM_FRAMES = 1          # head frames the benchmark shows the model per decisi
 # sampling weights within the non-game draws (as the fine-tune: BiGym 45 of 70 -> ~50% of all draws)
 MIX: Dict[str, float] = {"bigym_v2c_bc_f1": 40.0, "bigym_v2c_probe": 5.0,
                          "score_vlfeedback": 3.0}
-GAME_FRAC = 0.12          # share of draws for the game replay (toolkit + the pool's expert frames)
+GAME_FRAC = 0.225         # share of draws for the game replay (toolkit + the pool's expert frames)
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 FREEZE = "full"           # everything but the vision tower
