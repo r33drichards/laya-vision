@@ -22,3 +22,4 @@ a93f9f6	0.1523	0.0833	0.6783	0.7062	0.0279	0.3435	201.1613	0.8360	discard	bigym	
 d8fbb73	0.2985	0.2292	0.6846	0.7041	0.0195	0.3342	201.1613	0.8310	discard	bigym	autoresearch/experiment_bigym.py	0.59 0.78 0.00 0.00 0.00 0.00	task weights 20/10/5/5 + reach weight 1.5
 779afa2	0.3724	0.3021	0.6857	0.7062	0.0204	0.3418	201.1613	0.8394	discard	bigym	autoresearch/experiment_bigym.py	0.91 0.91 0.00 0.00 0.00 0.00	task weights 20/10/5/5, LR_BACKBONE 2e-5
 1d244b3	0.2824	0.2135	0.6857	0.7051	0.0194	0.3404	201.1613	0.8319	discard	bigym	autoresearch/experiment_bigym.py	0.44 0.84 0.00 0.00 0.00 0.00	task weights 20/10/5/5 + DrawerTopClose soft DART (w0.5)
+3888414	0.3624	0.2917	0.6873	0.7051	0.0178	0.3313	201.1613	0.8249	discard	bigym	autoresearch/experiment_bigym.py	0.81 0.94 0.00 0.00 0.00 0.00	exp19 recipe, LR_HEAD 2e-4
