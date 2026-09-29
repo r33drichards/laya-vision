@@ -44,6 +44,94 @@ WARMUP_STEPS = 40
 NUM_WORKERS = 14
 PREFETCH = 2
 
+# reach tasks have no BC data: roll the privileged reach oracle out on training seeds inside the budget, with some
+# random moves so it also sees off-path states (every visited state labelled with the oracle's move)
+REACH_TASKS = ("ReachTarget", "ReachTargetSingle")
+REACH_ROLLOUT_S = 150     # wall seconds of rollouts, counted in the 15-minute budget
+REACH_PROCS = 28          # rollout processes (OSMesa rendering, CPU only)
+REACH_EXPLORE = 0.3       # chance of playing a random primitive instead of the oracle's (the label stays the oracle's)
+REACH_WEIGHT = 0.5        # sampling weight relative to bigym_v2c_bc_f4
+
+_REACH_WORKER = r"""
+import io, os, pickle, random, sys, time
+os.environ["MUJOCO_GL"] = os.environ["PYOPENGL_PLATFORM"] = "osmesa"
+from PIL import Image
+from laya import bigymgames as bg
+from laya.bigymdata import label_index
+
+wid, deadline, frames, explore, out_path = int(sys.argv[1]), float(sys.argv[2]), int(sys.argv[3]), float(sys.argv[4]), sys.argv[5]
+jobs = pickle.loads(bytes.fromhex(sys.argv[6]))
+rng = random.Random(wid)
+envs, out, episodes = {}, [], 0
+for task, seed in jobs:
+    if time.time() > deadline:
+        break
+    if task not in envs:
+        envs[task] = bg.make_env(task, cameras=True)
+    g = bg.BiGymGame(task, seed, env=envs[task])
+    enc = {}
+    while not g.done and g.decisions < bg.TASKS[task]["max_decisions"] and time.time() < deadline:
+        a = bg.oracle_action(g)
+        imgs = []
+        for f in g.frames(frames):
+            if id(f) not in enc:
+                buf = io.BytesIO()
+                Image.fromarray(f).save(buf, format="JPEG", quality=90)
+                enc[id(f)] = buf.getvalue()
+            imgs.append(enc[id(f)])
+        out.append((task, seed, g.decisions, imgs, label_index(a)))
+        g.step(a if rng.random() >= explore else rng.choice(g.actions))
+    episodes += 1
+with open(out_path, "wb") as fh:
+    pickle.dump({"records": out, "episodes": episodes}, fh)
+"""
+
+
+def reach_rollouts(ctx, seconds: float, procs: int, frames: int, explore: float):
+    """Oracle-labelled reach examples from ``procs`` subprocesses rolling out for ``seconds`` on training seeds."""
+    import os
+    import pickle
+    import random
+    import subprocess
+    import sys
+    import tempfile
+    import time
+
+    from laya.bigymgames import bigym_question
+    from laya.vlm import VLMAgent
+
+    rng = random.Random(0)
+    tmp = tempfile.mkdtemp()
+    script = os.path.join(tmp, "reach_worker.py")
+    with open(script, "w") as f:
+        f.write(_REACH_WORKER)
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(p for p in sys.path if p))
+    deadline = time.time() + seconds
+    runs = []
+    for w in range(procs):
+        jobs = [(REACH_TASKS[(w + i) % 2], rng.randrange(1, 100_000)) for i in range(400)]
+        assert all(ctx.bigym_seed_ok(s) for _, s in jobs)
+        out = os.path.join(tmp, "out-%d.pkl" % w)
+        runs.append((out, subprocess.Popen([sys.executable, script, str(w), str(deadline), str(frames), str(explore),
+                                            out, pickle.dumps(jobs).hex()], env=env)))
+    qs = {t: VLMAgent._to_internal(bigym_question(t, frames)["action"]) for t in REACH_TASKS}
+    exs, episodes = [], 0
+    for out, p in runs:
+        if p.wait(timeout=seconds + 300) != 0:
+            print("reach worker %s failed (exit %s)" % (out, p.returncode), flush=True)
+            continue
+        with open(out, "rb") as f:
+            got = pickle.load(f)
+        episodes += got["episodes"]
+        for task, seed, d, imgs, label in got["records"]:
+            k = len(qs[task]["crit"])
+            state = {"images": imgs} if frames > 1 else {"image": imgs[-1]}
+            exs.append({"state": state, "q": qs[task], "target": [float(i == label) for i in range(k)],
+                        "label": label, "dataset": "bigym_reach_oracle", "id": "%s-%d-%d" % (task, seed, d)})
+    print("reach rollouts: %d examples from %d episodes in %.0f s" % (len(exs), episodes,
+                                                                      seconds - (deadline - time.time())), flush=True)
+    return exs
+
 
 def _loader_fit(batch_size: int, workers: int, prefetch: int, images: int = 4, side: int = 512):
     """(workers, prefetch) so the batches in flight fit in half of /dev/shm (a batch pads every example to its
@@ -77,14 +165,23 @@ def build(ctx):
 
 
 def train(agent, ctx):
+    import time
+
     from laya.vlm_train import train as train_loop
 
+    t0 = time.time()
+    reach = reach_rollouts(ctx, REACH_ROLLOUT_S, REACH_PROCS, BIGYM_FRAMES, REACH_EXPLORE)
+    data, mix = list(ctx.data), dict(ctx.mix)
+    if reach:
+        data += reach
+        mix["bigym_reach_oracle"] = REACH_WEIGHT * mix["bigym_v2c_bc_f4"]
+    left_min = (ctx.time_budget_s - (time.time() - t0)) / 60
     workers, prefetch = _loader_fit(BATCH_SIZE, NUM_WORKERS, PREFETCH)
     print("loader: %d workers, prefetch %d" % (workers, prefetch), flush=True)
     stats = {}
-    train_loop(agent.model, agent.processor, ctx.data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
-               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=ctx.mix,
-               max_minutes=ctx.time_budget_s / 60, num_workers=workers, prefetch_factor=prefetch, log_every=50,
+    train_loop(agent.model, agent.processor, data, steps=10**9, batch_size=BATCH_SIZE, freeze=FREEZE,
+               lr_head=LR_HEAD, lr_backbone=LR_BACKBONE, warmup=WARMUP_STEPS, mix_weights=mix,
+               max_minutes=left_min, num_workers=workers, prefetch_factor=prefetch, log_every=50,
                device=ctx.device, stats=stats)
     print("train stats: %s" % {k: v for k, v in stats.items() if k != "samples_per_dataset"}, flush=True)
     print("samples: %s" % stats.get("samples_per_dataset"), flush=True)
