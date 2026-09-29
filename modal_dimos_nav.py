@@ -44,7 +44,7 @@ UV = "/root/.local/bin/uv"
 nav_image = (
     modal.Image.from_registry("ubuntu:22.04", add_python="3.12")
     .env({"DEBIAN_FRONTEND": "noninteractive"})
-    .apt_install("curl", "ca-certificates", "git", "git-lfs", "build-essential", "pkg-config", "bzip2",
+    .apt_install("curl", "wget", "ca-certificates", "git", "git-lfs", "build-essential", "pkg-config", "bzip2",
                  "libegl1", "libgl1", "libglib2.0-0", "libgomp1", "portaudio19-dev", "libturbojpeg0-dev",
                  "libssl-dev", "clang", "cmake")
     .run_commands(
