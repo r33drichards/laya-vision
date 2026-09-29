@@ -14,3 +14,5 @@ f1f7b2d	-0.0067	0.0365	0.6870	0.7050	0.0180	0.3182	201.1613	0.8219	discard	bigym
 7d52516	0.1460	0.0729	0.6788	0.7061	0.0273	0.3221	201.1613	0.8327	discard	bigym	autoresearch/experiment_bigym.py	0.38 0.06 0.00 0.00 0.00 0.00	1-frame recipe + EMA (2nd half, 0.99/5 steps)
 fe88ffd	0.1762	0.1094	0.6792	0.7019	0.0227	0.3662	201.1613	0.8301	discard	bigym	autoresearch/experiment_bigym.py	0.62 0.03 0.00 0.00 0.00 0.00	1-frame recipe, LR_BACKBONE 1e-5
 77ba40d	-0.0137	0.0000	0.6732	0.7003	0.0271	0.3281	201.1613	0.8275	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	1-frame recipe, bc_f1 weight 30
+a93f9f6	0.1523	0.0833	0.6783	0.7062	0.0279	0.3435	201.1613	0.8360	discard	bigym	autoresearch/experiment_bigym.py	0.44 0.06 0.00 0.00 0.00 0.00	1-frame recipe, last_n 10 layers, LR_BACKBONE 3e-5
+8a3db45	0.3066	0.2344	0.6800	0.7023	0.0223	0.3395	201.1613	0.8268	keep	bigym	autoresearch/experiment_bigym.py	0.62 0.78 0.00 0.00 0.00 0.00	1-frame recipe + reach-oracle w1.0 150s, LR_BACKBONE 1.5e-5
