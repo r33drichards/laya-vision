@@ -11,6 +11,11 @@ and turns the answers into velocity commands; it calls TypeSafe's `POST /v1/syst
     modal run modal_dimos_nav.py::list_cases
     modal run modal_dimos_nav.py::main --out results/dimos-nav/<new-name> [--cases a,b] [--limit N]
 
+`--timeout-s` defaults to 600, the cut-off of the published runs (their per-task data ends timed-out arms at
+t = 601 s); dimos's own default is 1800. The public suite is 84 cases over 11 scenes; the page's 327 tasks
+are a different set (even ids both use, e.g. 102344193_chair, have other spawns and goals), so the numbers
+are not comparable case for case.
+
 One L4 per case (Habitat renders through EGL, the checkpoint runs on the same GPU). Each case's dimos run dir
 (results.jsonl, nav_metrics.json, the agent's request/response traces) and the server's call log come back
 as `<out>/<case>.tar.gz`; `benchmarks/dimos_nav/summarize.py <out>` scores them.
@@ -191,7 +196,7 @@ def _link_data() -> None:
 
 @app.function(image=nav_image, gpu="L4", volumes={"/data": habitat_vol, "/cache/hf": hf_vol}, timeout=3 * 3600,
               cpu=8, memory=32768)
-def run_case(case_id: str, model: str = LAYA_MODEL, revision: str = LAYA_REVISION, timeout_s: int = 1800) -> bytes:
+def run_case(case_id: str, model: str = LAYA_MODEL, revision: str = LAYA_REVISION, timeout_s: int = 600) -> bytes:
     _link_data()
     work = f"/work/{case_id}"
     os.makedirs(work, exist_ok=True)
@@ -244,7 +249,7 @@ def list_cases():
 
 
 @app.local_entrypoint()
-def main(out: str, cases: str = "", limit: int = 0, timeout_s: int = 1800):
+def main(out: str, cases: str = "", limit: int = 0, timeout_s: int = 600):
     if os.path.exists(out):
         raise SystemExit(f"{out} exists; results are create-only, pick a new --out")
     ids = [c for c in cases.split(",") if c] or [c["id"] for c in case_ids.remote()]
