@@ -81,15 +81,44 @@ nav_image = (
 @app.function(image=nav_image, volumes={"/data": habitat_vol}, timeout=6 * 3600, cpu=8,
               secrets=[modal.Secret.from_name("huggingface-thaitea")])  # anonymous listing hits 429
 def prepare_hssd(revision: str = "main") -> dict:
-    """HSSD's dataset config, every object/stage config, and the meshes the suite's scenes use."""
+    """What the suite's HSSD scenes load: the dataset config, semantics, each scene's instance and stage, and
+    every object template (config, mesh, decomposed parts) those scenes place. A full snapshot is ~100k
+    files, over the Hub's request quota, so this fetches by pattern and waits out a 429."""
     from huggingface_hub import HfApi, snapshot_download
+    from huggingface_hub.errors import HfHubHTTPError
 
     out = "/data/hssd-hab"
-    rev = HfApi().dataset_info(HSSD_REPO, revision=revision).sha
     if os.path.exists(f"{out}/manifest.json"):
         return json.load(open(f"{out}/manifest.json"))
-    snapshot_download(HSSD_REPO, repo_type="dataset", revision=rev, local_dir=out, max_workers=32)
-    manifest = {"repo": HSSD_REPO, "revision": rev, "time": time.time()}
+    rev = HfApi().dataset_info(HSSD_REPO, revision=revision).sha
+    scenes = [c["scene_id"] for c in _cases() if "hssd" in (c.get("scene_dataset_config") or "")]
+
+    def fetch(patterns):
+        for attempt in range(20):
+            try:
+                return snapshot_download(HSSD_REPO, repo_type="dataset", revision=rev, local_dir=out,
+                                         allow_patterns=patterns, max_workers=4)
+            except HfHubHTTPError as e:
+                if "429" not in str(e):
+                    raise
+                print(f"rate limited, waiting 5 min (attempt {attempt})", flush=True)
+                time.sleep(310)
+        raise RuntimeError("still rate limited")
+
+    fetch(["*.scene_dataset_config.json", "semantics/*"] + [f"scenes/{s}.scene_instance.json" for s in scenes]
+          + [f"stages/{s}.*" for s in scenes])
+    templates = set()
+    for s in scenes:
+        inst = json.load(open(f"{out}/scenes/{s}.scene_instance.json"))
+        templates |= {o["template_name"].split("_part_", 1)[0] for o in inst.get("object_instances", [])}
+    patterns = []
+    for t in sorted(templates):
+        patterns += [f"objects/{t[0]}/{t}.*", f"objects/{t[0]}/{t}_*", f"objects/decomposed/{t}/*",
+                     f"objects/openings/{t}.*", f"objects/openings/{t}/*"]
+    print(f"{len(scenes)} scenes, {len(templates)} templates", flush=True)
+    fetch(patterns)
+    manifest = {"repo": HSSD_REPO, "revision": rev, "scenes": scenes, "templates": len(templates),
+                "time": time.time()}
     json.dump(manifest, open(f"{out}/manifest.json", "w"))
     habitat_vol.commit()
     return manifest
