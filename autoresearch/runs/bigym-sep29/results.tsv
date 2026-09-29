@@ -5,3 +5,4 @@ a130439	0.0329	0.0000	0.6899	0.7085	0.0186	0.3276	201.1613	0.8310	discard	bigym	
 62ef35f	0.0340	0.0000	0.6960	0.7096	0.0136	0.3255	201.1613	0.8258	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	reach-oracle rollouts 150s, 30% explore, w=0.5 bc_f4
 cec7ce0	0.0182	0.0000	0.6873	0.7053	0.0180	0.3329	201.1613	0.8343	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	anti-collapse: per task x primitive groups at count^0.5, smoothing 0.1
 be3ec0b	0.0332	0.0000	0.6926	0.7078	0.0152	0.3221	201.1613	0.8176	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	DART cupboard data during phase 1 (eps 0.25, 420s, 16 procs), phase 2 adds it at bc_f4 weight
+5c1f85d	0.2254	0.1771	0.6758	0.7029	0.0271	0.3704	201.1613	0.8349	keep	bigym	autoresearch/experiment_bigym.py	0.53 0.19 0.00 0.34 0.00 0.00	1 frame (bc_f1 only, w40), LRs x2, 26 loader workers

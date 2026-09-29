@@ -28,20 +28,20 @@ from typing import Dict
 
 INIT = "autoresearch/full/long-sep24-b64/best"   # the 20-layer model (ctx.ckpt_path: under /ckpt/smolvlm, then /ckpt)
 HEAD_MAX_LEN = 320        # question + options budget: the 37-option BiGym question with room to spare
-BIGYM_FRAMES = 4          # head frames the benchmark shows the model per decision (written to the saved config)
+BIGYM_FRAMES = 1          # head frames the benchmark shows the model per decision (written to the saved config)
 
 # sampling weights within the non-game draws (as the fine-tune: BiGym 45 of 70 -> ~50% of all draws)
-MIX: Dict[str, float] = {"bigym_v2c_bc_f4": 30.0, "bigym_v2c_bc_f1": 10.0, "bigym_v2c_probe": 5.0,
+MIX: Dict[str, float] = {"bigym_v2c_bc_f1": 40.0, "bigym_v2c_probe": 5.0,
                          "score_vlfeedback": 3.0}
 GAME_FRAC = 0.225         # share of draws for the game replay (toolkit + the pool's expert frames)
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 FREEZE = "full"           # everything but the vision tower
-LR_HEAD = 5e-5
-LR_BACKBONE = 1e-5
+LR_HEAD = 1e-4
+LR_BACKBONE = 2e-5
 BATCH_SIZE = 64           # fits an H100's 80 GB with 4-image records (a 40 GB A100 does not)
 WARMUP_STEPS = 40
-NUM_WORKERS = 14
+NUM_WORKERS = 26
 PREFETCH = 2
 
 # DART-style data for the cupboard tasks, made while the model trains: subprocesses follow the train demos with
@@ -50,9 +50,9 @@ PREFETCH = 2
 # the move that recovers. Phase 1 trains on the pool while they run; phase 2 adds their frames.
 DART_TASKS = ("DrawerTopOpen", "DrawerTopClose", "WallCupboardOpen", "WallCupboardClose")
 DART_S = 420              # wall seconds of rollouts (phase 1 trains meanwhile)
-DART_PROCS = 16           # rollout processes (OSMesa); the loader keeps its 14 workers
+DART_PROCS = 10           # rollout processes (OSMesa), next to the loader's workers
 DART_EPS = 0.25
-DART_WEIGHT = 1.0         # sampling weight relative to bigym_v2c_bc_f4
+DART_WEIGHT = 1.0         # sampling weight relative to bigym_v2c_bc_f1
 DART_TEMP = 0.005         # soft target softmax(-cost / T) over the lookahead's costs (a 3 cm step moves cost ~0.03)
 
 _DART_WORKER = r"""
@@ -199,7 +199,7 @@ def collect_dart(started):
         for task, seed, d, imgs, label, soft in got["records"]:
             state = {"images": imgs} if frames > 1 else {"image": imgs[-1]}
             exs.append({"state": state, "q": qs[task], "target": soft,
-                        "label": label, "dataset": "bigym_dart_f4", "id": "%s-%d-%d" % (task, seed, d)})
+                        "label": label, "dataset": "bigym_dart", "id": "%s-%d-%d" % (task, seed, d)})
     print("dart rollouts: %d examples from %d finished episodes (%d successes)" % (len(exs), episodes, succ),
           flush=True)
     return exs
@@ -228,7 +228,7 @@ def build(ctx):
 
     agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device, head_max_len=HEAD_MAX_LEN)
     agent.cfg["bigym_frames"] = BIGYM_FRAMES
-    data = ctx.train_examples() + ctx.bigym_examples()
+    data = ctx.train_examples() + ctx.bigym_examples(names=("bigym_v2c_bc_f1", "bigym_v2c_probe"))
     games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
     for g in CONTROL_GAMES:
         games += toolkit.control_examples(g, 5000)
@@ -243,7 +243,7 @@ def train(agent, ctx):
 
     t0 = time.time()
     started = start_dart(ctx, DART_S, DART_PROCS, BIGYM_FRAMES, DART_EPS)
-    workers, prefetch = _loader_fit(BATCH_SIZE, NUM_WORKERS, PREFETCH)
+    workers, prefetch = _loader_fit(BATCH_SIZE, NUM_WORKERS, PREFETCH, images=BIGYM_FRAMES)
     print("loader: %d workers, prefetch %d" % (workers, prefetch), flush=True)
 
     def phase(data, mix, minutes, warmup):
@@ -260,7 +260,7 @@ def train(agent, ctx):
     data, mix = list(ctx.data), dict(ctx.mix)
     if dart:
         data += dart
-        mix["bigym_dart_f4"] = DART_WEIGHT * mix["bigym_v2c_bc_f4"]
+        mix["bigym_dart"] = DART_WEIGHT * mix["bigym_v2c_bc_f1"]
     left = (ctx.time_budget_s - (time.time() - t0)) / 60
     if left > 0.5:
         phase(data, mix, left, 10)
