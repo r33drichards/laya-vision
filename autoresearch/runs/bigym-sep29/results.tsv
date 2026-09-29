@@ -2,3 +2,4 @@ commit	bigym	bigym_success	quality	macro_acc	ece_hard	games	params_m	latency_x	s
 837f06a	0.0360	0.0000	0.6851	0.7039	0.0188	0.3373	201.1613	0.8220	keep	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	baseline
 a130439	0.0329	0.0000	0.6899	0.7085	0.0186	0.3276	201.1613	0.8310	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	baseline repeat
 396f159	0.0333	0.0000	0.6871	0.7070	0.0200	0.3503	201.1613	0.8255	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	baseline repeat
+62ef35f	0.0340	0.0000	0.6960	0.7096	0.0136	0.3255	201.1613	0.8258	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	reach-oracle rollouts 150s, 30% explore, w=0.5 bc_f4
