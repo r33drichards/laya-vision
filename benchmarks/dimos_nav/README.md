@@ -11,7 +11,7 @@ arm unchanged. dimos's `TypeSafeAgent` builds the state, asks the questions and 
 | File | What |
 |---|---|
 | [`../../modal_dimos_nav.py`](../../modal_dimos_nav.py) | Image (dimos at a pinned commit, habitat-sim, the MLS planner, a laya venv), `prepare_hssd`, one L4 per case |
-| [`systemone_server.py`](systemone_server.py) | `/v1/systemone` over a Laya checkpoint; logs latency, truncation and answers per call |
+| [`systemone_server.py`](systemone_server.py) | `/v1/systemone` over a Laya checkpoint (`--max-len`, `--head-max-len`, `--option-max-len` override its budgets); logs latency, truncation and answers per call |
 | [`summarize.py`](summarize.py) | Arrival, SPL, SoftSPL, per difficulty and scene, and the model's picks over every call |
 | [`probe_options.py`](probe_options.py) | Re-scores logged states under other option renderings, to tell adapter effects from the checkpoint's |
 
@@ -26,20 +26,31 @@ python benchmarks/dimos_nav/summarize.py <dir> --scenes <dimos checkout>/dimos/e
 [`eval-results/dimos-nav/laya-vision-f2fe3c1-600s.json`](../../eval-results/dimos-nav/laya-vision-f2fe3c1-600s.json):
 84 of 84 cases graded, no errors, 600 s per case (the published runs' cut-off), on an L4.
 
-| | laya-vision, checkpoint budgets (1024 / 256) | laya-vision, `--max-len 4096 --head-max-len 1024` | TypeSafe Jev (page, 327 tasks) |
-|---|---|---|---|
-| Arrival | **0 / 84** | **3 / 84 (3.6%)** | 45.9% |
-| Mean SPL | 0.000 | 0.034 | 0.263 |
-| Mean SoftSPL | 0.076 | 0.150 | 0.325 |
-| WorldState tokens dropped per call | 190–380 | 0 | |
-| Model call, median | 0.22 s | 0.37 s | |
+| | Checkpoint budgets (1024 / 256 / 48) | `max_len` 4096, `head_max_len` 1024 | + `option_max_len` 256 | TypeSafe Jev (page, 327 tasks) |
+|---|---|---|---|---|
+| Arrival | **0 / 84** | **3 / 84 (3.6%)** | **0 / 84** | 45.9% |
+| Mean SPL | 0.000 | 0.034 | 0.000 | 0.263 |
+| Mean SoftSPL | 0.076 | 0.150 | 0.000 | 0.325 |
+| Calls with anything truncated | all | all (option texts only) | none | |
+| Model calls per case, median | 1,182 | 1,178 | 1 | |
+| Model call, median | 0.22 s | 0.37 s | (one cold call per case) | |
 
-The middle column is [`laya-vision-f2fe3c1-600s-maxlen4096.json`](../../eval-results/dimos-nav/laya-vision-f2fe3c1-600s-maxlen4096.json).
+Columns: [`laya-vision-f2fe3c1-600s.json`](../../eval-results/dimos-nav/laya-vision-f2fe3c1-600s.json),
+[`laya-vision-f2fe3c1-600s-maxlen4096.json`](../../eval-results/dimos-nav/laya-vision-f2fe3c1-600s-maxlen4096.json),
+[`laya-vision-f2fe3c1-600s-opt256.json`](../../eval-results/dimos-nav/laya-vision-f2fe3c1-600s-opt256.json).
 The checkpoint was trained at `max_len` 1024, but the SmolVLM backbone takes 8,192, so the budgets can be raised
-at load time (`load_vlm(..., max_len=4096, head_max_len=1024)`). With that, every WorldState fits whole. Option
-texts are still cut at 48 tokens each: that cap is hard-coded in `build_vlm_inputs`, and no config key changes it.
+at load time: `load_vlm(..., max_len=4096, head_max_len=1024, option_max_len=256)`. `option_max_len`, the tokens
+each option keeps, was a hard-coded 48 before `c7d35f0`; it is now a config key with that default. With all three
+raised, nothing is cut: the whole WorldState and every option text reach the model.
 
-**The checkpoint does not navigate, with or without truncation.** Over 80,361 calls at the checkpoint's
+With nothing cut, the model answers `task = finished` on its first call in every case (119 calls over 84 cases).
+The agent then declares the task done and stops at the spawn point, so every run ends within ~8 s. The option
+probe at these budgets
+([`laya-vision-f2fe3c1-option-probe-opt256.json`](../../eval-results/dimos-nav/laya-vision-f2fe3c1-option-probe-opt256.json))
+shows the same on the 168 logged states: `task = finished` 168 / 168 under every rendering, `drive.x = backward`
+on 139 and `drive.yaw = none` on all.
+
+**The checkpoint does not navigate, however much of the prompt it sees.** Over 80,361 calls at the checkpoint's
 budgets it answered `drive.x = backward` on every call and `drive.yaw = none` on all but 149. `stop` never
 reached the agent's 0.7 threshold, and `task` said `finished` once. With the whole state visible (88,264 calls)
 it answered `backward` on 88,235 and `none` for yaw on every one. The robot only ever reverses. The little SoftSPL it earns is from runs where reversing happened to bring it
@@ -60,11 +71,13 @@ barely above always answering `turn_right` (22).
 This is expected. The checkpoint is a 201M image-QA model, and this eval is a text-only control prompt it
 never trained on. Truncation is not the cause: at the checkpoint's budgets every call lost 190–380 tokens
 from the end of the state (`open_sides`, `free_space`), but goal, target bearing and distance fit. With no
-state cut at all, the policy does not change.
+state cut at all, the policy does not change; with no option cut either, it only changes which answer is
+constant.
 
 **Caveats.** The public dimos suite is 84 cases over 11 scenes (10 HSSD, plus the HM3D example house). The
 page's 327 tasks are a different set; even the ids both use (e.g. `102344193_chair`) have other spawns and
 goals. So the laya columns above and the page's column are not the same cases. The option renderer passes each criterion's `what`
 text; see the probe for the others. Raw per-case output (the agent's traces, dimos run dirs, the server's call
 logs) is on the `dimos-habitat` Modal volume under `runs/laya-vision-f2fe3c1-600s-20260929` and
-`runs/laya-vision-f2fe3c1-600s-maxlen4096-20260929`. Their SHA-256s are in the results files.
+`runs/laya-vision-f2fe3c1-600s-maxlen4096-20260929` and `runs/laya-vision-f2fe3c1-600s-opt256-20260929`. Their
+SHA-256s are in the results files.

@@ -88,7 +88,10 @@ question was divided by (`temperatures`).
 
 Inputs are cut to fit the checkpoint's token budgets: each option to 48 tokens (and shorter when many options must
 share `head_max_len`, 256), the instructions to what the options leave, the state's text to what `max_len` leaves
-after the images. An answer whose question was cut carries a `truncated` field, absent otherwise:
+after the images. The three budgets are the checkpoint config's `option_max_len` (48 by default), `head_max_len`
+and `max_len`; keywords to `load_vlm` override them, e.g. `load_vlm(model, max_len=4096, head_max_len=1024,
+option_max_len=256)` for long text states (the backbone takes 8,192 tokens, but the checkpoint was trained within
+its own budgets). An answer whose question was cut carries a `truncated` field, absent otherwise:
 
 ```python
 {"options": [labels cut], "indistinguishable": [[label, label], ...], "instructions": bool,

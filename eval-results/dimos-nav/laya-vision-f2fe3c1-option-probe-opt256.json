@@ -1,0 +1,90 @@
+{
+ "picks": {
+  "as_run": {
+   "drive.x": {
+    "backward": 139,
+    "none": 29
+   },
+   "drive.yaw": {
+    "none": 168
+   },
+   "task": {
+    "finished": 168
+   }
+  },
+  "as_run_perm6": {
+   "drive.x": {
+    "backward": 168
+   },
+   "drive.yaw": {
+    "none": 168
+   },
+   "task": {
+    "finished": 168
+   }
+  },
+  "full_json_criteria": {
+   "drive.x": {
+    "backward": 154,
+    "forward": 14
+   },
+   "drive.yaw": {
+    "turn_right": 146,
+    "turn_left": 22
+   },
+   "task": {
+    "finished": 168
+   }
+  },
+  "labels_only": {
+   "drive.x": {
+    "forward": 168
+   },
+   "drive.yaw": {
+    "turn_left": 122,
+    "turn_right": 46
+   },
+   "task": {
+    "finished": 168
+   }
+  },
+  "no_task_prose": {
+   "drive.x": {
+    "forward": 161,
+    "none": 5,
+    "backward": 2
+   },
+   "drive.yaw": {
+    "none": 168
+   },
+   "task": {
+    "finished": 168
+   }
+  }
+ },
+ "overrides": {
+  "max_len": 4096,
+  "head_max_len": 1024,
+  "option_max_len": 256
+ },
+ "calls_with_truncation": {
+  "as_run": 0,
+  "as_run_perm6": 0,
+  "full_json_criteria": 0,
+  "labels_only": 0,
+  "no_task_prose": 0
+ },
+ "yaw_oracle_n": 33,
+ "yaw_agree": {
+  "as_run": 2,
+  "as_run_perm6": 2,
+  "full_json_criteria": 22,
+  "labels_only": 17,
+  "no_task_prose": 2
+ },
+ "yaw_oracle_dist": {
+  "turn_right": 22,
+  "turn_left": 9,
+  "none": 2
+ }
+}
