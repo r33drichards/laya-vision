@@ -196,7 +196,8 @@ def _link_data() -> None:
 
 @app.function(image=nav_image, gpu="L4", volumes={"/data": habitat_vol, "/cache/hf": hf_vol}, timeout=3 * 3600,
               cpu=8, memory=32768)
-def run_case(case_id: str, model: str = LAYA_MODEL, revision: str = LAYA_REVISION, timeout_s: int = 600) -> bytes:
+def run_case(case_id: str, model: str = LAYA_MODEL, revision: str = LAYA_REVISION, timeout_s: int = 600,
+             max_len: int = 0, head_max_len: int = 0) -> bytes:
     _link_data()
     work = f"/work/{case_id}"
     os.makedirs(work, exist_ok=True)
@@ -204,7 +205,8 @@ def run_case(case_id: str, model: str = LAYA_MODEL, revision: str = LAYA_REVISIO
            "DIMOS_EVAL_TIMEOUT_S": str(timeout_s)}
     server = subprocess.Popen(
         ["/opt/laya/bin/python", "/opt/laya-src/dimos_nav/systemone_server.py", "--model", model, "--revision",
-         revision, "--port", "8765", "--log", f"{work}/systemone.jsonl"],
+         revision, "--port", "8765", "--log", f"{work}/systemone.jsonl"]
+        + (["--max-len", str(max_len)] if max_len else []) + (["--head-max-len", str(head_max_len)] if head_max_len else []),
         env=env, stdout=open(f"{work}/server.log", "w"), stderr=subprocess.STDOUT)
     import urllib.request
     for _ in range(600):
@@ -233,6 +235,7 @@ def run_case(case_id: str, model: str = LAYA_MODEL, revision: str = LAYA_REVISIO
     json.dump({"case": case_id, "model": model, "revision": revision, "dimos_commit": DIMOS_COMMIT,
                "ground_truth_commit": GROUND_TRUTH_COMMIT, "returncode": returncode,
                "wall_s": time.time() - t0, "timeout_s": timeout_s,
+               "max_len": max_len or None, "head_max_len": head_max_len or None,
                "hssd": json.load(open("/data/hssd-hab/manifest.json")) if os.path.exists("/data/hssd-hab/manifest.json") else None},
               open(f"{work}/case.json", "w"))
     buf = io.BytesIO()
@@ -249,7 +252,7 @@ def list_cases():
 
 
 @app.local_entrypoint()
-def main(out: str, cases: str = "", limit: int = 0, timeout_s: int = 600):
+def main(out: str, cases: str = "", limit: int = 0, timeout_s: int = 600, max_len: int = 0, head_max_len: int = 0):
     if os.path.exists(out):
         raise SystemExit(f"{out} exists; results are create-only, pick a new --out")
     ids = [c for c in cases.split(",") if c] or [c["id"] for c in case_ids.remote()]
@@ -257,7 +260,8 @@ def main(out: str, cases: str = "", limit: int = 0, timeout_s: int = 600):
         ids = ids[:limit]
     os.makedirs(out)
     print(f"{len(ids)} cases -> {out}")
-    for cid, blob in zip(ids, run_case.map(ids, kwargs={"timeout_s": timeout_s}, return_exceptions=True)):
+    for cid, blob in zip(ids, run_case.map(ids, kwargs={"timeout_s": timeout_s, "max_len": max_len, "head_max_len": head_max_len},
+                                           return_exceptions=True)):
         if isinstance(blob, Exception):
             print(f"{cid}: ERROR {blob!r}")
             continue

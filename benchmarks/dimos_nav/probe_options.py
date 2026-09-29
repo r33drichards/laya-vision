@@ -39,12 +39,12 @@ def yaw_oracle(state):
 
 
 @app.function(image=image, gpu="L4", volumes={"/cache/hf": hf_vol}, timeout=3600)
-def probe(sample):
+def probe(sample, overrides=None):
     sys.path.insert(0, "/root/dimos_nav")
     import laya
     from systemone_server import to_laya
 
-    agent = laya.load_vlm("thaitea/laya-vision", revision="f2fe3c12cb6d04c59d8a190250bf3fb40fc828dc")
+    agent = laya.load_vlm("thaitea/laya-vision", revision="f2fe3c12cb6d04c59d8a190250bf3fb40fc828dc", **(overrides or {}))
 
     def variants(body):
         qs = {k: v for k, v in body["questions"].items() if k in ("drive.x", "drive.yaw", "task")}
@@ -64,26 +64,28 @@ def probe(sample):
     picks = collections.defaultdict(lambda: collections.defaultdict(collections.Counter))
     yaw_agree = collections.Counter()
     yaw_n = 0
+    cut = collections.Counter()
     for body in sample:
         oracle = yaw_oracle(body["state"])
         yaw_n += oracle is not None
         for name, (state, qs, perm) in variants(body).items():
             ans = agent.predict(state, qs, n_permutations=perm)["answers"]
+            cut[name] += any("truncated" in a for a in ans.values())
             for q, a in ans.items():
                 picks[name][q][a["choice"]] += 1
             if oracle is not None:
                 yaw_agree[name] += ans["drive.yaw"]["choice"] == oracle
     return {"picks": {n: {q: dict(c) for q, c in d.items()} for n, d in picks.items()},
-            "yaw_oracle_n": yaw_n, "yaw_agree": dict(yaw_agree),
+            "overrides": overrides or {}, "calls_with_truncation": dict(cut), "yaw_oracle_n": yaw_n, "yaw_agree": dict(yaw_agree),
             "yaw_oracle_dist": dict(collections.Counter(filter(None, (yaw_oracle(b["state"]) for b in sample))))}
 
 
 @app.local_entrypoint()
-def main(sample: str, out: str):
+def main(sample: str, out: str, max_len: int = 0, head_max_len: int = 0):
     import os
     if os.path.exists(out):
         raise SystemExit(f"{out} exists (create-only)")
     sample = json.load(open(sample))
-    res = probe.remote(sample)
+    res = probe.remote(sample, {k: v for k, v in (("max_len", max_len), ("head_max_len", head_max_len)) if v})
     print(json.dumps(res, indent=1))
     json.dump(res, open(out, "w"), indent=1)

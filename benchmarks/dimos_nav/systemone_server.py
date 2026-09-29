@@ -11,7 +11,8 @@ dimos's `TypeSafeAgent` (dimos/agents/typesafe) sends `{"state", "model", "quest
 Every call is appended to `--log` (one JSON line: latency, truncation per question, answers) so a run can
 say how much of each WorldState the checkpoint actually saw.
 
-    python benchmarks/dimos_nav/systemone_server.py --model thaitea/laya-vision --revision <sha> --port 8765
+    python benchmarks/dimos_nav/systemone_server.py --model thaitea/laya-vision --revision <sha> --port 8765 \
+        [--max-len 4096 --head-max-len 1024]   # the checkpoint's budgets (1024 / 256) cut every WorldState
 """
 
 from __future__ import annotations
@@ -61,14 +62,18 @@ def main() -> None:
     ap.add_argument("--device", default=None)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--log", default=None)
+    ap.add_argument("--max-len", type=int, default=None, help="override the checkpoint's sequence budget")
+    ap.add_argument("--head-max-len", type=int, default=None, help="override its question+options budget")
     args = ap.parse_args()
 
     import laya
 
-    agent = laya.load_vlm(args.model, revision=args.revision, device=args.device)
+    overrides = {k: v for k, v in (("max_len", args.max_len), ("head_max_len", args.head_max_len)) if v}
+    agent = laya.load_vlm(args.model, revision=args.revision, device=args.device, **overrides)
     lock = threading.Lock()  # one GPU, one predict at a time
     log = open(args.log, "a") if args.log else None
-    name = "laya:%s@%s" % (args.model, args.revision or "main")
+    name = "laya:%s@%s" % (args.model, args.revision or "main") + "".join(
+        ",%s=%d" % kv for kv in sorted(overrides.items()))
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *a):
