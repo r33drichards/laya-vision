@@ -1,6 +1,7 @@
 """The fixed autoresearch harness for Laya Vision: train an experiment for 15 minutes, then measure it.
 
     modal run autoresearch/harness.py --tag <tag> [--desc "what this experiment tries"]
+    modal run autoresearch/harness.py --tag bigym-<date> --profile bigym --experiment autoresearch/experiment_bigym.py
 
 This file is the ground truth, like upstream's ``prepare.py``: experiments never edit it. It sends the current
 ``autoresearch/experiment.py`` to an H100, where the experiment builds a model and trains it for exactly
@@ -58,7 +59,23 @@ refuses to rebuild a missing part of an older version. History:
 * ``v1``: 2,000 per set, which 15 minutes cycled through twice (quality fell 0.02);
 * ``v2``: 6,000 per set, every kind;
 * ``v3``: ``games`` rebuilt with ``next_target`` (the next-move head's auxiliary target), otherwise the same seeded
-  frames as v2; ``train``, ``calib`` and ``eval`` are read unchanged from ``pool-v2``.
+  frames as v2; ``train``, ``calib`` and ``eval`` are read unchanged from ``pool-v2``;
+* (``v4``: a ``pool-v4/games`` directory exists on the volume, written on 2026-09-24 by code that was never
+  committed; no harness reads it, and the version number is skipped;)
+* ``v5``: adds the BiGym kinds, read only by the ``bigym`` profile: ``bigym``, every train record of the cleaned
+  BiGym behaviour-cloning and probe sets (``BIGYM_DATASETS``; ``bc_f4`` records carry four images, stored once per
+  distinct frame), and ``bigym_demos``, the waypoints of BiGym's human demos per cupboard task
+  (``laya.bigymdemos.demo_waypoints``, the train-split demos that succeed; the sets' val demos are left out) for
+  experiments that relabel their own rollouts with the lookahead follower. The other kinds keep their versions.
+
+Profiles (``--profile``). ``default`` is the four-objective Pareto loop above. ``bigym`` (``program_bigym.md``) makes
+BiGym control the objective with quality and games as guard-rails (``pareto.decide_bigym``): the experiment trains
+on an H100 image that also has MuJoCo and BiGym (``TrainEvalBigym``: the same budget, calibration, save / reload and
+quality eval, plus ``ctx.bigym_examples()``, ``ctx.bigym_demos()`` and ``ctx.bigym_game()`` for rollouts on training
+seeds), then the BiGym benchmark (``bigym_eval.py``, one L4 container per task chunk, ``BiGym``) runs alongside the
+latency and games jobs and its ``bigym`` score is merged into the result. ``--experiment`` picks the experiment file
+(default ``autoresearch/experiment.py``); the profile and the file are recorded in the result JSON (and, for the
+bigym profile, in results.tsv, whose columns are ``pareto.BIGYM_COLUMNS``). A tag keeps one profile.
 
 Memory snapshots. Both GPU jobs are ``@app.cls(enable_memory_snapshot=True, single_use_containers=True)`` classes
 whose ``@modal.enter(snap=True)`` method does the experiment-independent CPU work, which Modal then restores from a
@@ -79,7 +96,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import modal
 
@@ -95,9 +112,10 @@ N_CALIB = 100              # last train records per calibration set, held out fr
 TRAIN_POOL_PER_SET = 6000  # seeded train examples per trainable set in the pool (fewer where a set is smaller)
 SEED = 0
 REFERENCE = "cauldron-score-2ep-bidir-full/best"   # latency is reported relative to this checkpoint (= thaitea/laya-vision)
-POOL_VERSION = "v3"         # the newest pool version (history in the module docstring)
-# The version whose directory holds each kind's parts: v3 rebuilt only ``games`` (adding next_target).
-POOL_KIND_VERSIONS = {"train": "v2", "calib": "v2", "eval": "v2", "games": "v3"}
+POOL_VERSION = "v5"         # the newest pool version (history in the module docstring; v4 is skipped)
+# The version whose directory holds each kind's parts: v3 rebuilt only ``games`` (adding next_target), v5 added the
+# BiGym kinds.
+POOL_KIND_VERSIONS = {"train": "v2", "calib": "v2", "eval": "v2", "games": "v3", "bigym": "v5", "bigym_demos": "v5"}
 POOL_ROOT = "/data/autoresearch"
 POOL_DIR = os.path.join(POOL_ROOT, "pool-" + POOL_VERSION)   # where this version's own parts go
 
@@ -121,18 +139,34 @@ GAME_DATASETS = {
     "game_doom_basic": ("/data/vqa", "doom_basic"),
 }
 
+# BiGym (the ``bigym`` profile): the cleaned behaviour-cloning / probe sets' train splits (their val splits stay
+# unused), every record in a seeded order, and the cupboard tasks whose human demos' waypoints go in the pool.
+BIGYM_DATASETS = ("bigym_v2c_bc_f4", "bigym_v2c_bc_f1", "bigym_v2c_probe")
+BIGYM_POOL_PER_SET = 20000   # more than any of the sets has (15,206 / 15,206 / 16,943): all of them
+BIGYM_DEMO_TASKS = ("DrawerTopOpen", "DrawerTopClose", "WallCupboardOpen", "WallCupboardClose")
+BIGYM_VAL_SET = "bigym_v2c_bc_f1"   # its val split names the demo seeds held out (same split for all three sets)
+# the same MuJoCo / BiGym pins as modal_bigym.py (tests/test_autoresearch_bigym.py checks they match)
+BIGYM = "git+https://github.com/r33drichards/bigym@14beb30318ad14c5d6723175c2ee2281129792af"
+MUJOCO = "3.14.0"
+PROFILES = ("default", "bigym")
+
 app = modal.App("laya-autoresearch")
 hf_vol = modal.Volume.from_name("laya-hf-cache")
 data_vol = modal.Volume.from_name("laya-datasets")
 ckpt_vol = modal.Volume.from_name("laya-checkpoints")
 # The harness's own modules next to the laya package in every container: the games benchmark (and its fixed
 # baselines) and the toolkit experiments import to generate game training data.
-HARNESS_FILES = ("games_eval.py", "game_baselines.json", "toolkit.py")
+HARNESS_FILES = ("games_eval.py", "game_baselines.json", "toolkit.py", "bigym_eval.py", "bigym_baselines.json")
+
+
+def _harness_files() -> List[str]:
+    """The ``HARNESS_FILES`` that exist (``bigym_baselines.json`` does not until it is measured)."""
+    return [f for f in HARNESS_FILES if os.path.exists(os.path.join(REPO, "autoresearch", f))]
 
 
 def _with_code(img):
     img = img.add_local_python_source("laya")
-    for f in HARNESS_FILES:
+    for f in _harness_files():
         img = img.add_local_file(os.path.join(REPO, "autoresearch", f), "/root/" + f)
     return img
 
@@ -146,6 +180,17 @@ _base = (
 )
 image = _with_code(_base)
 games_image = _with_code(_base.pip_install("ale-py==0.12.1", "vizdoom"))
+# MuJoCo, BiGym (installed without its pins, as modal_bigym.py does: its safetensors pin clashes with transformers 5)
+# and headless GL, plus BiGym's human demos (~/.bigym) so nothing downloads inside a timed run
+_bigym_base = (
+    _base.apt_install("git", "libegl1", "libgl1", "libosmesa6", "libglib2.0-0")
+    .pip_install("mujoco==" + MUJOCO, "dm_control==1.0.47", "mojo-mujoco-wrapper==0.1.1", "mujoco-utils==0.0.6",
+                 "pyquaternion==0.9.9", "numpy-quaternion==2024.0.13", "imageio", "pyyaml", "wget==3.2", "tqdm")
+    .pip_install(BIGYM, extra_options="--no-deps")
+    .env({"MUJOCO_GL": "osmesa", "NVIDIA_DRIVER_CAPABILITIES": "all"})
+    .run_commands("python -c 'from demonstrations.demo_store import DemoStore; DemoStore().pull_demos()'")
+)
+bigym_image = _with_code(_bigym_base)
 VOLUMES = {"/cache/hf": hf_vol, "/data": data_vol, "/ckpt": ckpt_vol}
 ROOT = "/ckpt/autoresearch"
 
@@ -170,23 +215,34 @@ def load_split(name: str, split: str) -> List[Dict]:
         return []
 
 
-def _with_bytes(ex: Dict) -> Dict:
-    """An example whose image paths are replaced by the files' bytes (``laya.vlm`` loads either)."""
+def _with_bytes(ex: Dict, files: Optional[Dict[str, bytes]] = None) -> Dict:
+    """An example whose image paths are replaced by the files' bytes (``laya.vlm`` loads either): ``"image"`` and
+    every entry of an ``"images"`` list. ``files`` (path -> bytes), when given, supplies them instead of reading,
+    so a frame shared by several examples is one bytes object (pickled once)."""
     state = ex["state"]
     if not isinstance(state, dict):
         return ex
+
+    def read(p):
+        if files is not None and p in files:
+            return files[p]
+        with open(p, "rb") as f:
+            return f.read()
+
     state = dict(state)
-    for key in ("image",):
-        if isinstance(state.get(key), str):
-            with open(state[key], "rb") as f:
-                state[key] = f.read()
+    if isinstance(state.get("image"), str):
+        state["image"] = read(state["image"])
     if state.get("images"):
-        imgs = []
-        for p in state["images"]:
-            with open(p, "rb") as f:
-                imgs.append(f.read())
-        state["images"] = imgs
+        state["images"] = [read(p) if isinstance(p, str) else p for p in state["images"]]
     return dict(ex, state=state)
+
+
+def _image_paths(ex: Dict) -> List[str]:
+    state = ex["state"]
+    if not isinstance(state, dict):
+        return []
+    return ([state["image"]] if isinstance(state.get("image"), str) else []) + \
+        [p for p in state.get("images") or [] if isinstance(p, str)]
 
 
 def pool_selection(kind: str, name: str) -> List[Dict]:
@@ -201,6 +257,11 @@ def pool_selection(kind: str, name: str) -> List[Dict]:
         # next_target from the whole split, before sampling; the list, and so the seeded sample, is v2's
         exs = [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train", next_targets=True)]
         return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
+    if kind == "bigym":
+        exs = load_split(name, "train")
+        if not exs:
+            raise FileNotFoundError("/data/vqa/%s is not a prepared dataset" % name)
+        return rng.sample(exs, min(BIGYM_POOL_PER_SET, len(exs)))
     if kind == "eval":
         exs = load_split(name, "val")
         return rng.sample(exs, min(EVAL_PER_SET, len(exs)))
@@ -221,10 +282,13 @@ def _pool_file(kind: str, name: str) -> str:
 
 
 POOL_PARTS = ([("train", n) for n in TRAINABLE_DATASETS] + [("calib", n) for n in CALIB_DATASETS]
-              + [("eval", n) for n in EVAL_DATASETS] + [("games", n) for n in GAME_DATASETS])
+              + [("eval", n) for n in EVAL_DATASETS] + [("games", n) for n in GAME_DATASETS]
+              + [("bigym", n) for n in BIGYM_DATASETS] + [("bigym_demos", t) for t in BIGYM_DEMO_TASKS])
+DEFAULT_KINDS = ("train", "calib", "eval", "games")
+BIGYM_KINDS = DEFAULT_KINDS + ("bigym", "bigym_demos")
 
 
-def load_pool(kinds=("train", "calib", "eval", "games")) -> Dict[str, Dict[str, List[Dict]]]:
+def load_pool(kinds=DEFAULT_KINDS) -> Dict[str, Dict[str, List[Dict]]]:
     """``{kind: {dataset: examples}}`` from the pool; fails with the command to build it when it is missing."""
     import pickle
     from concurrent.futures import ThreadPoolExecutor
@@ -248,14 +312,71 @@ def load_pool(kinds=("train", "calib", "eval", "games")) -> Dict[str, Dict[str, 
 
 class Context:
     """What an experiment gets: the budget, the device, checkpoint lookup and training data. Training data never
-    includes the val splits or the calibration tail the harness fits temperatures on."""
+    includes the val splits or the calibration tail the harness fits temperatures on. Under the ``bigym`` profile
+    it also has the BiGym pool (``bigym_examples``, ``bigym_demos``) and the simulator (``bigym_game``)."""
 
-    def __init__(self, time_budget_s: float, train: Dict[str, List[Dict]], games: Dict[str, List[Dict]]):
+    def __init__(self, time_budget_s: float, train: Dict[str, List[Dict]], games: Dict[str, List[Dict]],
+                 bigym: Optional[Dict[str, List[Dict]]] = None, bigym_demos: Optional[Dict[str, List[Dict]]] = None):
         self.time_budget_s = time_budget_s
         self.device = "cuda"
         self.ckpt_path = ckpt_path
         self._train = train  # name -> train records minus the calibration tail
         self._games = games  # name -> expert game frames
+        self._bigym = bigym  # name -> BiGym behaviour-cloning / probe train records (bigym profile only)
+        self._bigym_demos = bigym_demos  # cupboard task -> its train demos' waypoints (bigym profile only)
+        self._gl = None
+
+    def _need_bigym(self):
+        if self._bigym is None:
+            raise RuntimeError("BiGym data and the simulator are only available under --profile bigym")
+
+    def bigym_examples(self, names=BIGYM_DATASETS) -> List[Dict]:
+        """The cleaned BiGym sets' train records (``BIGYM_DATASETS``): ``bigym_v2c_bc_f4`` (the control question
+        over the last four head frames, ``state["images"]``), ``bigym_v2c_bc_f1`` (one frame) and
+        ``bigym_v2c_probe`` (done / progress / side questions); images inline as encoded bytes, ``dataset`` =
+        the set's name. Their val splits are not here and must stay unused."""
+        self._need_bigym()
+        out = []
+        for name in names:
+            if name not in BIGYM_DATASETS:
+                raise ValueError("%s is not a BiGym set here (one of %s)" % (name, BIGYM_DATASETS))
+            out += self._bigym[name]
+        return out
+
+    def bigym_demos(self, task: str) -> List[Dict]:
+        """BiGym's human demos of a cupboard task as ``laya.bigymdemos.demo_waypoints`` gives them (``seed``,
+        ``waypoints``, ``part``, ...), the train-split demos that succeed: what ``laya.bigymdemos.follow`` and
+        ``lookahead`` need to label states (DAgger). Rollouts on a demo's own seed start where the demo did."""
+        self._need_bigym()
+        if task not in BIGYM_DEMO_TASKS:
+            raise ValueError("no demos for %s (one of %s)" % (task, BIGYM_DEMO_TASKS))
+        return self._bigym_demos[task]
+
+    def bigym_seed_ok(self, seed: int) -> bool:
+        """Whether an experiment may roll out on ``seed``: below ``bigym_eval.TRAIN_SEED_MAX`` or a train demo's."""
+        import bigym_eval
+
+        seed = int(seed)
+        if bigym_eval.is_eval_seed(seed):
+            return False
+        return seed < bigym_eval.TRAIN_SEED_MAX or any(seed == d["seed"] for ds in self._bigym_demos.values()
+                                                       for d in ds)
+
+    def bigym_game(self, task: str, seed: int, cameras: bool = True, env=None):
+        """A ``laya.bigymgames.BiGymGame`` on a training seed (see ``bigym_seed_ok``; the eval's seeds raise), with
+        a headless GL picked on first use. Pass ``env`` (``laya.bigymgames.make_env``, after one ``bigym_game``
+        call) to reuse an environment across episodes: making one takes seconds."""
+        self._need_bigym()
+        if not self.bigym_seed_ok(seed):
+            raise ValueError("seed %d is off-limits for training rollouts (use seeds below %d or a train demo's)"
+                             % (seed, __import__("bigym_eval").TRAIN_SEED_MAX))
+        if self._gl is None:
+            import bigym_eval
+
+            self._gl = bigym_eval.pick_gl()
+        from laya import bigymgames as bg
+
+        return bg.BiGymGame(task, int(seed), env=env or bg.make_env(task, cameras=cameras))
 
     def game_examples(self, names=tuple(GAME_DATASETS)) -> List[Dict]:
         """Expert frames from the data pool: Atari Freeway and Breakout (the expert agents' action distributions as
@@ -300,9 +421,11 @@ def _log(t_start: float, msg: str) -> None:
     print("[harness %6.1f s] %s" % (time.time() - t_start, msg), flush=True)
 
 
-@app.cls(image=image, gpu="H100", cpu=16, memory=65536, timeout=60 * 60, volumes=VOLUMES,
-         enable_memory_snapshot=True, single_use_containers=True)
-class TrainEval:
+class _TrainEvalBase:
+    """The training and quality job; ``TrainEval`` (default profile) and ``TrainEvalBigym`` differ only in their
+    image, the pool kinds they hold and the context they hand the experiment."""
+    KINDS = DEFAULT_KINDS
+
     @modal.enter(snap=True)
     def load(self):
         """Experiment-independent CPU state, kept in the memory snapshot. No CUDA here: there is no GPU yet."""
@@ -316,7 +439,7 @@ class TrainEval:
         import laya.vlm_train  # noqa: F401
         _log(t, "imports")
 
-        self.pool = load_pool()
+        self.pool = load_pool(self.KINDS)
         _log(t, "data pool: %s" % ", ".join("%s %d examples" % (k, sum(len(v) for v in d.values()))
                                             for k, d in self.pool.items()))
         self.snap_s = time.time() - t
@@ -334,6 +457,9 @@ class TrainEval:
     def _val(self) -> List[Dict]:
         return [ex for name in EVAL_DATASETS for ex in self.pool["eval"][name]]
 
+    def _context(self) -> Context:
+        return Context(TIME_BUDGET, self._train_lists(), self.pool["games"])
+
     @modal.method()
     def run(self, source: str, tag: str, commit: str) -> Dict:
         import random
@@ -346,7 +472,7 @@ class TrainEval:
         torch.manual_seed(SEED)
         random.seed(SEED)
         exp = _import_experiment(source)
-        ctx = Context(TIME_BUDGET, self._train_lists(), self.pool["games"])
+        ctx = self._context()
         t_setup = time.time()
         agent = exp.build(ctx)
         setup_s = time.time() - t_setup
@@ -384,6 +510,23 @@ class TrainEval:
         print(json.dumps(summary))
         _log(t_run, "done")
         return res
+
+
+@app.cls(image=image, gpu="H100", cpu=16, memory=65536, timeout=60 * 60, volumes=VOLUMES,
+         enable_memory_snapshot=True, single_use_containers=True)
+class TrainEval(_TrainEvalBase):
+    """The default profile's training and quality job."""
+
+
+@app.cls(image=bigym_image, gpu="H100", cpu=32, memory=98304, timeout=60 * 60, volumes=VOLUMES,
+         enable_memory_snapshot=True, single_use_containers=True)
+class TrainEvalBigym(_TrainEvalBase):
+    """The bigym profile's: the same job with the BiGym pool kinds and MuJoCo / BiGym for rollouts in ``train``."""
+    KINDS = BIGYM_KINDS
+
+    def _context(self) -> Context:
+        return Context(TIME_BUDGET, self._train_lists(), self.pool["games"], self.pool["bigym"],
+                       self.pool["bigym_demos"])
 
 
 def _latency_cases(evals: Dict[str, List[Dict]]) -> List:
@@ -482,6 +625,90 @@ class Games:
         return out
 
 
+@app.cls(image=bigym_image, gpu="L4", cpu=8, memory=32768, timeout=40 * 60, volumes=VOLUMES,
+         enable_memory_snapshot=True, single_use_containers=True)
+class BiGym:
+    """The BiGym benchmark (``bigym_eval.py``) on one chunk of one task. MuJoCo is not imported before the GL is
+    picked (EGL on the GPU), so the snapshot holds only torch and laya."""
+
+    @modal.enter(snap=True)
+    def load(self):
+        import torch  # noqa: F401
+
+        import bigym_eval  # noqa: F401
+        import games_eval  # noqa: F401
+        import laya.vlm  # noqa: F401
+
+    @modal.method()
+    def run(self, ckpt: str, task: str, chunk: int) -> Dict:
+        """``bigym_eval.run_chunk`` with the checkpoint at ``ckpt`` (an absolute path on the checkpoint volume)."""
+        import bigym_eval
+
+        t = time.time()
+        gl = bigym_eval.pick_gl()
+        ckpt_vol.reload()
+        from laya.vlm import VLMAgent
+
+        agent = VLMAgent(ckpt, device="cuda", dtype="bf16")
+        load_s = time.time() - t
+        out = bigym_eval.run_chunk(agent, task, chunk)
+        out.update(gl=gl, load_seconds=round(load_s, 1))
+        _log(t, "bigym %s chunk %d: progress %.3f, success %.2f, %d forwards, %.0f s play (%.0f s envs, %.0f s "
+                "policy)" % (task, chunk, sum(e["progress"] for e in out["episodes"]) / len(out["episodes"]),
+                             sum(e["success"] for e in out["episodes"]) / len(out["episodes"]), out["forwards"],
+                             out["seconds"], out["env_seconds"], out["policy_seconds"]))
+        return out
+
+
+@app.function(image=bigym_image, cpu=4, memory=16384, timeout=60 * 60)
+def bigym_reference(task: str, policy: str) -> Dict:
+    """``random`` or ``oracle`` (reach tasks) on the BiGym eval's episodes of ``task`` (no camera)."""
+    import bigym_eval
+
+    gl = bigym_eval.pick_gl()
+    out = bigym_eval.play_reference(task, policy)
+    out.update(gl=gl, policy=policy)
+    return out
+
+
+def run_bigym(ckpt: str, bigym_cls=None) -> Dict:
+    """The whole BiGym benchmark on ``ckpt``: every (task, chunk) in its own container, in parallel; returns
+    ``bigym_eval.summarize`` plus the merged per-task results. Raises when a task is incomplete."""
+    import bigym_eval
+
+    bigym_cls = bigym_cls or BiGym
+    calls = {(t, c): bigym_cls().run.spawn(ckpt, t, c) for t in bigym_eval.TASKS for c in range(bigym_eval.CHUNKS[t])}
+    return collect_bigym(calls)
+
+
+def collect_bigym(calls: Dict) -> Dict:
+    import bigym_eval
+
+    got: Dict[str, List[Dict]] = {}
+    for (t, c), call in calls.items():
+        got.setdefault(t, []).append(call.get())
+    merged = {t: bigym_eval.merge_chunks(cs) for t, cs in got.items()}
+    summ = bigym_eval.summarize(merged)
+    if not summ["complete"]:
+        raise RuntimeError("BiGym benchmark incomplete, missing %s" % summ["missing"])
+    summ.update(tasks=list(bigym_eval.TASKS), eval=bigym_eval.fingerprint(),
+                wall_seconds=max(r.get("seconds", 0) for cs in got.values() for r in cs),
+                results={t: dict(m, chunk_timings=[{k: r.get(k) for k in ("chunk", "seconds", "env_seconds",
+                                                                          "policy_seconds", "load_seconds", "gl")}
+                                                   for r in got[t]]) for t, m in merged.items()})
+    return summ
+
+
+def print_bigym(b: Dict) -> None:
+    print("%-18s %8s %8s %8s  %s" % ("bigym task", "progress", "success", "norm", "top actions"))
+    for t in b["tasks"]:
+        top = ", ".join("%s %.0f%%" % (a, 100 * f) for a, f in b["top_actions"].get(t, [])[:3])
+        print("%-18s %8.3f %8.2f %+8.3f  %s" % (t, b["progress"].get(t, float("nan")), b["success"].get(t, float("nan")),
+                                                b["per_task"].get(t) if b["per_task"].get(t) is not None else float("nan"),
+                                                top))
+    print("%-18s %8s %8.2f %+8.3f" % ("bigym (mean)", "", b["success_mean"], b["bigym"]))
+
+
 @app.function(image=image, cpu=4, memory=8192, timeout=60 * 60, volumes={"/data": data_vol})
 def build_pool_part(kind: str, name: str) -> Dict:
     """One pool part: the selected examples with their image bytes inline, pickled to the pool directory."""
@@ -495,9 +722,22 @@ def build_pool_part(kind: str, name: str) -> Dict:
     if POOL_KIND_VERSIONS[kind] != POOL_VERSION:  # an older version's part: immutable, never rebuilt by newer code
         raise FileNotFoundError("%s is missing; %s parts belong to pool-%s, which this harness (pool-%s) does not "
                                 "rebuild" % (path, kind, POOL_KIND_VERSIONS[kind], POOL_VERSION))
+    if kind == "bigym_demos":
+        raise ValueError("bigym_demos parts are built by build_bigym_demo_part (they need the simulator)")
     exs = pool_selection(kind, name)
-    with ThreadPoolExecutor(64) as pool:  # each small-file read is ~0.4 s of latency; overlap many
-        exs = list(pool.map(_with_bytes, exs))
+    if kind == "bigym":  # bc_f4 records share frames: read each file once, one bytes object per frame
+        paths = sorted({p for ex in exs for p in _image_paths(ex)})
+
+        def read(p):
+            with open(p, "rb") as f:
+                return p, f.read()
+
+        with ThreadPoolExecutor(64) as pool:
+            files = dict(pool.map(read, paths))
+        exs = [_with_bytes(ex, files) for ex in exs]
+    else:
+        with ThreadPoolExecutor(64) as pool:  # each small-file read is ~0.4 s of latency; overlap many
+            exs = list(pool.map(_with_bytes, exs))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".tmp", "wb") as f:
         pickle.dump(exs, f, protocol=5)
@@ -507,10 +747,64 @@ def build_pool_part(kind: str, name: str) -> Dict:
             "seconds": round(time.time() - t, 1)}
 
 
+def _val_demo_seeds(task: str) -> List[int]:
+    """The demo seeds the cleaned BiGym sets hold out for ``task`` (their val split, by record id
+    ``<task>-<seed>-<decision>``)."""
+    seeds = set()
+    with open(os.path.join("/data/vqa", BIGYM_VAL_SET, "val.jsonl")) as f:
+        for line in f:
+            if line.strip():
+                t, seed = json.loads(line)["id"].split("-")[:2]
+                if t == task:
+                    seeds.add(int(seed))
+    return sorted(seeds)
+
+
+@app.function(image=bigym_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
+def build_bigym_demo_part(task: str) -> Dict:
+    """A ``bigym_demos`` part: ``laya.bigymdemos.demo_waypoints`` of every demo of ``task``, keeping those that
+    succeed in BiGym's replay and are not in the cleaned sets' val split."""
+    import pickle
+
+    import bigym_eval
+
+    t = time.time()
+    path = _pool_file("bigym_demos", task)
+    if os.path.exists(path):
+        return {"kind": "bigym_demos", "name": task, "examples": -1, "mb": round(os.path.getsize(path) / 1e6, 1),
+                "seconds": 0.0}
+    bigym_eval.pick_gl()
+    from laya import bigymdemos
+
+    val = set(_val_demo_seeds(task))
+    demos = bigymdemos.demo_waypoints(task, amount=-1, seed=0)
+    keep = sorted((d for d in demos if d["success_step"] is not None and d["seed"] not in val),
+                  key=lambda d: d["seed"])
+    if any(bigym_eval.is_eval_seed(d["seed"]) for d in keep):
+        raise RuntimeError("a demo seed falls in the BiGym eval's seed range")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".tmp", "wb") as f:
+        pickle.dump(keep, f, protocol=5)
+    os.replace(path + ".tmp", path)
+    data_vol.commit()
+    print("%s: %d demos, %d succeed, %d held out as val, %d kept" % (
+        task, len(demos), sum(d["success_step"] is not None for d in demos), len(val), len(keep)))
+    return {"kind": "bigym_demos", "name": task, "examples": len(keep), "mb": round(os.path.getsize(path) / 1e6, 1),
+            "seconds": round(time.time() - t, 1)}
+
+
 def build_pool():
     """Build every missing pool part, all in parallel (``modal run autoresearch/harness.py --prepare-pool``)."""
     total = 0.0
-    for r in build_pool_part.starmap(POOL_PARTS, order_outputs=False, return_exceptions=True):
+    demo_calls = [build_bigym_demo_part.spawn(n) for k, n in POOL_PARTS if k == "bigym_demos"]
+    plain = [(k, n) for k, n in POOL_PARTS if k != "bigym_demos"]
+    results = list(build_pool_part.starmap(plain, order_outputs=False, return_exceptions=True))
+    for c in demo_calls:
+        try:
+            results.append(c.get())
+        except Exception as e:
+            results.append(e)
+    for r in results:
         if isinstance(r, Exception):
             print("FAILED:", repr(r)[:300])
             continue
@@ -543,7 +837,7 @@ def _code_hash() -> str:
     import hashlib
 
     h = hashlib.sha256()
-    files = [os.path.abspath(__file__)] + [os.path.join(REPO, "autoresearch", f) for f in HARNESS_FILES]
+    files = [os.path.abspath(__file__)] + [os.path.join(REPO, "autoresearch", f) for f in _harness_files()]
     for d, _, names in sorted(os.walk(os.path.join(REPO, "laya"))):
         files += [os.path.join(d, n) for n in sorted(names) if n.endswith(".py")]
     for path in files:
@@ -564,7 +858,8 @@ def follow_logs(name: str):
 
 
 def deployed_classes():
-    """``(TrainEval, Latency, Games)`` from a deployment of exactly this code, deploying it first if needed.
+    """``(TrainEval, Latency, Games, TrainEvalBigym, BiGym)`` from a deployment of exactly this code, deploying it
+    first if needed.
 
     Modal only snapshots deployed apps, so ``modal run`` alone would rebuild everything every time. Each version of
     the code gets its own app, ``laya-autoresearch-<hash>``: redeploying unchanged code is quick and keeps its
@@ -580,7 +875,8 @@ def deployed_classes():
         if p.returncode:
             raise RuntimeError("modal deploy failed:\n" + p.stdout + p.stderr)
         te = modal.Cls.from_name(name, "TrainEval")
-    return te, modal.Cls.from_name(name, "Latency"), modal.Cls.from_name(name, "Games")
+    return (te, modal.Cls.from_name(name, "Latency"), modal.Cls.from_name(name, "Games"),
+            modal.Cls.from_name(name, "TrainEvalBigym"), modal.Cls.from_name(name, "BiGym"))
 
 
 def _git(*args) -> str:
@@ -588,22 +884,46 @@ def _git(*args) -> str:
 
 
 @app.local_entrypoint()
-def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool = False):
+def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool = False, profile: str = "default",
+         experiment: str = "autoresearch/experiment.py", bigym_eval: bool = False, bigym_baselines_tasks: str = "",
+         measure_bigym_baselines: bool = False, bigym_check_model: str = "", out: str = ""):
+    """``--profile bigym`` trains on the BiGym image and adds the BiGym benchmark (keep / discard by
+    ``pareto.decide_bigym``); ``--experiment`` picks the experiment file (relative to the repo root);
+    ``--bigym-eval`` also runs the BiGym benchmark under the default profile (reported, not decided on).
+
+    One-off BiGym jobs (no training; Modal allows one local entrypoint per file, so they are flags here):
+    ``--measure-bigym-baselines [--bigym-baselines-tasks A,B]`` measures ``bigym_baselines.json``;
+    ``--bigym-check-model <run>/best [--out x.json]`` runs the BiGym benchmark alone on a saved checkpoint."""
     import pareto
 
     if prepare_pool:
         build_pool()
         return
+    if measure_bigym_baselines:
+        bigym_baselines(bigym_baselines_tasks)
+        return
+    if bigym_check_model:
+        bigym_check(bigym_check_model, out)
+        return
     if not tag:
         raise SystemExit("--tag is required (the run tag, e.g. sep23)")
+    if profile not in PROFILES:
+        raise SystemExit("--profile is one of %s" % ", ".join(PROFILES))
+    with_bigym = profile == "bigym" or bigym_eval
 
-    exp_path = os.path.join(REPO, "autoresearch", "experiment.py")
-    if _git("status", "--porcelain", "--", exp_path):
-        raise SystemExit("commit autoresearch/experiment.py first: results are keyed by commit")
+    exp_rel = os.path.relpath(os.path.abspath(os.path.join(REPO, experiment)), REPO)
+    exp_path = os.path.join(REPO, exp_rel)
+    if exp_rel.startswith("..") or not os.path.exists(exp_path):
+        raise SystemExit("no experiment file %s in the repository" % experiment)
+    if _git("status", "--porcelain", "--", exp_path) or not _git("ls-files", "--", exp_path):
+        raise SystemExit("commit %s first: results are keyed by commit" % exp_rel)
     commit = _git("rev-parse", "--short=7", "HEAD")
     desc = desc or _git("log", "-1", "--format=%s")
     runs = os.path.join(REPO, "autoresearch", "runs", tag)
     tsv = os.path.join(runs, "results.tsv")
+    have = pareto.tsv_profile(tsv)
+    if have is not None and have != profile:
+        raise SystemExit("tag %r is a %s-profile tag; run it with --profile %s or start a new tag" % (tag, have, have))
     os.makedirs(runs, exist_ok=True)
     # results are only comparable under one harness: this file, the laya package and the pool it reads
     version, pinned = _code_hash(), os.path.join(runs, "harness.txt")
@@ -615,55 +935,140 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
     with open(exp_path) as f:
         source = f.read()
     t0 = time.time()
-    train_eval, latency, games = deployed_classes()  # a failed deploy is not the experiment's crash
+    # a failed deploy is not the experiment's crash
+    train_eval, latency, games, train_eval_bigym, bigym_cls = deployed_classes()
     logs = follow_logs(deployment_name())
+    timings = {}
     try:
         import games_eval
 
-        res = train_eval().run.remote(source, tag, commit)
-        # the latency job and one games job per family, all on the saved checkpoint, at once
+        te = train_eval_bigym if profile == "bigym" else train_eval
+        res = te().run.remote(source, tag, commit)
+        timings["train_eval_s"] = round(time.time() - t0, 1)
+        t1 = time.time()
+        # the latency job, one games job per family and (bigym) one BiGym job per task chunk, all at once
         lat = latency().run.spawn(tag, commit)
         fams = {f: games().run.spawn(tag, commit, f) for f in games_eval.FAMILIES}
+        bcalls = {}
+        if with_bigym:
+            import bigym_eval as be
+
+            ck = os.path.join(ROOT, tag, commit)
+            bcalls = {(t, c): bigym_cls().run.spawn(ck, t, c) for t in be.TASKS for c in range(be.CHUNKS[t])}
         res["summary"].update({k: v for k, v in lat.get().items() if k.startswith("latency")})
+        timings["latency_s"] = round(time.time() - t1, 1)
         played = {}
         for f, call in fams.items():
             played.update(call.get())
+        timings["games_s"] = round(time.time() - t1, 1)
         g = games_eval.summarize(played)
         if not g["complete"]:
             raise RuntimeError("games benchmark incomplete, missing %s" % g["missing"])
         res["summary"]["games"] = g["games"]
         res["games"] = {"per_game": g["per_game"], "results": played}
+        if bcalls:
+            b = collect_bigym(bcalls)
+            timings["bigym_s"] = round(time.time() - t1, 1)
+            res["summary"]["bigym"] = b["bigym"]
+            res["bigym"] = b
     except Exception as e:
         print("crash: %r" % (e,))
-        pareto.append_tsv(tsv, pareto.crash_row(commit, desc))
+        pareto.append_tsv(tsv, pareto.crash_row(commit, desc, profile, exp_rel), profile)
         print("status: crash")
         raise SystemExit(1)
     finally:
         time.sleep(3)  # let the last lines arrive
         logs.terminate()
     res["harness"] = version
-    res.update(description=desc, total_s=round(time.time() - t0, 1))
+    res.update(description=desc, total_s=round(time.time() - t0, 1), profile=profile, experiment=exp_rel,
+               timings=timings)
     out = os.path.join(runs, commit + ".json")
     with open(out, "w") as f:
         json.dump(res, f, indent=2)
     s = res["summary"]
     print("---")
-    for k in ("quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x", "latency_ms", "latency_ref_ms"):
+    keys = ("bigym",) if "bigym" in s else ()
+    for k in keys + ("quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x", "latency_ms",
+                     "latency_ref_ms"):
         print("%-17s %.4f" % (k + ":", s[k]))
     print("%-17s %.1f" % ("train_seconds:", res["train_s"]))
     print("%-17s %.1f" % ("total_seconds:", res["total_s"]))
+    print("%-17s %s" % ("profile:", profile))
+    print("%-17s %s" % ("experiment:", exp_rel))
+    if "bigym" in res:
+        print_bigym(res["bigym"])
     rows = pareto.read_tsv(tsv)
     row = pareto.row_from_result(res, commit, desc)
-    status, beaten = pareto.decide(pareto.frontier(rows), row)
-    row["status"] = status
-    pareto.append_tsv(tsv, row)
-    print("status:           %s" % status)
-    if beaten:
-        print("now dominates:    %s" % ", ".join(p["commit"] for p in beaten))
-    print(pareto.show(pareto.read_tsv(tsv)))
+    if profile == "bigym":
+        status, why = pareto.decide_bigym(rows, row)
+        row["status"] = status
+        pareto.append_tsv(tsv, row, profile)
+        print("status:           %s (%s)" % (status, why))
+        print(pareto.show_bigym(pareto.read_tsv(tsv)))
+        prunable = pareto.prunable_bigym(pareto.read_tsv(tsv))
+    else:
+        status, beaten = pareto.decide(pareto.frontier(rows), row)
+        row["status"] = status
+        pareto.append_tsv(tsv, row)
+        print("status:           %s" % status)
+        if beaten:
+            print("now dominates:    %s" % ", ".join(p["commit"] for p in beaten))
+        print(pareto.show(pareto.read_tsv(tsv)))
+        prunable = pareto.prunable(pareto.read_tsv(tsv))
     if prune:
-        # only commits the TSV has finished with and that are off the frontier: a concurrent run's checkpoint is
-        # not in the TSV until that run decides, so it is never touched
-        removed = prune_checkpoints.remote(tag, pareto.prunable(pareto.read_tsv(tsv)))
+        # only commits the TSV has finished with (and, default profile, off the frontier): a concurrent run's
+        # checkpoint is not in the TSV until that run decides, so it is never touched
+        removed = prune_checkpoints.remote(tag, prunable)
         if removed:
-            print("pruned checkpoints off the frontier: %s" % ", ".join(removed))
+            print("pruned checkpoints: %s" % ", ".join(removed))
+
+
+def bigym_baselines(tasks: str = ""):
+    """Measure the BiGym benchmark's random and oracle references on its own seeds (one CPU container per task and
+    policy) and merge them into ``autoresearch/bigym_baselines.json``."""
+    import bigym_eval as be
+
+    todo = [t for t in (tasks.split(",") if tasks else be.TASKS) if t]
+    t0 = time.time()
+    calls = {(t, p): bigym_reference.spawn(t, p) for t in todo for p in (("random", "oracle") if t in be.REACH
+                                                                         else ("random",))}
+    got = {k: c.get() for k, c in calls.items()}
+    entries = {t: be.baseline_entry(t, got[(t, "random")], got.get((t, "oracle"))) for t in todo}
+    for t, e in entries.items():
+        print("%-18s random %.4f (success %.2f)  expert %.4f  [%s]  %.0f s" % (
+            t, e["random"], e["random_success"], e["expert"], e["expert_source"][:22],
+            max(v["seconds"] for (tt, _), v in got.items() if tt == t)))
+    meta = {"date": time.strftime("%Y-%m-%d"), "commit": _git("rev-parse", "HEAD"), "mujoco": MUJOCO, "bigym": BIGYM,
+            "gl": sorted({v["gl"] for v in got.values()}), "eval": be.fingerprint(),
+            "wall_seconds": round(time.time() - t0, 1)}
+    be.write_baselines(entries, meta=meta)
+    print("wrote", be.BASELINES_PATH)
+
+
+def bigym_check(model: str, out: str = ""):
+    """The BiGym benchmark alone on a checkpoint of the laya-checkpoints volume (``<run>/best`` under /ckpt/smolvlm,
+    or ``<family>/<run>/best`` under /ckpt), e.g. to compare a fine-tune with the zero-shot model. Writes
+    ``autoresearch/runs/bigym-checks/<model>-<date>.json`` (create-only)."""
+    for base in ("/ckpt/smolvlm", "/ckpt"):  # resolved like ckpt_path, but from here (the client has no /ckpt)
+        rel = os.path.join(base, model)[len("/ckpt/"):]
+        ls = subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "laya-checkpoints", rel],
+                            capture_output=True, text=True)
+        if ls.returncode == 0 and "vlm_agent_config.json" in ls.stdout:
+            ck = os.path.join(base, model)
+            break
+    else:
+        raise SystemExit("no checkpoint %r under /ckpt/smolvlm or /ckpt" % model)
+    path = out or os.path.join(REPO, "autoresearch", "runs", "bigym-checks",
+                               "%s-%s.json" % (model.replace("/", "_"), time.strftime("%Y%m%d-%H%M%S")))
+    if os.path.exists(path):
+        raise SystemExit("%s exists (create-only)" % path)
+    t0 = time.time()
+    b = run_bigym(ck)
+    b.update(checkpoint=ck, model=model, total_seconds=round(time.time() - t0, 1), code=_git("rev-parse", "HEAD"),
+             date=time.strftime("%Y-%m-%d"))
+    print_bigym(b)
+    print("wall %.0f s (slowest container %.0f s)" % (b["total_seconds"], b["wall_seconds"]))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(b, f, indent=1)
+    print("wrote", path)
