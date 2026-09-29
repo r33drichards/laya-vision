@@ -58,7 +58,9 @@ nav_image = (
         f"cd /app && git checkout {DIMOS_COMMIT} && git fetch origin {GROUND_TRUTH_COMMIT} "
         f"&& git checkout {GROUND_TRUTH_COMMIT} -- misc/habitat/ground_truth",
     )
-    .run_commands(f"cd /app && {UV} sync --frozen --no-dev")
+    # Modal's bundled python has an SQLite without jsonb, which the dimos recorder needs.
+    .run_commands(f"cd /app && {UV} sync --frozen --no-dev --python-preference only-managed",
+                  "/app/.venv/bin/python -c 'import sqlite3; assert sqlite3.sqlite_version_info >= (3, 45), sqlite3.sqlite_version'")
     .run_commands("cd /app/dimos/simulation/habitat/nix && ./install.sh")
     .run_commands("cd /app/dimos/navigation/nav_3d/mls_planner/rust && . /root/.cargo/env && cargo build --release")
     .run_commands(
@@ -209,13 +211,22 @@ def run_case(case_id: str, model: str = LAYA_MODEL, revision: str = LAYA_REVISIO
                 raise RuntimeError(open(f"{work}/server.log").read()[-3000:])
             time.sleep(1)
     t0 = time.time()
-    r = subprocess.run(
-        ["dimos", "evals", "run", SUITE, "--agent", "dimos.evals.agents.topic",
-         "--set", 'modules=["type-safe-agent"]', "--set", "trace=TypeSafeAgent", "--case", case_id],
-        cwd="/app", env=env, stdout=open(f"{work}/dimos.log", "w"), stderr=subprocess.STDOUT)
+    # A stall (a recorder that cannot write holds the launch forever) must not hold an L4 for hours.
+    try:
+        r = subprocess.run(
+            ["dimos", "evals", "run", SUITE, "--agent", "dimos.evals.agents.topic",
+             "--set", 'modules=["type-safe-agent"]', "--set", "trace=TypeSafeAgent", "--case", case_id],
+            cwd="/app", env=env, stdout=open(f"{work}/dimos.log", "w"), stderr=subprocess.STDOUT,
+            timeout=timeout_s + 900)
+        returncode = r.returncode
+    except subprocess.TimeoutExpired:
+        returncode = "timeout"
     server.terminate()
+    import shutil
+    if os.path.isdir("/app/recordings"):  # nav_metrics.json and habitat_episode.json sit beside memory.db
+        shutil.copytree("/app/recordings", f"{work}/recordings", ignore=shutil.ignore_patterns("*.db", "*.rrd", "*.mp4"))
     json.dump({"case": case_id, "model": model, "revision": revision, "dimos_commit": DIMOS_COMMIT,
-               "ground_truth_commit": GROUND_TRUTH_COMMIT, "returncode": r.returncode,
+               "ground_truth_commit": GROUND_TRUTH_COMMIT, "returncode": returncode,
                "wall_s": time.time() - t0, "timeout_s": timeout_s,
                "hssd": json.load(open("/data/hssd-hab/manifest.json")) if os.path.exists("/data/hssd-hab/manifest.json") else None},
               open(f"{work}/case.json", "w"))
