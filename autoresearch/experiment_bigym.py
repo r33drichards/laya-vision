@@ -42,7 +42,7 @@ CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
 
 FREEZE = "full"           # everything but the vision tower
 LR_HEAD = 1e-4
-LR_BACKBONE = 1.5e-5
+LR_BACKBONE = 2e-5
 BATCH_SIZE = 64           # fits an H100's 80 GB with 4-image records (a 40 GB A100 does not)
 WARMUP_STEPS = 40
 NUM_WORKERS = 26
@@ -54,7 +54,7 @@ REACH_TASKS = ("ReachTarget", "ReachTargetSingle")
 REACH_ROLLOUT_S = 150     # wall seconds of rollouts, counted in the 15-minute budget
 REACH_PROCS = 30          # rollout processes (OSMesa rendering, CPU only)
 REACH_EXPLORE = 0.3       # chance of playing a random primitive instead of the oracle's (the label stays the oracle's)
-REACH_WEIGHT = 1.5        # sampling weight relative to bigym_v2c_bc_f1
+REACH_WEIGHT = 1.0        # sampling weight relative to bigym_v2c_bc_f1
 
 _REACH_WORKER = r"""
 import io, os, pickle, random, sys, time

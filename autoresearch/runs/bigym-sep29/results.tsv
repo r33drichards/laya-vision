@@ -18,3 +18,4 @@ a93f9f6	0.1523	0.0833	0.6783	0.7062	0.0279	0.3435	201.1613	0.8360	discard	bigym	
 8a3db45	0.3066	0.2344	0.6800	0.7023	0.0223	0.3395	201.1613	0.8268	keep	bigym	autoresearch/experiment_bigym.py	0.62 0.78 0.00 0.00 0.00 0.00	1-frame recipe + reach-oracle w1.0 150s, LR_BACKBONE 1.5e-5
 826bf70	0.3510	0.2969	0.6882	0.7035	0.0153	0.3421	201.1613	0.8316	keep	bigym	autoresearch/experiment_bigym.py	0.59 0.94 0.00 0.25 0.00 0.00	kept reach recipe, BC task weights 20/10/5/5 toward DrawerTopClose
 86c4ba2	0.3431	0.2708	0.6782	0.7033	0.0251	0.3600	201.1613	0.8365	discard	bigym	autoresearch/experiment_bigym.py	0.72 0.91 0.00 0.00 0.00 0.00	kept reach recipe, reach weight 1.5
+6dbd71e	0.3060	0.2396	0.6827	0.7033	0.0206	0.3638	201.1613	0.8315	discard	bigym	autoresearch/experiment_bigym.py	0.62 0.81 0.00 0.00 0.00 0.00	task weights DrawerTopClose 30 / WallCupboardClose 10, Open tasks dropped
