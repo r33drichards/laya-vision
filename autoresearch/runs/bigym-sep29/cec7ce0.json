@@ -1,0 +1,2859 @@
+{
+  "tag": "bigym-sep29",
+  "commit": "cec7ce0",
+  "summary": {
+    "macro_acc": 0.7052928276230238,
+    "ece_hard": 0.018009312636467312,
+    "quality": 0.6872835149865565,
+    "n_sets": 34,
+    "n_questions": 9303,
+    "params_m": 201.161347,
+    "latency_x": 0.8343407967657597,
+    "latency_ms": 64.12138299992876,
+    "latency_ref_ms": 76.85274799996478,
+    "latency_p90_ms": 71.19412900005955,
+    "games": 0.33290526823382277,
+    "bigym": 0.01819642031270382
+  },
+  "metrics": {
+    "all": {
+      "n": 9303,
+      "acc": 0.709018596151779,
+      "ece": 0.0358600546794592,
+      "nll": 0.7242723040882986,
+      "n_score": 1800,
+      "mae": 0.6017618846562174,
+      "xent": 1.305653053007813,
+      "n_soft": 560,
+      "soft_xent": 1.3255993225212608
+    },
+    "aokvqa": {
+      "n": 300,
+      "acc": 0.63,
+      "ece": 0.08475566486517588,
+      "nll": 0.962114331126213
+    },
+    "scienceqa": {
+      "n": 300,
+      "acc": 0.84,
+      "ece": 0.06333880285422008,
+      "nll": 0.407408631471917
+    },
+    "vqav2_yesno": {
+      "n": 300,
+      "acc": 0.6866666666666666,
+      "ece": 0.07222737212975824,
+      "nll": 0.6001716497913003
+    },
+    "cauldron_ai2d": {
+      "n": 282,
+      "acc": 0.75177304964539,
+      "ece": 0.07920569657011234,
+      "nll": 0.6635211526237904
+    },
+    "cauldron_aokvqa": {
+      "n": 300,
+      "acc": 0.6966666666666667,
+      "ece": 0.05005807528893151,
+      "nll": 0.8110480013862252
+    },
+    "cauldron_iconqa": {
+      "n": 300,
+      "acc": 0.9133333333333333,
+      "ece": 0.048415081004301766,
+      "nll": 0.23074106191905835
+    },
+    "cauldron_intergps": {
+      "n": 94,
+      "acc": 0.2978723404255319,
+      "ece": 0.34665117270134865,
+      "nll": 1.800120897274068
+    },
+    "cauldron_scienceqa": {
+      "n": 300,
+      "acc": 0.8833333333333333,
+      "ece": 0.05640011558930079,
+      "nll": 0.29035158241788545
+    },
+    "cauldron_tqa": {
+      "n": 264,
+      "acc": 0.7424242424242424,
+      "ece": 0.0482865368778055,
+      "nll": 0.7085827453640487
+    },
+    "cauldron_visual7w": {
+      "n": 300,
+      "acc": 0.85,
+      "ece": 0.17021597991387052,
+      "nll": 0.5381091092526913
+    },
+    "cauldron_raven": {
+      "n": 300,
+      "acc": 0.7633333333333333,
+      "ece": 0.0740222728252411,
+      "nll": 0.5014880615596969
+    },
+    "cauldron_figureqa": {
+      "n": 300,
+      "acc": 0.8333333333333334,
+      "ece": 0.11197916368643442,
+      "nll": 0.38381127852946517
+    },
+    "cauldron_hateful_memes": {
+      "n": 300,
+      "acc": 0.87,
+      "ece": 0.05689720332622529,
+      "nll": 0.33020166456699374
+    },
+    "cauldron_nlvr2": {
+      "n": 300,
+      "acc": 0.79,
+      "ece": 0.030258334080378216,
+      "nll": 0.4713276008764903
+    },
+    "cauldron_vsr": {
+      "n": 160,
+      "acc": 0.85625,
+      "ece": 0.07146513089537622,
+      "nll": 0.3380487497197464
+    },
+    "cauldron_vqarad": {
+      "n": 62,
+      "acc": 0.8387096774193549,
+      "ece": 0.10659551620483398,
+      "nll": 0.47839650103161413
+    },
+    "cauldron_clevr": {
+      "n": 300,
+      "acc": 0.6333333333333333,
+      "ece": 0.05355771283308667,
+      "nll": 0.6159908589969079
+    },
+    "cauldron_dvqa": {
+      "n": 300,
+      "acc": 0.9233333333333333,
+      "ece": 0.09501126368840533,
+      "nll": 0.21813306670015056
+    },
+    "cauldron_mapqa": {
+      "n": 300,
+      "acc": 0.65,
+      "ece": 0.0642416447401046,
+      "nll": 0.5780354112138351
+    },
+    "cauldron_ocrvqa": {
+      "n": 300,
+      "acc": 0.87,
+      "ece": 0.13984383185704552,
+      "nll": 0.4100013276189566
+    },
+    "cauldron_vqav2": {
+      "n": 300,
+      "acc": 0.76,
+      "ece": 0.08568201084931694,
+      "nll": 0.4903200230250756
+    },
+    "cauldron_chartqa": {
+      "n": 41,
+      "acc": 0.6829268292682927,
+      "ece": 0.23652267892186238,
+      "nll": 0.9391340770099948
+    },
+    "score_vlfeedback": {
+      "n": 300,
+      "acc": 0.5566666666666666,
+      "ece": 0.13623700976371764,
+      "nll": 1.1921881950894992,
+      "n_score": 300,
+      "mae": 0.9314074721435706,
+      "xent": 1.1921881950894992,
+      "prior_xent": 1.5554393529891968
+    },
+    "score_ava": {
+      "n": 300,
+      "acc": 0.8466666666666667,
+      "ece": 0.49378100335597985,
+      "nll": 1.0901961457729339,
+      "n_score": 300,
+      "mae": 0.24903183420499167,
+      "xent": 1.3015797038873036,
+      "prior_xent": 1.22678804397583
+    },
+    "score_richhf": {
+      "n": 300,
+      "acc": 0.51,
+      "ece": 0.04941402216752369,
+      "nll": 1.0859504123528798,
+      "n_score": 300,
+      "mae": 0.5846126858393351,
+      "xent": 1.0859504123528798,
+      "prior_xent": 1.179534912109375
+    },
+    "score_crisismmd": {
+      "n": 300,
+      "acc": 0.6466666666666666,
+      "ece": 0.1929844574133555,
+      "nll": 0.9929121814109385,
+      "n_score": 300,
+      "mae": 0.4441126795113087,
+      "xent": 0.9929121814109385,
+      "prior_xent": 0.915880024433136
+    },
+    "eval_koniq": {
+      "n": 300,
+      "acc": 0.44666666666666666,
+      "ece": 0.1598097907503446,
+      "nll": 1.4663764888048172,
+      "n_score": 300,
+      "mae": 0.4748384551207225,
+      "xent": 1.4810106766223907,
+      "prior_xent": 1.170714259147644
+    },
+    "eval_evalmuse": {
+      "n": 300,
+      "acc": 0.18666666666666668,
+      "ece": 0.27097885946432754,
+      "nll": 1.8158158673842748,
+      "n_score": 300,
+      "mae": 0.9265681811173757,
+      "xent": 1.7802771486838658,
+      "prior_xent": 1.490944266319275
+    },
+    "eval_cifar10h": {
+      "n": 300,
+      "acc": 0.7966666666666666,
+      "ece": 0.10787914474805196,
+      "nll": 0.7761114881187677,
+      "n_soft": 180,
+      "soft_xent": 1.1170047687159643,
+      "prior_soft_xent": 2.228107213973999
+    },
+    "eval_ferplus": {
+      "n": 300,
+      "acc": 0.41,
+      "ece": 0.1047955407202244,
+      "nll": 1.6927184172471363,
+      "n_soft": 205,
+      "soft_xent": 1.9204402010615278,
+      "prior_soft_xent": 1.7679743766784668
+    },
+    "eval_vizwiz": {
+      "n": 300,
+      "acc": 0.42333333333333334,
+      "ece": 0.26951969663302106,
+      "nll": 0.9006489983697732,
+      "n_soft": 175,
+      "soft_xent": 0.8433401201452527,
+      "prior_soft_xent": 0.6837133765220642
+    },
+    "eval_pope_random": {
+      "n": 300,
+      "acc": 0.8333333333333334,
+      "ece": 0.04446879525979361,
+      "nll": 0.42700701403121155
+    },
+    "eval_pope_popular": {
+      "n": 300,
+      "acc": 0.7833333333333333,
+      "ece": 0.04262396951516469,
+      "nll": 0.4778550174087286
+    },
+    "eval_pope_adversarial": {
+      "n": 300,
+      "acc": 0.7766666666666666,
+      "ece": 0.05075797994931538,
+      "nll": 0.48384008221328256
+    }
+  },
+  "temperature": [
+    3.6249797344207764,
+    2.391251564025879,
+    3.8403491973876953
+  ],
+  "setup_s": 150.8,
+  "train_s": 903.5,
+  "checkpoint": "/ckpt/autoresearch/bigym-sep29/cec7ce0",
+  "config": {
+    "backbone": "HuggingFaceTB/SmolVLM-256M-Instruct",
+    "head_layers": 2,
+    "n_act": 2,
+    "max_len": 1024,
+    "head_max_len": 320,
+    "option_attention": "block",
+    "dtype": "fp32",
+    "preprocess": "processor",
+    "image_size": 512,
+    "image_interpolation": "processor",
+    "readout": "terminator",
+    "image_split_edge": 0,
+    "bigym_frames": 4
+  },
+  "games": {
+    "per_game": {
+      "Maze4": 0.2421875,
+      "Maze6": 0.015625,
+      "Snake10": 0.13082191780821917,
+      "CartPole": -0.04361479413817167,
+      "Acrobot": 0.6190476190476191,
+      "MountainCar": 0.7474825716498839,
+      "LunarLander": -0.22103945493117266,
+      "Freeway": 0.6865671641791045,
+      "Breakout": 0.15748031496062992,
+      "DoomBasic": 0.9944948437621152
+    },
+    "results": {
+      "Maze4": {
+        "model": 0.2421875,
+        "normalized": 0.2421875,
+        "episodes": 128,
+        "seconds": 39.7,
+        "random": 0.0,
+        "expert": 1.0,
+        "scores": [
+          1.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "decisions": 7916,
+        "model_frames": 845,
+        "search": false
+      },
+      "Maze6": {
+        "model": 0.015625,
+        "normalized": 0.015625,
+        "episodes": 64,
+        "seconds": 37.6,
+        "random": 0.0,
+        "expert": 1.0,
+        "scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "decisions": 9588,
+        "model_frames": 517,
+        "search": false
+      },
+      "Snake10": {
+        "model": 3.1875,
+        "normalized": 0.13082191780821917,
+        "episodes": 64,
+        "seconds": 30.0,
+        "random": 0.203125,
+        "expert": 23.015625,
+        "scores": [
+          2.0,
+          6.0,
+          4.0,
+          0.0,
+          5.0,
+          1.0,
+          6.0,
+          0.0,
+          1.0,
+          2.0,
+          6.0,
+          2.0,
+          1.0,
+          2.0,
+          3.0,
+          3.0,
+          0.0,
+          0.0,
+          4.0,
+          12.0,
+          1.0,
+          5.0,
+          1.0,
+          0.0,
+          6.0,
+          1.0,
+          8.0,
+          6.0,
+          2.0,
+          11.0,
+          2.0,
+          1.0,
+          0.0,
+          4.0,
+          11.0,
+          0.0,
+          5.0,
+          2.0,
+          0.0,
+          0.0,
+          4.0,
+          0.0,
+          7.0,
+          1.0,
+          5.0,
+          5.0,
+          6.0,
+          3.0,
+          7.0,
+          1.0,
+          3.0,
+          1.0,
+          1.0,
+          0.0,
+          2.0,
+          4.0,
+          6.0,
+          10.0,
+          3.0,
+          6.0,
+          1.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "decisions": 1562,
+        "model_frames": 1465,
+        "search": false
+      },
+      "CartPole": {
+        "model": 13.0625,
+        "normalized": -0.04361479413817167,
+        "episodes": 16,
+        "seconds": 9.6,
+        "random": 20.875,
+        "expert": 200.0,
+        "scores": [
+          31.0,
+          13.0,
+          10.0,
+          9.0,
+          10.0,
+          10.0,
+          12.0,
+          9.0,
+          10.0,
+          11.0,
+          11.0,
+          10.0,
+          11.0,
+          10.0,
+          32.0,
+          10.0
+        ],
+        "decisions": 209,
+        "model_frames": 192,
+        "search": false
+      },
+      "Acrobot": {
+        "model": -130.125,
+        "normalized": 0.6190476190476191,
+        "episodes": 16,
+        "seconds": 50.1,
+        "random": -200.0,
+        "expert": -87.125,
+        "scores": [
+          -160.0,
+          -132.0,
+          -146.0,
+          -73.0,
+          -200.0,
+          -133.0,
+          -135.0,
+          -145.0,
+          -83.0,
+          -200.0,
+          -106.0,
+          -80.0,
+          -109.0,
+          -111.0,
+          -161.0,
+          -108.0
+        ],
+        "decisions": 2096,
+        "model_frames": 2096,
+        "search": false
+      },
+      "MountainCar": {
+        "model": -139.6875,
+        "normalized": 0.7474825716498839,
+        "episodes": 16,
+        "seconds": 48.7,
+        "random": -200.0,
+        "expert": -119.3125,
+        "scores": [
+          -119.0,
+          -121.0,
+          -125.0,
+          -119.0,
+          -114.0,
+          -119.0,
+          -118.0,
+          -200.0,
+          -118.0,
+          -128.0,
+          -123.0,
+          -115.0,
+          -200.0,
+          -116.0,
+          -200.0,
+          -200.0
+        ],
+        "decisions": 2235,
+        "model_frames": 2048,
+        "search": false
+      },
+      "LunarLander": {
+        "model": -264.0131926407509,
+        "normalized": -0.22103945493117266,
+        "episodes": 16,
+        "seconds": 42.9,
+        "random": -170.09627879185288,
+        "expert": 254.79127749596864,
+        "scores": [
+          -405.3527085915721,
+          -527.5333794843486,
+          -102.95991582412437,
+          -397.14365246773224,
+          -180.68287050815917,
+          -390.6846265178513,
+          -52.12312415656771,
+          -365.18709210503505,
+          -33.369235546242166,
+          -171.19355174397725,
+          -491.70328495028133,
+          -231.708340956705,
+          -24.729045224836824,
+          -140.60342100110245,
+          -390.4085177984831,
+          -318.82831537499555
+        ],
+        "decisions": 1702,
+        "model_frames": 1681,
+        "search": false
+      },
+      "Freeway": {
+        "model": 11.5,
+        "normalized": 0.6865671641791045,
+        "episodes": 4,
+        "seconds": 103.6,
+        "random": 0.0,
+        "expert": 16.75,
+        "scores": [
+          12.0,
+          11.0,
+          11.0,
+          12.0
+        ],
+        "decisions": 4000,
+        "model_frames": 4000,
+        "search": false
+      },
+      "Breakout": {
+        "model": 21.5,
+        "normalized": 0.15748031496062992,
+        "episodes": 4,
+        "seconds": 90.6,
+        "random": 1.5,
+        "expert": 128.5,
+        "scores": [
+          40.0,
+          19.0,
+          15.0,
+          12.0
+        ],
+        "decisions": 2905,
+        "model_frames": 2905,
+        "search": false
+      },
+      "DoomBasic": {
+        "model": 78.703125,
+        "normalized": 0.9944948437621152,
+        "episodes": 64,
+        "seconds": 18.4,
+        "random": -121.703125,
+        "expert": 79.8125,
+        "scores": [
+          71.0,
+          71.0,
+          95.0,
+          11.0,
+          95.0,
+          87.0,
+          95.0,
+          75.0,
+          63.0,
+          71.0,
+          71.0,
+          95.0,
+          87.0,
+          63.0,
+          95.0,
+          75.0,
+          79.0,
+          67.0,
+          83.0,
+          79.0,
+          67.0,
+          91.0,
+          75.0,
+          87.0,
+          95.0,
+          95.0,
+          71.0,
+          63.0,
+          63.0,
+          95.0,
+          79.0,
+          87.0,
+          95.0,
+          71.0,
+          59.0,
+          87.0,
+          87.0,
+          71.0,
+          95.0,
+          67.0,
+          71.0,
+          95.0,
+          75.0,
+          95.0,
+          67.0,
+          91.0,
+          71.0,
+          83.0,
+          67.0,
+          79.0,
+          67.0,
+          71.0,
+          68.0,
+          67.0,
+          67.0,
+          79.0,
+          91.0,
+          95.0,
+          95.0,
+          83.0,
+          71.0,
+          79.0,
+          87.0,
+          95.0
+        ],
+        "decisions": 382,
+        "model_frames": 382,
+        "search": false
+      }
+    }
+  },
+  "bigym": {
+    "bigym": 0.01819642031270382,
+    "per_task": {
+      "ReachTarget": -0.226241971818986,
+      "ReachTargetSingle": -0.06643450934718545,
+      "DrawerTopOpen": 0.0,
+      "DrawerTopClose": 0.3970948467923944,
+      "WallCupboardOpen": 0.0,
+      "WallCupboardClose": 0.00476015625
+    },
+    "per_task_progress": {
+      "ReachTarget": -0.30962680078082916,
+      "ReachTargetSingle": -0.10061095417824187,
+      "DrawerTopOpen": 0.0,
+      "DrawerTopClose": 0.7941896935847887,
+      "WallCupboardOpen": 0.0,
+      "WallCupboardClose": 0.0095203125
+    },
+    "progress": {
+      "ReachTarget": 0.18340062499999998,
+      "ReachTargetSingle": 0.11688937500000002,
+      "DrawerTopOpen": 0.0,
+      "DrawerTopClose": 0.8003771874999999,
+      "WallCupboardOpen": 0.0,
+      "WallCupboardClose": 0.0095203125
+    },
+    "success": {
+      "ReachTarget": 0.0,
+      "ReachTargetSingle": 0.0,
+      "DrawerTopOpen": 0.0,
+      "DrawerTopClose": 0.0,
+      "WallCupboardOpen": 0.0,
+      "WallCupboardClose": 0.0
+    },
+    "success_mean": 0.0,
+    "top_actions": {
+      "ReachTarget": [
+        [
+          "RIGHT_HAND_UP",
+          0.374
+        ],
+        [
+          "RIGHT_HAND_FORWARD",
+          0.335
+        ],
+        [
+          "RIGHT_HAND_RIGHT",
+          0.122
+        ],
+        [
+          "BASE_FORWARD",
+          0.116
+        ],
+        [
+          "RIGHT_HAND_LEFT",
+          0.038
+        ]
+      ],
+      "ReachTargetSingle": [
+        [
+          "RIGHT_HAND_UP",
+          0.615
+        ],
+        [
+          "RIGHT_HAND_FORWARD",
+          0.217
+        ],
+        [
+          "BASE_FORWARD",
+          0.082
+        ],
+        [
+          "LEFT_HAND_FORWARD",
+          0.034
+        ],
+        [
+          "RIGHT_HAND_LEFT",
+          0.028
+        ]
+      ],
+      "DrawerTopOpen": [
+        [
+          "BASE_FORWARD",
+          0.878
+        ],
+        [
+          "RIGHT_HAND_FORWARD",
+          0.052
+        ],
+        [
+          "RIGHT_HAND_RIGHT",
+          0.024
+        ],
+        [
+          "LEFT_HAND_DOWN",
+          0.017
+        ],
+        [
+          "RIGHT_HAND_UP",
+          0.008
+        ]
+      ],
+      "DrawerTopClose": [
+        [
+          "BASE_FORWARD",
+          0.393
+        ],
+        [
+          "RIGHT_HAND_RIGHT",
+          0.372
+        ],
+        [
+          "RIGHT_HAND_FORWARD",
+          0.155
+        ],
+        [
+          "RIGHT_HAND_UP",
+          0.072
+        ],
+        [
+          "BASE_BACK",
+          0.003
+        ]
+      ],
+      "WallCupboardOpen": [
+        [
+          "RIGHT_HAND_FORWARD",
+          0.514
+        ],
+        [
+          "BASE_FORWARD",
+          0.176
+        ],
+        [
+          "LEFT_HAND_FORWARD",
+          0.125
+        ],
+        [
+          "LEFT_HAND_UP",
+          0.049
+        ],
+        [
+          "RIGHT_HAND_RIGHT",
+          0.035
+        ]
+      ],
+      "WallCupboardClose": [
+        [
+          "RIGHT_HAND_FORWARD",
+          0.337
+        ],
+        [
+          "RIGHT_HAND_LEFT",
+          0.32
+        ],
+        [
+          "RIGHT_HAND_UP",
+          0.139
+        ],
+        [
+          "BASE_FORWARD",
+          0.083
+        ],
+        [
+          "LEFT_HAND_FORWARD",
+          0.041
+        ]
+      ]
+    },
+    "missing": [],
+    "complete": true,
+    "tasks": [
+      "ReachTarget",
+      "ReachTargetSingle",
+      "DrawerTopOpen",
+      "DrawerTopClose",
+      "WallCupboardOpen",
+      "WallCupboardClose"
+    ],
+    "eval": "ead6a9e737",
+    "wall_seconds": 171.3,
+    "results": {
+      "ReachTarget": {
+        "task": "ReachTarget",
+        "episodes": [
+          {
+            "seed": 780000,
+            "progress": 0.20735,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780001,
+            "progress": 0.31334,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780002,
+            "progress": 0.07275,
+            "final": 0.06792,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780003,
+            "progress": 0.11359,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780004,
+            "progress": 0.33432,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780005,
+            "progress": 0.28764,
+            "final": 0.28262,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780006,
+            "progress": 0.08538,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780007,
+            "progress": 0.1977,
+            "final": 0.08309,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780008,
+            "progress": 0.13609,
+            "final": 0.02608,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780009,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780010,
+            "progress": 0.15584,
+            "final": 0.15335,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780011,
+            "progress": 0.22709,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780012,
+            "progress": 0.17078,
+            "final": 0.1658,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780013,
+            "progress": 0.36257,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780014,
+            "progress": 0.18646,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780015,
+            "progress": 0.20937,
+            "final": 0.12649,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780016,
+            "progress": 0.16564,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780017,
+            "progress": 0.23451,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780018,
+            "progress": 0.27778,
+            "final": 0.06967,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780019,
+            "progress": 0.16568,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780020,
+            "progress": 0.0839,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780021,
+            "progress": 0.29802,
+            "final": 0.08986,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780022,
+            "progress": 0.16263,
+            "final": 0.15719,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780023,
+            "progress": 0.26305,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780024,
+            "progress": 0.23151,
+            "final": 0.23064,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780025,
+            "progress": 0.15365,
+            "final": 0.15286,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780026,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780027,
+            "progress": 0.09161,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780028,
+            "progress": 0.1904,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780029,
+            "progress": 0.15461,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780030,
+            "progress": 0.12554,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 780031,
+            "progress": 0.21002,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          }
+        ],
+        "actions": {
+          "BASE_FORWARD": 222,
+          "RIGHT_HAND_RIGHT": 235,
+          "RIGHT_HAND_UP": 719,
+          "RIGHT_HAND_FORWARD": 644,
+          "LEFT_HAND_FORWARD": 15,
+          "RIGHT_HAND_LEFT": 73,
+          "RIGHT_HAND_DOWN": 4,
+          "LEFT_HAND_DOWN": 1,
+          "BASE_DOWN": 5,
+          "LEFT_HAND_LEFT": 1,
+          "LEFT_HAND_RIGHT": 1
+        },
+        "seconds": 94.2,
+        "chunks": 2,
+        "frames": 4,
+        "budgets": {
+          "head_max_len": 320,
+          "max_len": 1024
+        },
+        "cap": 60,
+        "chunk_timings": [
+          {
+            "chunk": 0,
+            "seconds": 94.0,
+            "env_seconds": 31.3,
+            "policy_seconds": 50.6,
+            "load_seconds": 19.7,
+            "gl": "egl"
+          },
+          {
+            "chunk": 1,
+            "seconds": 94.2,
+            "env_seconds": 29.9,
+            "policy_seconds": 52.5,
+            "load_seconds": 18.9,
+            "gl": "egl"
+          }
+        ]
+      },
+      "ReachTargetSingle": {
+        "task": "ReachTargetSingle",
+        "episodes": [
+          {
+            "seed": 781000,
+            "progress": 0.25657,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781001,
+            "progress": 0.4054,
+            "final": 0.40413,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781002,
+            "progress": 0.10414,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781003,
+            "progress": 0.12896,
+            "final": 0.12497,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781004,
+            "progress": 0.09011,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781005,
+            "progress": 0.05732,
+            "final": 0.0519,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781006,
+            "progress": 0.14791,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781007,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781008,
+            "progress": 0.11043,
+            "final": 0.10664,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781009,
+            "progress": 0.15262,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781010,
+            "progress": 0.12296,
+            "final": 0.1197,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781011,
+            "progress": 0.04334,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781012,
+            "progress": 0.10127,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781013,
+            "progress": 0.08896,
+            "final": 0.08709,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781014,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781015,
+            "progress": 0.04813,
+            "final": 0.04617,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781016,
+            "progress": 0.21639,
+            "final": 0.05318,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781017,
+            "progress": 0.06976,
+            "final": 0.06712,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781018,
+            "progress": 0.15713,
+            "final": 0.15256,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781019,
+            "progress": 0.0741,
+            "final": 0.07169,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781020,
+            "progress": 0.05373,
+            "final": 0.05091,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781021,
+            "progress": 0.06801,
+            "final": 0.06244,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781022,
+            "progress": 0.06764,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781023,
+            "progress": 0.1436,
+            "final": 0.07637,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781024,
+            "progress": 0.21143,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781025,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781026,
+            "progress": 0.1879,
+            "final": 0.18634,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781027,
+            "progress": 0.15268,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781028,
+            "progress": 0.22517,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781029,
+            "progress": 0.04487,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781030,
+            "progress": 0.20993,
+            "final": 0.20689,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          },
+          {
+            "seed": 781031,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 60,
+            "terminated": false
+          }
+        ],
+        "actions": {
+          "BASE_FORWARD": 158,
+          "RIGHT_HAND_UP": 1180,
+          "BASE_BACK": 1,
+          "RIGHT_HAND_FORWARD": 416,
+          "RIGHT_HAND_LEFT": 53,
+          "RIGHT_HAND_DOWN": 3,
+          "LEFT_HAND_FORWARD": 66,
+          "RIGHT_HAND_RIGHT": 38,
+          "BASE_DOWN": 5
+        },
+        "seconds": 92.7,
+        "chunks": 2,
+        "frames": 4,
+        "budgets": {
+          "head_max_len": 320,
+          "max_len": 1024
+        },
+        "cap": 60,
+        "chunk_timings": [
+          {
+            "chunk": 0,
+            "seconds": 88.7,
+            "env_seconds": 27.8,
+            "policy_seconds": 49.7,
+            "load_seconds": 16.5,
+            "gl": "egl"
+          },
+          {
+            "chunk": 1,
+            "seconds": 92.7,
+            "env_seconds": 29.9,
+            "policy_seconds": 51.3,
+            "load_seconds": 18.7,
+            "gl": "egl"
+          }
+        ]
+      },
+      "DrawerTopOpen": {
+        "task": "DrawerTopOpen",
+        "episodes": [
+          {
+            "seed": 782000,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782001,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782002,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782003,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782004,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782005,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782006,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782007,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782008,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782009,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782010,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782011,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782012,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782013,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782014,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782015,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782016,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782017,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782018,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782019,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782020,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782021,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782022,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782023,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782024,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782025,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782026,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782027,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782028,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782029,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782030,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 782031,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          }
+        ],
+        "actions": {
+          "LEFT_HAND_DOWN": 83,
+          "RIGHT_TILT_UP": 32,
+          "RIGHT_HAND_RIGHT": 114,
+          "RIGHT_HAND_FORWARD": 252,
+          "BASE_FORWARD": 4216,
+          "BASE_BACK": 5,
+          "RIGHT_HAND_UP": 39,
+          "LEFT_HAND_FORWARD": 30,
+          "RIGHT_HAND_LEFT": 25,
+          "RIGHT_HAND_BACK": 2,
+          "LEFT_HAND_LEFT": 2
+        },
+        "seconds": 171.3,
+        "chunks": 3,
+        "frames": 4,
+        "budgets": {
+          "head_max_len": 320,
+          "max_len": 1024
+        },
+        "cap": 150,
+        "chunk_timings": [
+          {
+            "chunk": 0,
+            "seconds": 162.5,
+            "env_seconds": 42.5,
+            "policy_seconds": 89.8,
+            "load_seconds": 18.8,
+            "gl": "egl"
+          },
+          {
+            "chunk": 1,
+            "seconds": 171.3,
+            "env_seconds": 40.7,
+            "policy_seconds": 98.2,
+            "load_seconds": 22.3,
+            "gl": "egl"
+          },
+          {
+            "chunk": 2,
+            "seconds": 151.9,
+            "env_seconds": 37.9,
+            "policy_seconds": 84.5,
+            "load_seconds": 22.3,
+            "gl": "egl"
+          }
+        ]
+      },
+      "DrawerTopClose": {
+        "task": "DrawerTopClose",
+        "episodes": [
+          {
+            "seed": 783000,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783001,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783002,
+            "progress": 0.80021,
+            "final": 0.80021,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783003,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783004,
+            "progress": 0.79987,
+            "final": 0.79987,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783005,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783006,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783007,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783008,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783009,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783010,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783011,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783012,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783013,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783014,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783015,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783016,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783017,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783018,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783019,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783020,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783021,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783022,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783023,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783024,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783025,
+            "progress": 0.80094,
+            "final": 0.80094,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783026,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783027,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783028,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783029,
+            "progress": 0.79842,
+            "final": 0.79842,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783030,
+            "progress": 0.80021,
+            "final": 0.80021,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 783031,
+            "progress": 0.80046,
+            "final": 0.80046,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          }
+        ],
+        "actions": {
+          "RIGHT_HAND_RIGHT": 1784,
+          "BASE_FORWARD": 1885,
+          "RIGHT_HAND_FORWARD": 742,
+          "LEFT_HAND_RIGHT": 2,
+          "RIGHT_HAND_UP": 347,
+          "LEFT_HAND_UP": 4,
+          "RIGHT_HAND_LEFT": 12,
+          "BASE_BACK": 13,
+          "LEFT_HAND_FORWARD": 2,
+          "RIGHT_WRIST_CCW": 5,
+          "RIGHT_HAND_DOWN": 4
+        },
+        "seconds": 167.3,
+        "chunks": 3,
+        "frames": 4,
+        "budgets": {
+          "head_max_len": 320,
+          "max_len": 1024
+        },
+        "cap": 150,
+        "chunk_timings": [
+          {
+            "chunk": 0,
+            "seconds": 160.5,
+            "env_seconds": 41.4,
+            "policy_seconds": 88.8,
+            "load_seconds": 18.2,
+            "gl": "egl"
+          },
+          {
+            "chunk": 1,
+            "seconds": 167.3,
+            "env_seconds": 40.2,
+            "policy_seconds": 95.1,
+            "load_seconds": 21.7,
+            "gl": "egl"
+          },
+          {
+            "chunk": 2,
+            "seconds": 153.3,
+            "env_seconds": 36.4,
+            "policy_seconds": 87.4,
+            "load_seconds": 21.5,
+            "gl": "egl"
+          }
+        ]
+      },
+      "WallCupboardOpen": {
+        "task": "WallCupboardOpen",
+        "episodes": [
+          {
+            "seed": 784000,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784001,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784002,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784003,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784004,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784005,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784006,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784007,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784008,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784009,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784010,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784011,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784012,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784013,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784014,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784015,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784016,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784017,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784018,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784019,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784020,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784021,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784022,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784023,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784024,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784025,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784026,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784027,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784028,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784029,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784030,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 784031,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          }
+        ],
+        "actions": {
+          "RIGHT_HAND_UP": 64,
+          "LEFT_HAND_UP": 234,
+          "RIGHT_HAND_FORWARD": 2466,
+          "BASE_FORWARD": 846,
+          "LEFT_HAND_FORWARD": 599,
+          "LEFT_HAND_LEFT": 108,
+          "LEFT_HAND_RIGHT": 115,
+          "RIGHT_HAND_RIGHT": 169,
+          "LEFT_HAND_DOWN": 25,
+          "RIGHT_HAND_DOWN": 13,
+          "RIGHT_HAND_LEFT": 100,
+          "BASE_DOWN": 45,
+          "BASE_BACK": 15,
+          "LEFT_HAND_BACK": 1
+        },
+        "seconds": 161.7,
+        "chunks": 3,
+        "frames": 4,
+        "budgets": {
+          "head_max_len": 320,
+          "max_len": 1024
+        },
+        "cap": 150,
+        "chunk_timings": [
+          {
+            "chunk": 0,
+            "seconds": 161.1,
+            "env_seconds": 42.7,
+            "policy_seconds": 91.9,
+            "load_seconds": 19.1,
+            "gl": "egl"
+          },
+          {
+            "chunk": 1,
+            "seconds": 161.7,
+            "env_seconds": 41.8,
+            "policy_seconds": 92.7,
+            "load_seconds": 18.7,
+            "gl": "egl"
+          },
+          {
+            "chunk": 2,
+            "seconds": 148.2,
+            "env_seconds": 38.6,
+            "policy_seconds": 84.9,
+            "load_seconds": 19.5,
+            "gl": "egl"
+          }
+        ]
+      },
+      "WallCupboardClose": {
+        "task": "WallCupboardClose",
+        "episodes": [
+          {
+            "seed": 785000,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785001,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785002,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785003,
+            "progress": 0.03347,
+            "final": 0.03347,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785004,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785005,
+            "progress": 0.02179,
+            "final": 0.01707,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785006,
+            "progress": 0.14276,
+            "final": 0.14276,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785007,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785008,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785009,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785010,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785011,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785012,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785013,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785014,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785015,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785016,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785017,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785018,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785019,
+            "progress": 0.01202,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785020,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785021,
+            "progress": 0.03314,
+            "final": 0.03314,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785022,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785023,
+            "progress": 0.05028,
+            "final": 0.03936,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785024,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785025,
+            "progress": 0.01119,
+            "final": 0.00716,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785026,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785027,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785028,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785029,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785030,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          },
+          {
+            "seed": 785031,
+            "progress": 0.0,
+            "final": 0.0,
+            "success": false,
+            "decisions": 150,
+            "terminated": false
+          }
+        ],
+        "actions": {
+          "BASE_FORWARD": 398,
+          "RIGHT_HAND_FORWARD": 1616,
+          "RIGHT_HAND_UP": 665,
+          "RIGHT_HAND_LEFT": 1537,
+          "LEFT_HAND_UP": 145,
+          "LEFT_HAND_LEFT": 65,
+          "LEFT_HAND_FORWARD": 197,
+          "RIGHT_HAND_RIGHT": 153,
+          "LEFT_HAND_RIGHT": 3,
+          "BASE_DOWN": 16,
+          "RIGHT_WRIST_CCW": 2,
+          "BASE_BACK": 1,
+          "RIGHT_HAND_DOWN": 2
+        },
+        "seconds": 157.2,
+        "chunks": 3,
+        "frames": 4,
+        "budgets": {
+          "head_max_len": 320,
+          "max_len": 1024
+        },
+        "cap": 150,
+        "chunk_timings": [
+          {
+            "chunk": 0,
+            "seconds": 155.7,
+            "env_seconds": 41.8,
+            "policy_seconds": 87.6,
+            "load_seconds": 19.2,
+            "gl": "egl"
+          },
+          {
+            "chunk": 1,
+            "seconds": 157.2,
+            "env_seconds": 42.3,
+            "policy_seconds": 88.6,
+            "load_seconds": 18.4,
+            "gl": "egl"
+          },
+          {
+            "chunk": 2,
+            "seconds": 137.4,
+            "env_seconds": 34.8,
+            "policy_seconds": 79.7,
+            "load_seconds": 16.1,
+            "gl": "egl"
+          }
+        ]
+      }
+    }
+  },
+  "harness": "fd512b47b4",
+  "description": "anti-collapse: per task x primitive groups at count^0.5, smoothing 0.1",
+  "total_s": 1439.1,
+  "profile": "bigym",
+  "experiment": "autoresearch/experiment_bigym.py",
+  "timings": {
+    "train_eval_s": 1136.6,
+    "latency_s": 49.0,
+    "games_s": 215.8,
+    "bigym_s": 299.5
+  }
+}
