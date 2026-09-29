@@ -32,6 +32,7 @@ app = modal.App("laya-dimos-nav")
 DIMOS_COMMIT = "3cf006dd607631988c2d1680b9c28c59c37909f6"
 GROUND_TRUTH_COMMIT = "5448392aab080e9a0c1fb2588d9bdcbff657b0bf"
 HSSD_REPO = "hssd/hssd-hab"
+HSSD_REVISION = "4369cb9876214c7fbebcf552eb532380e4d287e4"
 LAYA_MODEL = "thaitea/laya-vision"
 LAYA_REVISION = "f2fe3c12cb6d04c59d8a190250bf3fb40fc828dc"
 SCENES_DIR = "/app/dimos/evals/suites/scenes/habitat"
@@ -80,48 +81,84 @@ nav_image = (
 
 @app.function(image=nav_image, volumes={"/data": habitat_vol}, timeout=6 * 3600, cpu=8,
               secrets=[modal.Secret.from_name("huggingface-thaitea")])  # anonymous listing hits 429
-def prepare_hssd(revision: str = "main") -> dict:
+def prepare_hssd(rev: str = HSSD_REVISION) -> dict:
     """What the suite's HSSD scenes load: the dataset config, semantics, each scene's instance and stage, and
     every object template (config, mesh, decomposed parts) those scenes place. A full snapshot is ~100k
-    files, over the Hub's request quota, so this fetches by pattern and waits out a 429."""
-    from huggingface_hub import HfApi, snapshot_download
-    from huggingface_hub.errors import HfHubHTTPError
+    files, far over the Hub's 2,500-requests-per-5-minutes API quota, so this lists only the directories it
+    needs and fetches files through `resolve` URLs, backing off on 429."""
+    import concurrent.futures
+    import requests
 
     out = "/data/hssd-hab"
     if os.path.exists(f"{out}/manifest.json"):
         return json.load(open(f"{out}/manifest.json"))
-    rev = HfApi().dataset_info(HSSD_REPO, revision=revision).sha
+    hdr = {"Authorization": f"Bearer {os.environ['HF_TOKEN']}"} if os.environ.get("HF_TOKEN") else {}
+    base = f"https://huggingface.co/datasets/{HSSD_REPO}"
+
+    def http(url, **kw):
+        for _ in range(40):
+            r = requests.get(url, headers=hdr, timeout=120, **kw)
+            if r.status_code != 429:
+                r.raise_for_status()
+                return r
+            print("429, waiting 60 s", flush=True)
+            time.sleep(60)
+        raise RuntimeError(f"still rate limited: {url}")
+
+    def ls(d):
+        url, got = f"https://huggingface.co/api/datasets/{HSSD_REPO}/tree/{rev}/{d}?limit=1000", []
+        while url:
+            r = http(url)
+            got += [x["path"] for x in r.json() if x["type"] == "file"]
+            url = r.links.get("next", {}).get("url")
+        return got
+
+    def get(path):
+        dst = f"{out}/{path}"
+        if os.path.exists(dst):
+            return
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with http(f"{base}/resolve/{rev}/{path}", stream=True) as r, open(dst + ".part", "wb") as f:
+            for chunk in r.iter_content(1 << 20):
+                f.write(chunk)
+        os.replace(dst + ".part", dst)
+
+    def get_all(paths):
+        with concurrent.futures.ThreadPoolExecutor(8) as ex:
+            list(ex.map(get, paths))
+
     scenes = [c["scene_id"] for c in _cases() if "hssd" in (c.get("scene_dataset_config") or "")]
-
-    def fetch(patterns):
-        for attempt in range(20):
-            try:
-                return snapshot_download(HSSD_REPO, repo_type="dataset", revision=rev, local_dir=out,
-                                         allow_patterns=patterns, max_workers=4)
-            except HfHubHTTPError as e:
-                if "429" not in str(e):
-                    raise
-                print(f"rate limited, waiting 5 min (attempt {attempt})", flush=True)
-                time.sleep(310)
-        raise RuntimeError("still rate limited")
-
-    fetch(["*.scene_dataset_config.json", "semantics/*"] + [f"scenes/{s}.scene_instance.json" for s in scenes]
-          + [f"stages/{s}.*" for s in scenes])
+    first = ["hssd-hab.scene_dataset_config.json"] + ls("semantics")
+    first += [f"scenes/{s}.scene_instance.json" for s in scenes]
+    first += [f"stages/{s}{ext}" for s in scenes for ext in (".glb", ".stage_config.json")]
+    get_all(first)
     templates = set()
     for s in scenes:
         inst = json.load(open(f"{out}/scenes/{s}.scene_instance.json"))
-        templates |= {o["template_name"].split("_part_", 1)[0] for o in inst.get("object_instances", [])}
-    patterns = []
-    for t in sorted(templates):
-        patterns += [f"objects/{t[0]}/{t}.*", f"objects/{t[0]}/{t}_*", f"objects/decomposed/{t}/*",
-                     f"objects/openings/{t}.*", f"objects/openings/{t}/*"]
-    print(f"{len(scenes)} scenes, {len(templates)} templates", flush=True)
-    fetch(patterns)
-    manifest = {"repo": HSSD_REPO, "revision": rev, "scenes": scenes, "templates": len(templates),
-                "time": time.time()}
+        templates |= {o["template_name"] for o in inst.get("object_instances", [])}
+    bases = {t.split("_part_", 1)[0] for t in templates}
+    listing = [p for c in sorted({t[0] for t in bases}) for p in ls(f"objects/{c}")] + ls("objects/openings")
+    decomposed = {d.split("/")[-1] for d in _dirs(http, rev, "objects/decomposed")}
+    for t in sorted(bases & decomposed):
+        listing += ls(f"objects/decomposed/{t}")
+    want = [p for p in listing if os.path.basename(p).split(".", 1)[0].split("_part_", 1)[0] in bases]
+    print(f"{len(scenes)} scenes, {len(bases)} templates, {len(want)} object files", flush=True)
+    get_all(want)
+    missing = [t for t in bases if not any(os.path.basename(p).startswith(t) for p in want)]
+    manifest = {"repo": HSSD_REPO, "revision": rev, "scenes": scenes, "templates": len(bases),
+                "files": len(first) + len(want), "templates_not_found": sorted(missing), "time": time.time()}
     json.dump(manifest, open(f"{out}/manifest.json", "w"))
     habitat_vol.commit()
     return manifest
+
+
+def _dirs(http, rev, d):
+    url, got = f"https://huggingface.co/api/datasets/{HSSD_REPO}/tree/{rev}/{d}?limit=1000", []
+    while url:
+        r = http(url)
+        got += [x["path"] for x in r.json() if x["type"] == "directory"]
+        url = r.links.get("next", {}).get("url")
+    return got
 
 
 def _cases() -> list[dict]:
