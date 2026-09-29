@@ -94,6 +94,25 @@ Its per-decision accuracy on the demo labels was ~20%. The BC labels come from a
 often near-ties (several primitives bring the robot about as close to the next waypoint), and one-hot targets on
 near-ties teach a prior, not a policy. Offline BC also never shows the states its own mistakes lead to.
 
+## Reference points (2026-09-29)
+
+| checkpoint | bigym | ReachTarget | ReachTargetSingle | DrawerTopOpen | DrawerTopClose | WallCupboardOpen | WallCupboardClose |
+|---|---|---|---|---|---|---|---|
+| zero-shot `autoresearch/full/long-sep24-b64/best` | -0.120 | -0.500 | -0.195 | 0.000 | -0.031 | 0.000 | +0.008 |
+| fine-tune `bigym-ft-20260927b/best` (2.2 A100-h) | +0.143 | +0.114 | +0.002 | 0.000 | +0.741 | 0.000 | 0.000 |
+| `experiment_bigym.py`, 15 min (`bigym-dev-20260929`) | +0.096 | -0.219 | -0.003 | 0.000 | +0.794 | +0.001 | 0.000 |
+
+(`autoresearch/runs/bigym-checks/`, `autoresearch/runs/bigym-dev-20260929/`.) Random dense progress is 0.38 on
+ReachTarget, 0.20 on ReachTargetSingle, 0.03 on DrawerTopClose and 0 on the other three. No model succeeds on a
+cupboard task yet. Beware what the dense score rewards: the 15-minute model's DrawerTopClose 0.80 comes from walking
+into the drawer (`BASE_FORWARD` on 93% of its decisions), which pushes it most of the way shut without ever meeting
+BiGym's 0.1 tolerance; read the success rates and top actions next to the score.
+
+Costs (the dev run): 15.0 min of training (1,674 steps at batch 64, ~107k samples, 36k of them 4-frame BiGym; the
+loader was the bottleneck, 37% data wait); a BiGym container takes 1.5 min (reach) to 4 min (cupboards) once
+running, but one of twelve took 12.4 min on a slow host, and a new deployment's first run pays the snapshots and
+L4 queueing: 47 min end to end for the first run.
+
 ## Ideas to start from
 
 - **DAgger with the lookahead follower as the expert.** Roll the current model out (greedy, or with some
