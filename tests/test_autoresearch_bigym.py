@@ -162,6 +162,12 @@ def test_summarize_normalizes_clips_and_averages():
     assert s["bigym"] == pytest.approx(1.0 / len(BE.TASKS))
     assert s["success"]["ReachTarget"] == 1.0 and s["top_actions"]["ReachTarget"][0][0] == "STAY"
     assert BE.normalize(-5.0, 0.1, 1.0) == BE.CLIP_LO and BE.normalize(0.1, 0.1, 0.1) is None
+    # progress without success tops out at half: full progress, no successes, random success 0
+    res2 = dict(res)
+    res2["DrawerTopClose"] = _fake("DrawerTopClose", [1.0] * n)
+    s2 = BE.summarize(res2, _bases())
+    assert s2["per_task"]["DrawerTopClose"] == pytest.approx(0.5)
+    assert s2["per_task_progress"]["DrawerTopClose"] == pytest.approx(1.0)
     # a missing task, or a task short of episodes, leaves the benchmark incomplete
     part = dict(res)
     part["WallCupboardOpen"] = _fake("WallCupboardOpen", [0.5] * (n // 2))

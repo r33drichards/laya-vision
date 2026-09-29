@@ -518,7 +518,7 @@ class TrainEval(_TrainEvalBase):
     """The default profile's training and quality job."""
 
 
-@app.cls(image=bigym_image, gpu="H100", cpu=16, memory=98304, timeout=60 * 60, volumes=VOLUMES,
+@app.cls(image=bigym_image, gpu="H100", cpu=32, memory=98304, timeout=60 * 60, volumes=VOLUMES,
          enable_memory_snapshot=True, single_use_containers=True)
 class TrainEvalBigym(_TrainEvalBase):
     """The bigym profile's: the same job with the BiGym pool kinds and MuJoCo / BiGym for rollouts in ``train``."""

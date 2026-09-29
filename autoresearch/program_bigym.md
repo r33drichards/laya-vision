@@ -8,7 +8,7 @@ while they stay within their noise margins of the baseline); size and latency ar
 
 | | what | role |
 |---|---|---|
-| `bigym` | mean over 6 BiGym tasks of the normalized dense progress (below) | **the objective**: keep needs `bigym` > best kept + `BIGYM_MARGIN` |
+| `bigym` | mean over 6 BiGym tasks of ½ normalized dense progress + ½ normalized success rate (below) | **the objective**: keep needs `bigym` > best kept + `BIGYM_MARGIN` |
 | `quality` | as in `program.md` (macro accuracy over 34 eval sets minus ECE) | guard: >= baseline - `QUALITY_GUARD` |
 | `games` | as in `program.md` (10-game normalized mean) | guard: >= baseline - `GAMES_GUARD` |
 | `params_m` | parameters of the saved model | guard: <= baseline x 1.01 (size frozen) |
@@ -29,7 +29,10 @@ capped at 60 decisions (reach) / 150 (cupboards). Each episode scores its best d
 
 Per task `(model - random) / (expert - random)`, clipped to [-0.5, 1.5], against `bigym_baselines.json`: random is
 `random_policy` on the same episodes, expert is the privileged oracle on the reach tasks and 1.0 on the cupboards
-(BiGym's human demos succeed 90-100% there; there is no primitive oracle). 0 = random play, 1 = expert. Success
+(BiGym's human demos succeed 90-100% there; there is no primitive oracle). 0 = random play, 1 = expert. The
+same normalization applies to the success rate (random's measured rate against the oracle's on reach, 1.0 on the
+cupboards), and a task's score is the mean of the two: dense progress alone let a policy score 0.79 on
+DrawerTopClose by shoving the drawer with its body without ever closing it. Success
 rates and each task's most played primitives are reported next to it: a policy that collapses onto one move
 shows there first.
 
@@ -58,7 +61,7 @@ python autoresearch/pareto.py show --tsv autoresearch/runs/<tag>/results.tsv
 ```
 
 After training, calibration and the quality eval (the H100 job), the latency job, the four games jobs and twelve
-BiGym jobs (6 tasks x 2 chunks, one L4 each) run in parallel. Keep / discard / crash and the git and results
+BiGym jobs (reach tasks x 2 chunks, cupboard tasks x 3, one L4 each) run in parallel. Keep / discard / crash and the git and results
 hygiene are as in `program.md`. The result JSON has everything per task (every episode's progress and success,
 action counts, timings) under `bigym`.
 

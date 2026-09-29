@@ -53,7 +53,7 @@ SEED_BASE = 780_000
 TRAIN_SEED_MAX = 100_000   # experiments' own rollouts use seeds below this (or BiGym's demo seeds), never these
 CAPS = {"ReachTarget": 60, "ReachTargetSingle": 60, "DrawerTopOpen": 150, "DrawerTopClose": 150,
         "WallCupboardOpen": 150, "WallCupboardClose": 150}   # = laya.bigymgames.TASKS max_decisions
-CHUNKS = {t: 2 for t in TASKS}   # containers per task, each playing EPISODES / CHUNKS episodes in lockstep
+CHUNKS = {t: 2 if t in REACH else 3 for t in TASKS}   # containers per task, each playing its share of EPISODES in lockstep
 FRAMES_DEFAULT = 4
 CLIP_LO, CLIP_HI = -0.5, 1.5
 FORWARD_BATCH = 16
@@ -344,12 +344,22 @@ def task_summary(res: Dict) -> Dict:
             "top_actions": [[a, round(n / total, 3)] for a, n in top]}
 
 
+def task_score(progress: float, success: float, base: Dict) -> Optional[float]:
+    """Half normalized dense progress, half normalized success rate: partial progress counts, but a policy that
+    pushes a part most of the way without ever finishing tops out near 0.5. ``None`` when neither is defined."""
+    p = normalize(progress, base["random"], base["expert"])
+    s = normalize(success, base.get("random_success", 0.0), base.get("expert_success", CUPBOARD_EXPERT))
+    parts = [v for v in (p, s) if v is not None]
+    return float(np.mean(parts)) if parts else None
+
+
 def summarize(results: Dict[str, Dict], baselines: Optional[Dict[str, Dict]] = None) -> Dict:
-    """``results``: ``{task: merged result}``. Returns ``{"bigym", "per_task": {task: normalized}, "success":
-    {task: rate}, "progress": {...}, "top_actions": {...}, "missing", "complete"}``; ``bigym`` averages the tasks
-    present (``complete`` False when one is missing or short of episodes)."""
+    """``results``: ``{task: merged result}``. Returns ``{"bigym", "per_task": {task: score}, "per_task_progress":
+    {task: normalized progress}, "success": {task: rate}, "progress": {...}, "top_actions": {...}, "missing",
+    "complete"}``; ``bigym`` averages the tasks present (``complete`` False when one is missing or short of
+    episodes). Each task's score is ``task_score``."""
     baselines = load_baselines() if baselines is None else baselines
-    per, succ, prog, top = {}, {}, {}, {}
+    per, per_prog, succ, prog, top = {}, {}, {}, {}, {}
     for task in TASKS:
         if task not in results:
             continue
@@ -358,10 +368,12 @@ def summarize(results: Dict[str, Dict], baselines: Optional[Dict[str, Dict]] = N
         if s["episodes"] != EPISODES:
             continue
         prog[task], succ[task], top[task] = s["progress"], s["success"], s["top_actions"]
-        per[task] = normalize(s["progress"], base["random"], base["expert"])
+        per[task] = task_score(s["progress"], s["success"], base)
+        per_prog[task] = normalize(s["progress"], base["random"], base["expert"])
     missing = [t for t in TASKS if t not in per]
     vals = [v for v in per.values() if v is not None]
-    return {"bigym": float(np.mean(vals)) if vals else float("nan"), "per_task": per, "progress": prog,
+    return {"bigym": float(np.mean(vals)) if vals else float("nan"), "per_task": per, "per_task_progress": per_prog,
+            "progress": prog,
             "success": succ, "success_mean": float(np.mean(list(succ.values()))) if succ else float("nan"),
             "top_actions": top, "missing": missing, "complete": not missing}
 
