@@ -19,6 +19,9 @@ Progress is the frontier's **hypervolume**: how much of the quality × games × 
 smaller model that is only slightly worse is a win, as is a better player at the same size. `pareto.py` makes the
 keep / discard call, not you.
 
+A second track, where BiGym control is the objective and quality and games are guard-rails, runs under
+`--profile bigym` with `experiment_bigym.py`: see `program_bigym.md`. Everything below is the default profile.
+
 ## Setup
 
 1. **Agree on a run tag** with the human, e.g. today's date (`sep23`). The branch `autoresearch/<tag>` must not exist.
