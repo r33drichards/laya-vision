@@ -16,3 +16,4 @@ fe88ffd	0.1762	0.1094	0.6792	0.7019	0.0227	0.3662	201.1613	0.8301	discard	bigym	
 77ba40d	-0.0137	0.0000	0.6732	0.7003	0.0271	0.3281	201.1613	0.8275	discard	bigym	autoresearch/experiment_bigym.py	0.00 0.00 0.00 0.00 0.00 0.00	1-frame recipe, bc_f1 weight 30
 a93f9f6	0.1523	0.0833	0.6783	0.7062	0.0279	0.3435	201.1613	0.8360	discard	bigym	autoresearch/experiment_bigym.py	0.44 0.06 0.00 0.00 0.00 0.00	1-frame recipe, last_n 10 layers, LR_BACKBONE 3e-5
 8a3db45	0.3066	0.2344	0.6800	0.7023	0.0223	0.3395	201.1613	0.8268	keep	bigym	autoresearch/experiment_bigym.py	0.62 0.78 0.00 0.00 0.00 0.00	1-frame recipe + reach-oracle w1.0 150s, LR_BACKBONE 1.5e-5
+826bf70	0.3510	0.2969	0.6882	0.7035	0.0153	0.3421	201.1613	0.8316	keep	bigym	autoresearch/experiment_bigym.py	0.59 0.94 0.00 0.25 0.00 0.00	kept reach recipe, BC task weights 20/10/5/5 toward DrawerTopClose

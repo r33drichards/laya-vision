@@ -31,7 +31,11 @@ HEAD_MAX_LEN = 320        # question + options budget: the 37-option BiGym quest
 BIGYM_FRAMES = 1          # head frames the benchmark shows the model per decision (written to the saved config)
 
 # sampling weights within the non-game draws (as the fine-tune: BiGym 45 of 70 -> ~50% of all draws)
-MIX: Dict[str, float] = {"bigym_v2c_bc_f1": 40.0, "bigym_v2c_probe": 5.0,
+# the 1-frame BC set split by task: under the eval's 150-decision cap the demo follower itself finishes
+# DrawerTopClose (median 103 decisions) but rarely WallCupboardClose (172) and never the two Open tasks (258, 295),
+# so the reachable one gets half the weight
+BC_TASK_WEIGHTS = {"DrawerTopClose": 30.0, "WallCupboardClose": 10.0}   # the Open tasks' records are left out
+MIX: Dict[str, float] = {**{"bigym_bc_f1:" + t: w for t, w in BC_TASK_WEIGHTS.items()}, "bigym_v2c_probe": 5.0,
                          "score_vlfeedback": 3.0}
 GAME_FRAC = 0.225         # share of draws for the game replay (toolkit + the pool's expert frames)
 CONTROL_GAMES = ("CartPole", "Acrobot", "MountainCar", "LunarLander")
@@ -50,7 +54,7 @@ REACH_TASKS = ("ReachTarget", "ReachTargetSingle")
 REACH_ROLLOUT_S = 150     # wall seconds of rollouts, counted in the 15-minute budget
 REACH_PROCS = 30          # rollout processes (OSMesa rendering, CPU only)
 REACH_EXPLORE = 0.3       # chance of playing a random primitive instead of the oracle's (the label stays the oracle's)
-REACH_WEIGHT = 1.5        # sampling weight relative to bigym_v2c_bc_f1
+REACH_WEIGHT = 1.0        # sampling weight relative to bigym_v2c_bc_f1
 
 _REACH_WORKER = r"""
 import io, os, pickle, random, sys, time
@@ -156,7 +160,11 @@ def build(ctx):
 
     agent = VLMAgent(ctx.ckpt_path(INIT), device=ctx.device, head_max_len=HEAD_MAX_LEN)
     agent.cfg["bigym_frames"] = BIGYM_FRAMES
-    data = ctx.train_examples() + ctx.bigym_examples(names=("bigym_v2c_bc_f1", "bigym_v2c_probe"))
+    bigym = [dict(ex, dataset="bigym_bc_f1:" + str(ex["id"]).split("-")[0]) if ex["dataset"] == "bigym_v2c_bc_f1"
+             else ex for ex in ctx.bigym_examples(names=("bigym_v2c_bc_f1", "bigym_v2c_probe"))]
+    bigym = [ex for ex in bigym if not ex["dataset"].startswith("bigym_bc_f1:")
+             or ex["dataset"].split(":")[1] in BC_TASK_WEIGHTS]
+    data = ctx.train_examples() + bigym
     games = toolkit.maze_examples(20000) + toolkit.snake_examples(20000) + ctx.game_examples()
     for g in CONTROL_GAMES:
         games += toolkit.control_examples(g, 5000)
@@ -174,7 +182,7 @@ def train(agent, ctx):
     data, mix = list(ctx.data), dict(ctx.mix)
     if reach:
         data += reach
-        mix["bigym_reach_oracle"] = REACH_WEIGHT * mix["bigym_v2c_bc_f1"]
+        mix["bigym_reach_oracle"] = REACH_WEIGHT * sum(v for k, v in mix.items() if k.startswith("bigym_bc_f1:"))
     left_min = (ctx.time_budget_s - (time.time() - t0)) / 60
     workers, prefetch = _loader_fit(BATCH_SIZE, NUM_WORKERS, PREFETCH, images=BIGYM_FRAMES)
     print("loader: %d workers, prefetch %d" % (workers, prefetch), flush=True)
