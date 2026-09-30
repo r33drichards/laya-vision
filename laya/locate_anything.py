@@ -209,8 +209,12 @@ class LocateAnythingBackbone(nn.Module):
         # the checkpoint's patchify: row-major patches per image, each [3, p, p], all images packed into one run
         patches = (x.to(self.vision_model.dtype).reshape(n, c, gh, p, gw, p).permute(0, 2, 4, 1, 3, 5)
                    .reshape(n * gh * gw, c, p, p))
-        grid = torch.tensor([[gh, gw]] * n, device=x.device, dtype=torch.int64)
-        merged = self.vision_model(patches, grid)  # list of [gh * gw / 4, 4 * vit_hidden]
+        # One image per call. Without flash-attn, MoonViT's SDPA path packs every image into one sequence and builds a
+        # dense [total, total] mask, so a batch of 32 images costs 32^2 times one image in memory and compute, almost
+        # all of it on cross-image blocks the mask then discards. Images never attend to each other, so this is exact.
+        grid = torch.tensor([[gh, gw]], device=x.device, dtype=torch.int64)
+        per = gh * gw
+        merged = [self.vision_model(patches[i * per:(i + 1) * per], grid)[0] for i in range(n)]
         feats = self.mlp1(torch.cat(merged, 0)).reshape(n, -1, self.config.text_config.hidden_size)
         return SimpleNamespace(pooler_output=feats) if return_dict else (feats,)
 

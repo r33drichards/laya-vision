@@ -117,6 +117,24 @@ def test_patchify_matches_the_checkpoint_image_processor(agent):
     assert feats.shape == (1, (56 // 28) * (84 // 28), 64)
 
 
+def test_vision_tower_runs_one_image_at_a_time(agent):
+    """Features for a batch equal each image's alone, and each tower call sees one image (MoonViT's SDPA path builds
+    a dense mask over everything it is given, so packing a batch is quadratic in memory)."""
+    enc = agent.model.encoder
+    x = torch.rand(1, 3, 3, 56, 56) * 2 - 1
+    calls = []
+    real = enc.vision_model.forward
+    enc.vision_model.forward = lambda p, g: calls.append(g.tolist()) or real(p, g)
+    try:
+        with torch.no_grad():
+            batch = enc.get_image_features(x).pooler_output
+            alone = torch.cat([enc.get_image_features(x[:, i:i + 1]).pooler_output for i in range(3)])
+    finally:
+        del enc.vision_model.forward
+    assert calls[:3] == [[[4, 4]]] * 3
+    assert torch.allclose(batch, alone, atol=1e-5)
+
+
 def test_padded_image_slots_are_dropped(agent):
     enc = agent.model.encoder
     x = torch.rand(1, 3, 3, 56, 56) * 2 - 1
