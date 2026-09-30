@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" font-family="Helvetica, Arial, sans-serif" font-size="15" role="img" aria-label="Before: Laya takes text and a question, runs ModernBERT, and returns typed answers. After: Laya Vision takes an image, text and a question, runs SmolVLM, and returns the same typed answers.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" font-family="Helvetica, Arial, sans-serif" font-size="15" role="img" aria-label="Before: Laya takes text and a question, runs ModernBERT, and returns typed answers. After: Laya Vision takes one or more images, text and a question, runs SmolVLM, and returns the same typed answers.">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
@@ -19,8 +19,15 @@
   <!-- After -->
   <text x="30" y="176" font-size="13" font-weight="bold" fill="#4c8a4c" letter-spacing="1.5">AFTER · Laya Vision</text>
   <rect x="30" y="192" width="180" height="60" rx="8" fill="#fff" stroke="#999"/>
-  <text x="120" y="219" text-anchor="middle" fill="#333"><tspan font-weight="bold">image</tspan> + text</text>
-  <text x="120" y="239" text-anchor="middle" fill="#333">+ question</text>
+  <text x="140" y="219" text-anchor="middle" fill="#333"><tspan font-weight="bold">images</tspan> + text</text>
+  <text x="140" y="239" text-anchor="middle" fill="#333">+ question</text>
+  <!-- stacked images -->
+  <g stroke="#2f7d6d" stroke-width="1.5">
+    <rect x="46" y="204" width="30" height="24" rx="3" fill="#e3f1ee"/>
+    <rect x="52" y="210" width="30" height="24" rx="3" fill="#e3f1ee"/>
+    <rect x="58" y="216" width="30" height="24" rx="3" fill="#cfe8e2"/>
+    <path d="M60,238 L69,228 L75,234 L80,229 L86,238" fill="none"/>
+  </g>
   <line x1="210" y1="222" x2="268" y2="222" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
   <rect x="272" y="192" width="200" height="60" rx="8" fill="#4c8a4c"/>
   <text x="372" y="228" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">SmolVLM</text>
