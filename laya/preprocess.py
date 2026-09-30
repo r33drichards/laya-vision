@@ -127,11 +127,17 @@ class ImagePrep:
         return cls(image_size=int(cfg.get("image_size", 512)),
                    backend=cfg.get("preprocess") or ("processor" if split_edge else default_backend),
                    interpolation=cfg.get("image_interpolation", "processor"),
+                   patch_size=int(cfg.get("image_patch_size", 16)),
+                   scale_factor=int(cfg.get("image_scale_factor", 4)),
                    split_edge=split_edge)
 
     def to_config(self) -> Dict[str, Any]:
-        return {"image_size": self.image_size, "preprocess": self.backend, "image_interpolation": self.interpolation,
-                "image_split_edge": self.split_edge}
+        out = {"image_size": self.image_size, "preprocess": self.backend, "image_interpolation": self.interpolation,
+               "image_split_edge": self.split_edge}
+        # the vision geometry is written only when it is not SmolVLM's, so existing configs stay byte-identical
+        if (self.patch_size, self.scale_factor) != (16, 4):
+            out.update(image_patch_size=self.patch_size, image_scale_factor=self.scale_factor)
+        return out
 
     # -- processor agreement ----------------------------------------------------------------------------------
 
@@ -335,6 +341,11 @@ def _expanded_ids(tokenizer, text: str, fake: str, glob: str, image: str, n_imag
     return tuple(tokenizer(text + expansion * n_images, add_special_tokens=False)["input_ids"])
 
 
+@functools.lru_cache(maxsize=32)
+def _tokenized(tokenizer, text: str) -> Tuple[int, ...]:
+    return tuple(tokenizer(text, add_special_tokens=False)["input_ids"])
+
+
 def prefix_ids(processor, text: str, n_images: int, image_seq_len: Optional[int] = None) -> List[int]:
     """``text`` with each image replaced by the processor's ``<image>`` run, tokenized (cached).
 
@@ -345,6 +356,9 @@ def prefix_ids(processor, text: str, n_images: int, image_seq_len: Optional[int]
     """
     if image_seq_len is None:
         image_seq_len = processor.image_seq_len
+    image_run = getattr(processor, "image_run", None)  # LocateAnything: <img><IMG_CONTEXT>...</img>
+    if image_run is not None:
+        return list(_tokenized(processor.tokenizer, text + image_run(image_seq_len) * n_images))
     glob = getattr(processor, "global_image_tag", None) or processor.global_image_token
     return list(_expanded_ids(processor.tokenizer, text, processor.fake_image_token, glob,
                               processor.image_token, n_images, image_seq_len))

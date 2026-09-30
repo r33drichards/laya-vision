@@ -287,6 +287,7 @@ def finetune(
     w_ce_schedule: str = "const",
     mix: str = "",
     mix_alpha: float = 0.0,
+    dtype: str = "",
 ):
     """Short fine-tune on the prepared VQA sets; logs loss and held-out accuracy / ECE, saves to
     ``<backbone root>/<run>`` (/ckpt/smolvlm or /ckpt/modernvbert).
@@ -296,7 +297,7 @@ def finetune(
     path recorded in the checkpoint: ``"processor"`` (the Hugging Face processor, what the released model
     used) for photos of mixed sizes; the device-side ``"gpu"`` path stacks raw frames and needs them all the
     same size, so it is for game frames (``modal_atari_train.py``). ``w_ce_schedule``, ``mix`` and ``mix_alpha``:
-    see ``finetune_long``.
+    see ``finetune_long``. ``dtype`` (``fp32`` or ``bf16``) overrides the backbone's default weight dtype.
     """
     import torch
 
@@ -316,7 +317,8 @@ def finetune(
     else:
         train_ex, calib_ex, val_ex = _load_data(datasets, train_split, val_split, n_calib, max_train, max_val, caps, val_datasets)
 
-    agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention)
+    agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention,
+                     dtype=dtype or None)
     print("backbone %s, readout %s, preprocess %s" % (backbone, agent.model.readout, agent.prep.backend))
     hf_vol.commit()
     model, proc = agent.model, agent.processor
@@ -412,6 +414,7 @@ def finetune_long(
     restart: bool = False,
     state_every_min: float = 10.0,
     crash_at_step: int = 0,
+    dtype: str = "",
 ):
     """Multi-epoch fine-tune (vision tower frozen) with per-epoch train/val tracking and best-checkpoint keeping.
 
@@ -499,7 +502,7 @@ def finetune_long(
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
         agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention,
-                         image_split_edge=split_edge, **({"max_len": max_len} if max_len else {}))
+                         image_split_edge=split_edge, dtype=dtype or None, **({"max_len": max_len} if max_len else {}))
     print("backbone %s, readout %s, preprocess %s, split_edge %d, max_len %d" % (
         agent.cfg["backbone"], agent.model.readout, agent.prep.backend, agent.prep.split_edge, agent.cfg["max_len"]))
     init_temps = list(agent.temperature)

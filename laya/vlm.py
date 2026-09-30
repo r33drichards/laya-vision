@@ -6,6 +6,10 @@ difference is where each option is read out (``VLMDecisionModel.readout``):
 * ``"terminator"``: a causal VLM (SmolVLM, the default), described next.
 * ``"mask"``: a bidirectional encoder VLM (ModernVBERT, ``MODERNVBERT_BACKBONE``), described at the end.
 
+A third, experimental backbone takes the ``"terminator"`` readout: NVIDIA's LocateAnything-3B
+(``LOCATE_ANYTHING_BACKBONE``, see ``laya.locate_anything``), a grounding VLM whose Qwen2.5 language model runs
+here as a plain causal decoder.
+
 The ModernBERT ``DecisionModel`` reads each option at a bidirectional ``[MASK]`` marker. A causal VLM backbone
 is a decoder, so the sequence is reordered so that every option's readout token comes AFTER all of
 the content it must see:
@@ -67,6 +71,9 @@ import torch.nn as nn
 from .calibration import Calibration, calibrate_records, checkpoint_identity, resolve_temperature
 from .common import QTYPES, confidence_from_probs, render_options, serialize_state, temp_bucket
 from .common import truncation_answer, truncation_error, truncation_report
+from .locate_anything import AGENT_DEFAULTS as LOCATE_ANYTHING_DEFAULTS
+from .locate_anything import LOCATE_ANYTHING_BACKBONE, LOCATE_ANYTHING_REVISION, LocateAnythingBackbone
+from .locate_anything import LocateAnythingConfig, LocateAnythingProcessor, is_locate_anything, is_saved_processor
 from .preprocess import ImagePrep, as_uint8_chw, prefix_ids
 
 DEFAULT_BACKBONE = "HuggingFaceTB/SmolVLM-256M-Instruct"
@@ -756,7 +763,14 @@ def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.
     branch); the commit actually loaded is ``model.encoder.config._commit_hash`` (None for a local backbone)."""
     from transformers import AutoConfig, AutoModel
 
-    if backbone_dir and os.path.exists(backbone_dir):
+    if is_locate_anything(cfg["backbone"]):
+        if backbone_dir and os.path.exists(backbone_dir):
+            backbone = LocateAnythingBackbone.from_config(LocateAnythingConfig.from_pretrained(backbone_dir),
+                                                          dtype=dtype, token=token)
+        else:
+            backbone = LocateAnythingBackbone.from_pretrained(cfg["backbone"], dtype=dtype, token=token,
+                                                              revision=revision or cfg.get("backbone_revision"))
+    elif backbone_dir and os.path.exists(backbone_dir):
         bcfg = AutoConfig.from_pretrained(backbone_dir)
         backbone = AutoModel.from_config(bcfg, attn_implementation="sdpa", dtype=dtype)
     else:
@@ -773,6 +787,18 @@ def build_vlm_model(cfg: Dict, backbone_dir: Optional[str] = None, dtype: torch.
         value_head=bool(cfg.get("value_head", False)),
         next_head=bool(cfg.get("next_head", False)),
     )
+
+
+def load_processor(path_or_id: str, revision: Optional[str] = None, token: Optional[str] = None):
+    """The backbone's processor: Hugging Face's ``AutoProcessor`` (Idefics3 for SmolVLM and ModernVBERT), or
+    ``LocateAnythingProcessor`` for a LocateAnything backbone or a saved processor directory written by one."""
+    if is_locate_anything(path_or_id) or (os.path.isdir(path_or_id) and is_saved_processor(path_or_id)):
+        return LocateAnythingProcessor.from_pretrained(path_or_id, revision=revision, token=token)
+    from transformers import AutoProcessor
+
+    if os.path.isdir(path_or_id):
+        return AutoProcessor.from_pretrained(path_or_id)
+    return AutoProcessor.from_pretrained(path_or_id, token=token, revision=revision)
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -857,7 +883,8 @@ class VLMAgent:
 
     Build fresh (untrained head) with ``VLMAgent(backbone="HuggingFaceTB/SmolVLM-256M-Instruct")`` (or
     ``backbone="ModernVBERT/modernvbert"`` for the bidirectional family) or load a saved agent with
-    ``VLMAgent("path/or/hub-id")``. ``backbone=SMOLVLM2_BACKBONE`` builds on SmolVLM2 instead. A fresh agent
+    ``VLMAgent("path/or/hub-id")``. ``backbone=SMOLVLM2_BACKBONE`` builds on SmolVLM2 instead, and
+    ``backbone=LOCATE_ANYTHING_BACKBONE`` on the experimental LocateAnything-3B (``laya.locate_anything``). A fresh agent
     takes config overrides as keywords, e.g. ``image_split_edge=2048`` for the processor's image splitting (see
     ``laya.preprocess``), which also raises ``max_len`` (``default_max_len``) unless one is given.
 
@@ -878,8 +905,6 @@ class VLMAgent:
         backbone_revision: Optional[str] = None,
         **cfg_overrides,
     ):
-        from transformers import AutoProcessor
-
         self.device = _resolve_device(device)
         self.source = {"id": model_id_or_path, "revision": None}
         self._static_provenance = None
@@ -899,6 +924,10 @@ class VLMAgent:
                 "temperature": [1.0, 1.0, 1.0],
                 "temperature_by_options": {},
             }
+            if is_locate_anything(self.cfg["backbone"]):
+                # its vision geometry (patch 14, 2x2 merge), bf16 (3.8B parameters) and the pinned Hub commit
+                self.cfg.update(LOCATE_ANYTHING_DEFAULTS, dtype=dtype or LOCATE_ANYTHING_DEFAULTS["dtype"],
+                                backbone_revision=LOCATE_ANYTHING_REVISION)
             self.cfg.update(cfg_overrides)
             # a fresh agent gets the cheap path by default; a saved one keeps whatever it was trained with
             self.prep = ImagePrep.from_config(self.cfg, default_backend="gpu")
@@ -907,8 +936,7 @@ class VLMAgent:
                 self.cfg["max_len"] = default_max_len(self.prep)
             self.model = build_vlm_model(self.cfg, dtype=self._torch_dtype(), prep=self.prep, token=token)
             self.cfg["backbone_revision"] = self._backbone_commit()
-            self.processor = AutoProcessor.from_pretrained(self.cfg["backbone"], token=token,
-                                                           revision=self.cfg["backbone_revision"])
+            self.processor = load_processor(self.cfg["backbone"], revision=self.cfg["backbone_revision"], token=token)
             self.prep.apply(self.processor)
         else:
             self._load(model_id_or_path, token, dtype, cfg_overrides, revision)
@@ -931,7 +959,6 @@ class VLMAgent:
 
     def _load(self, model_id_or_path: str, token, dtype, overrides, revision: Optional[str] = None):
         from safetensors.torch import load_file
-        from transformers import AutoProcessor
 
         model_dir = model_id_or_path
         if not os.path.exists(model_dir):
@@ -948,8 +975,8 @@ class VLMAgent:
             self.cfg["dtype"] = dtype
         self.cfg.update(overrides)
         proc_dir = os.path.join(model_dir, "processor")
-        self.processor = AutoProcessor.from_pretrained(proc_dir) if os.path.exists(proc_dir) else \
-            AutoProcessor.from_pretrained(self.cfg["backbone"], revision=self.cfg.get("backbone_revision"))
+        self.processor = load_processor(proc_dir) if os.path.exists(proc_dir) else \
+            load_processor(self.cfg["backbone"], revision=self.cfg.get("backbone_revision"))
         # honour the checkpoint's recorded input resolution and preprocessing path; a config written before
         # those keys existed means 512 through the Hugging Face processor, which is what it was trained with
         self.prep = ImagePrep.from_config(self.cfg, default_backend="processor")

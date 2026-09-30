@@ -14,6 +14,8 @@ These are **task-oriented** recipes for getting specific things done. They assum
   a scorecard.
 - [Play games with a checkpoint](play-games.md): watch a checkpoint play in a local window, and score it on the games
   suite.
+- [Try the LocateAnything backbone](locate-anything-backbone.md): build and fine-tune on NVIDIA's LocateAnything-3B
+  instead of SmolVLM (experimental, non-commercial weights).
 
 ## See also
 
