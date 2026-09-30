@@ -450,6 +450,10 @@ def collate_vlm(items: List[Dict], pad_id: int, with_pixels: bool = True) -> Dic
         # value-head targets in [0, 1]; NaN marks the rows that have none (the loss skips them)
         res["value"] = torch.tensor([float(it["value"]) if it.get("value") is not None else float("nan")
                                      for it in items], dtype=torch.float32)
+    if any(it.get("advantage") is not None for it in items):
+        # policy-gradient advantages (laya.vlm_train.pg_loss); NaN marks the ordinary rows
+        res["advantage"] = torch.tensor([float(it["advantage"]) if it.get("advantage") is not None else float("nan")
+                                         for it in items], dtype=torch.float32)
     if any(it.get("next_target") is not None for it in items):
         # next-move targets over each row's options; a NaN row marks an item without one (the loss skips it)
         nt = torch.zeros((n, kmax), dtype=torch.float32)

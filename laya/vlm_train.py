@@ -146,6 +146,8 @@ def make_item(
                              % (k, ex["next_target"]))
         total = sum(nt)
         it["next_target"] = [nt[i] / total for i in order]  # permuted to marker order, like the target
+    if ex.get("advantage") is not None:  # policy-gradient row: the target is one-hot on the answer that was taken
+        it["advantage"] = float(ex["advantage"])
     return it
 
 
@@ -193,6 +195,19 @@ def vlm_loss(logits, target, qtype, mask, sigma: float = 0.3, group_size: int = 
         eu = p_act * (c_ok * y + c_bad * (1 - y)) + (1 - p_act) * c_esc
         loss = loss - eu.mean()
     return loss, r.mean()
+
+
+def pg_loss(logits, target, mask, advantage):
+    """REINFORCE on outcome rewards (RLVR): ``-mean(advantage * log p(taken answer))`` over the rows that carry an
+    advantage, where the taken answer is the row's one-hot target (the level the policy sampled when it acted) and
+    the advantage its return relative to the other rollouts of the same situation (group-relative, GRPO-style,
+    computed by whoever built the rows). -> (loss, row mask)."""
+    has = ~torch.isnan(advantage)
+    if not bool(has.any()):
+        return logits.sum() * 0.0, has
+    lp = torch.log_softmax(logits.float()[has].masked_fill(~mask[has], -1e4), -1)
+    taken = target[has].argmax(-1, keepdim=True)
+    return -(advantage[has].to(lp.device) * lp.gather(1, taken).squeeze(1)).mean(), has
 
 
 def value_loss(value_logits: Optional[torch.Tensor], value: Optional[torch.Tensor], w_value: float = 1.0):
@@ -355,6 +370,7 @@ def train(
     mix_alpha: float = 0.0,
     w_value: float = 1.0,
     w_next: float = 0.15,
+    w_pg: float = 1.0,
 ) -> List[float]:
     """Single-device loop; stops at ``steps``, ``max_minutes``, or when every dataset hits ``max_passes``.
 
@@ -481,9 +497,18 @@ def train(
         b = _to(batch, device, dtype)
         with torch.autocast(device.type, dtype=torch.bfloat16, enabled=amp):
             logits, act = _forward(model, b)
-        loss, reward = vlm_loss(logits, b["target"], b["qtype"], b["marker_mask"], sigma=sigma_now,
-                                group_size=group_size, w_ce=w_ce_now, w_sph=w_sph,
-                                act_logits=act if train_act else None)
+        if b.get("advantage") is not None:  # outcome-reward rows get the policy gradient, the rest the usual loss
+            lpg, rl = pg_loss(logits, b["target"], b["marker_mask"], b["advantage"].to(device))
+            sup = ~rl
+            loss, reward = (vlm_loss(logits[sup], b["target"][sup], b["qtype"][sup], b["marker_mask"][sup],
+                                     sigma=sigma_now, group_size=group_size, w_ce=w_ce_now, w_sph=w_sph,
+                                     act_logits=act[sup] if train_act else None)
+                            if bool(sup.any()) else (logits.sum() * 0.0, torch.zeros((), device=device)))
+            loss = loss + w_pg * lpg
+        else:
+            loss, reward = vlm_loss(logits, b["target"], b["qtype"], b["marker_mask"], sigma=sigma_now,
+                                    group_size=group_size, w_ce=w_ce_now, w_sph=w_sph,
+                                    act_logits=act if train_act else None)
         if not train_act:
             loss = loss + 0.0 * act.float().sum()
         loss = loss + value_loss(model.last_value, b.get("value"), w_value)
@@ -561,6 +586,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
         ex["value"] = float(rec["value"])
     if rec.get("next_target") is not None:  # optional next-move-head target, checked by make_item
         ex["next_target"] = [float(p) for p in rec["next_target"]]
+    if rec.get("advantage") is not None:  # optional policy-gradient row (pg_loss): label = the answer taken
+        ex["advantage"] = float(rec["advantage"])
     return ex
 
 
