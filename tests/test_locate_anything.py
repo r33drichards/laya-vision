@@ -222,5 +222,9 @@ def test_real_checkpoint(tmp_path):
         f = [a.model.encode_raw_images(np.asarray(img)[None]) for img in (red, blue)]
     assert f[0].shape == (1, 256, 2048) and not torch.allclose(f[0], f[1])
     a.save(str(tmp_path), include_backbone=False)
+    del a, f  # two 3.8B models at once do not fit a 16 GB machine
+    import gc
+
+    gc.collect()
     b = VLMAgent(str(tmp_path), device=dev)
     assert b.cfg["backbone_revision"] == LOCATE_ANYTHING_REVISION
