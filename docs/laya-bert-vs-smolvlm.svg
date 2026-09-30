@@ -1,146 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 760" font-family="Helvetica, Arial, sans-serif" font-size="13" role="img" aria-label="Before and after. Before: upstream Laya reads text only. Its state and typed question are packed into one ModernBERT-large sequence, [CLS] question [SEP] [MASK] option ... [SEP] state [SEP], encoded bidirectionally, and each option is read at its [MASK]. After: Laya Vision adds an image. A SigLIP vision tower turns a 512 pixel image into 64 tokens that join the state and question in a SmolVLM-256M sequence, the options go last, and each option is read at the newline that ends its line; the recommended checkpoint cuts the language model to 20 of 30 layers and lets options attend to each other. Both share the decision head, the typed predict API with choice, score and noul questions, the RLCD objective and temperature calibration.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 300" font-family="Helvetica, Arial, sans-serif" font-size="15" role="img" aria-label="Before: Laya takes text and a question, runs ModernBERT, and returns typed answers. After: Laya Vision takes an image, text and a question, runs SmolVLM, and returns the same typed answers.">
   <defs>
-    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M0,0 L10,5 L0,10 z" fill="#555"/>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
     </marker>
   </defs>
-  <rect width="1000" height="760" fill="#ffffff"/>
+  <rect width="760" height="300" fill="#fff"/>
 
-  <text x="500" y="34" text-anchor="middle" font-size="22" font-weight="bold" fill="#222">Laya with BERT → Laya Vision with SmolVLM</text>
-  <text x="500" y="56" text-anchor="middle" font-size="13" fill="#666">Same typed, calibrated, one-forward-pass decisions; the text encoder is swapped for a small vision-language model</text>
+  <!-- Before -->
+  <text x="30" y="46" font-size="13" font-weight="bold" fill="#5b6f9e" letter-spacing="1.5">BEFORE · Laya</text>
+  <rect x="30" y="62" width="180" height="60" rx="8" fill="#fff" stroke="#999"/>
+  <text x="120" y="89" text-anchor="middle" fill="#333">text</text>
+  <text x="120" y="109" text-anchor="middle" fill="#333">+ question</text>
+  <line x1="210" y1="92" x2="268" y2="92" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="272" y="62" width="200" height="60" rx="8" fill="#5b6f9e"/>
+  <text x="372" y="98" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">ModernBERT</text>
+  <line x1="472" y1="92" x2="530" y2="92" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
 
-  <!-- ============ BEFORE ============ -->
-  <rect x="20" y="76" width="470" height="470" rx="10" fill="#f4f6fb" stroke="#8a9bc4"/>
-  <text x="40" y="104" font-size="12" font-weight="bold" fill="#5b6f9e" letter-spacing="1.5">BEFORE</text>
-  <text x="40" y="126" font-size="18" font-weight="bold" fill="#222">Laya (upstream): text only</text>
+  <!-- After -->
+  <text x="30" y="176" font-size="13" font-weight="bold" fill="#4c8a4c" letter-spacing="1.5">AFTER · Laya Vision</text>
+  <rect x="30" y="192" width="180" height="60" rx="8" fill="#fff" stroke="#999"/>
+  <text x="120" y="219" text-anchor="middle" fill="#333"><tspan font-weight="bold">image</tspan> + text</text>
+  <text x="120" y="239" text-anchor="middle" fill="#333">+ question</text>
+  <line x1="210" y1="222" x2="268" y2="222" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="272" y="192" width="200" height="60" rx="8" fill="#4c8a4c"/>
+  <text x="372" y="228" text-anchor="middle" font-size="17" font-weight="bold" fill="#fff">SmolVLM</text>
+  <line x1="472" y1="222" x2="530" y2="222" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
 
-  <!-- inputs -->
-  <rect x="40" y="142" width="200" height="54" rx="6" fill="#fff" stroke="#999"/>
-  <text x="140" y="164" text-anchor="middle" font-weight="bold" fill="#333">state</text>
-  <text x="140" y="182" text-anchor="middle" fill="#555">text / JSON / conversation</text>
-  <rect x="270" y="142" width="200" height="54" rx="6" fill="#fff" stroke="#999"/>
-  <text x="370" y="164" text-anchor="middle" font-weight="bold" fill="#333">question</text>
-  <text x="370" y="182" text-anchor="middle" fill="#555">choice | score | noul</text>
-  <line x1="140" y1="196" x2="200" y2="226" stroke="#555" marker-end="url(#arr)"/>
-  <line x1="370" y1="196" x2="310" y2="226" stroke="#555" marker-end="url(#arr)"/>
-
-  <!-- sequence -->
-  <text x="40" y="244" font-size="12" fill="#666">sequence (build_sequence)</text>
-  <g font-family="Menlo, Consolas, monospace" font-size="11">
-    <rect x="40"  y="252" width="44" height="26" rx="3" fill="#dde3f0" stroke="#8a9bc4"/><text x="62"  y="269" text-anchor="middle">[CLS]</text>
-    <rect x="88"  y="252" width="62" height="26" rx="3" fill="#fff4d6" stroke="#d4a72c"/><text x="119" y="269" text-anchor="middle">question</text>
-    <rect x="154" y="252" width="44" height="26" rx="3" fill="#dde3f0" stroke="#8a9bc4"/><text x="176" y="269" text-anchor="middle">[SEP]</text>
-    <rect x="202" y="252" width="50" height="26" rx="3" fill="#e05d5d" stroke="#b03a3a"/><text x="227" y="269" text-anchor="middle" fill="#fff">[MASK]</text>
-    <rect x="256" y="252" width="40" height="26" rx="3" fill="#e8f3e8" stroke="#6aa06a"/><text x="276" y="269" text-anchor="middle">opt</text>
-    <rect x="300" y="252" width="50" height="26" rx="3" fill="#e05d5d" stroke="#b03a3a"/><text x="325" y="269" text-anchor="middle" fill="#fff">[MASK]</text>
-    <rect x="354" y="252" width="40" height="26" rx="3" fill="#e8f3e8" stroke="#6aa06a"/><text x="374" y="269" text-anchor="middle">opt</text>
-    <text x="400" y="269">…</text>
-    <rect x="414" y="252" width="56" height="26" rx="3" fill="#f0e6f5" stroke="#9b72b0"/><text x="442" y="269" text-anchor="middle">state</text>
-  </g>
-  <text x="40" y="298" font-size="11" fill="#b03a3a">each option is read at its [MASK]</text>
-
-  <line x1="255" y1="306" x2="255" y2="330" stroke="#555" marker-end="url(#arr)"/>
-
-  <!-- encoder -->
-  <rect x="40" y="334" width="430" height="84" rx="8" fill="#5b6f9e"/>
-  <text x="255" y="360" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff">ModernBERT-large encoder</text>
-  <text x="255" y="381" text-anchor="middle" fill="#e8ecf6">28 layers · d = 1024 · bidirectional</text>
-  <text x="255" y="400" text-anchor="middle" fill="#e8ecf6">every [MASK] sees question, state and every other option</text>
-
-  <!-- facts -->
-  <g font-size="12.5" fill="#333">
-    <text x="40" y="446">✗  no image input</text>
-    <text x="40" y="468">•  budgets: max_len 512, question + options 192</text>
-    <text x="40" y="490">•  encoder alone ≈ 395M parameters</text>
-    <text x="40" y="512">•  text decisions only</text>
-  </g>
-
-  <!-- arrow between panels -->
-  <path d="M492,310 L508,310" stroke="#555" stroke-width="3" marker-end="url(#arr)"/>
-
-  <!-- ============ AFTER ============ -->
-  <rect x="510" y="76" width="470" height="470" rx="10" fill="#f2f8f3" stroke="#6aa06a"/>
-  <text x="530" y="104" font-size="12" font-weight="bold" fill="#4c8a4c" letter-spacing="1.5">AFTER</text>
-  <text x="530" y="126" font-size="18" font-weight="bold" fill="#222">Laya Vision (this repo): image + text</text>
-
-  <!-- inputs -->
-  <rect x="530" y="142" width="130" height="54" rx="6" fill="#fff" stroke="#999"/>
-  <text x="595" y="164" text-anchor="middle" font-weight="bold" fill="#333">image</text>
-  <text x="595" y="182" text-anchor="middle" fill="#555">photo / game frame</text>
-  <rect x="670" y="142" width="140" height="54" rx="6" fill="#fff" stroke="#999"/>
-  <text x="740" y="164" text-anchor="middle" font-weight="bold" fill="#333">state</text>
-  <text x="740" y="182" text-anchor="middle" fill="#555">optional text</text>
-  <rect x="820" y="142" width="140" height="54" rx="6" fill="#fff" stroke="#999"/>
-  <text x="890" y="164" text-anchor="middle" font-weight="bold" fill="#333">question</text>
-  <text x="890" y="182" text-anchor="middle" fill="#555">choice | score | noul</text>
-
-  <line x1="595" y1="196" x2="595" y2="208" stroke="#555"/>
-  <rect x="530" y="208" width="130" height="26" rx="4" fill="#2f7d6d"/>
-  <text x="595" y="225" text-anchor="middle" font-size="11" fill="#fff">SigLIP → 64 tokens</text>
-  <line x1="595" y1="234" x2="595" y2="248" stroke="#555" marker-end="url(#arr)"/>
-  <line x1="740" y1="196" x2="700" y2="248" stroke="#555" marker-end="url(#arr)"/>
-  <line x1="890" y1="196" x2="800" y2="248" stroke="#555" marker-end="url(#arr)"/>
-
-  <!-- sequence -->
-  <g font-family="Menlo, Consolas, monospace" font-size="11">
-    <rect x="530" y="252" width="62" height="26" rx="3" fill="#cfe8e2" stroke="#2f7d6d"/><text x="561" y="269" text-anchor="middle">img×64</text>
-    <rect x="596" y="252" width="50" height="26" rx="3" fill="#f0e6f5" stroke="#9b72b0"/><text x="621" y="269" text-anchor="middle">state</text>
-    <rect x="650" y="252" width="66" height="26" rx="3" fill="#fff4d6" stroke="#d4a72c"/><text x="683" y="269" text-anchor="middle">question</text>
-    <rect x="720" y="252" width="52" height="26" rx="3" fill="#e8f3e8" stroke="#6aa06a"/><text x="746" y="269" text-anchor="middle">- opt</text>
-    <rect x="776" y="252" width="30" height="26" rx="3" fill="#e05d5d" stroke="#b03a3a"/><text x="791" y="269" text-anchor="middle" fill="#fff">\n</text>
-    <rect x="810" y="252" width="52" height="26" rx="3" fill="#e8f3e8" stroke="#6aa06a"/><text x="836" y="269" text-anchor="middle">- opt</text>
-    <rect x="866" y="252" width="30" height="26" rx="3" fill="#e05d5d" stroke="#b03a3a"/><text x="881" y="269" text-anchor="middle" fill="#fff">\n</text>
-    <text x="902" y="269">…</text>
-  </g>
-  <text x="530" y="298" font-size="11" fill="#b03a3a">options go last; each is read at the \n that ends its line</text>
-
-  <line x1="745" y1="306" x2="745" y2="330" stroke="#555" marker-end="url(#arr)"/>
-
-  <!-- backbone -->
-  <rect x="530" y="334" width="430" height="84" rx="8" fill="#4c8a4c"/>
-  <text x="745" y="360" text-anchor="middle" font-size="16" font-weight="bold" fill="#fff">SmolVLM-256M (SigLIP + SmolLM2)</text>
-  <text x="745" y="381" text-anchor="middle" fill="#e6f2e6">language model cut to 20 of 30 layers · d = 576</text>
-  <text x="745" y="400" text-anchor="middle" fill="#e6f2e6">causal, except options attend to each other</text>
-
-  <!-- facts -->
-  <g font-size="12.5" fill="#333">
-    <text x="530" y="446">✓  image input, one 512-px tile = 64 tokens</text>
-    <text x="530" y="468">•  budgets: max_len 1024, question + options 256</text>
-    <text x="530" y="490">•  201M parameters in total · 41 ms per predict on an L4</text>
-    <text x="530" y="512">•  also plays games from pixels: screen = image, buttons = options</text>
-  </g>
-
-  <!-- ============ SHARED ============ -->
-  <line x1="255" y1="546" x2="255" y2="578" stroke="#555" marker-end="url(#arr)"/>
-  <line x1="745" y1="546" x2="745" y2="578" stroke="#555" marker-end="url(#arr)"/>
-  <rect x="20" y="582" width="960" height="150" rx="10" fill="#fafafa" stroke="#bbb" stroke-dasharray="6 4"/>
-  <text x="500" y="608" text-anchor="middle" font-size="12" font-weight="bold" fill="#777" letter-spacing="1.5">UNCHANGED FROM LAYA</text>
-
-  <g font-size="12.5" fill="#333">
-    <rect x="40"  y="622" width="220" height="92" rx="6" fill="#fff" stroke="#ccc"/>
-    <text x="150" y="644" text-anchor="middle" font-weight="bold">decision head</text>
-    <text x="150" y="664" text-anchor="middle">+ type embedding</text>
-    <text x="150" y="682" text-anchor="middle">2 bidirectional layers</text>
-    <text x="150" y="700" text-anchor="middle">one logit per option marker</text>
-
-    <rect x="276" y="622" width="220" height="92" rx="6" fill="#fff" stroke="#ccc"/>
-    <text x="386" y="644" text-anchor="middle" font-weight="bold">predict(state, questions)</text>
-    <text x="386" y="664" text-anchor="middle">choice → option + probs</text>
-    <text x="386" y="682" text-anchor="middle">score → expected level</text>
-    <text x="386" y="700" text-anchor="middle">noul → P(true)</text>
-
-    <rect x="512" y="622" width="220" height="92" rx="6" fill="#fff" stroke="#ccc"/>
-    <text x="622" y="644" text-anchor="middle" font-weight="bold">RLCD training objective</text>
-    <text x="622" y="664" text-anchor="middle">proper-scoring-rule</text>
-    <text x="622" y="682" text-anchor="middle">policy gradient</text>
-    <text x="622" y="700" text-anchor="middle">+ decide / escalate head</text>
-
-    <rect x="748" y="622" width="212" height="92" rx="6" fill="#fff" stroke="#ccc"/>
-    <text x="854" y="644" text-anchor="middle" font-weight="bold">temperature calibration</text>
-    <text x="854" y="664" text-anchor="middle">per question type</text>
-    <text x="854" y="682" text-anchor="middle">probabilities usable</text>
-    <text x="854" y="700" text-anchor="middle">at face value</text>
-  </g>
-
-  <text x="500" y="752" text-anchor="middle" font-size="11" fill="#888">One forward pass, no text generation, in both. Details: site-docs/concepts/architecture.md</text>
+  <!-- Shared output -->
+  <rect x="534" y="62" width="196" height="190" rx="8" fill="#fafafa" stroke="#bbb" stroke-dasharray="6 4"/>
+  <text x="632" y="120" text-anchor="middle" font-weight="bold" fill="#333">same typed answers</text>
+  <text x="632" y="150" text-anchor="middle" fill="#555">choice · score · noul</text>
+  <text x="632" y="174" text-anchor="middle" fill="#555">calibrated probabilities</text>
+  <text x="632" y="198" text-anchor="middle" fill="#555">one forward pass</text>
 </svg>
