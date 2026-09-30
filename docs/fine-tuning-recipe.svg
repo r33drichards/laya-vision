@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 380" font-family="Helvetica, Arial, sans-serif" font-size="13" role="img" aria-label="Fine-tuning recipe for your own data. Step 1: prepare typed questions as train and val JSONL with images. Step 2: run finetune_long with init-from a Laya Vision checkpoint and your dataset; the language model and head train, the vision tower stays frozen, and the best checkpoint by validation accuracy is kept. Step 3: temperatures are fitted on a calibration holdout; question types missing from your data keep the starting checkpoint's temperature. Optional step 4, with no training: agent.calibrate on a few hundred of your labelled questions refits the temperatures for your threshold. The result is your checkpoint, used with predict as before.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 310" font-family="Helvetica, Arial, sans-serif" font-size="13" role="img" aria-label="Fine-tuning recipe for your own data. Step 1: prepare typed questions as train and val JSONL with images. Step 2: run finetune_long with init-from a Laya Vision checkpoint and your dataset; the language model and head train, the vision tower stays frozen, and the best checkpoint by validation accuracy is kept. Step 3: temperatures are fitted on a calibration holdout; question types missing from your data keep the starting checkpoint's temperature. The result is your checkpoint, used with predict as before.">
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
     </marker>
   </defs>
-  <rect width="1000" height="380" fill="#fff"/>
+  <rect width="1000" height="310" fill="#fff"/>
 
   <text x="30" y="40" font-size="20" font-weight="bold" fill="#222">Fine-tuning recipe: Laya Vision → your task</text>
   <text x="30" y="62" fill="#666">Start from a released checkpoint and train on your own typed questions</text>
@@ -51,8 +51,4 @@
   <text x="875" y="198" text-anchor="middle" fill="#555">agent.predict(state,</text>
   <text x="875" y="216" text-anchor="middle" fill="#555">questions)</text>
 
-  <!-- optional shortcut -->
-  <rect x="30" y="302" width="940" height="52" rx="8" fill="#fafafa" stroke="#bbb" stroke-dasharray="6 4"/>
-  <text x="46" y="324" font-weight="bold" fill="#444">No GPU? Skip step 2.</text>
-  <text x="46" y="343" fill="#555"><tspan font-family="Menlo, Consolas, monospace" font-size="12">agent.calibrate(rows)</tspan> refits only the temperatures on a few hundred of your labelled questions: better probabilities, same weights.</text>
 </svg>
