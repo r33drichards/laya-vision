@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 380" font-family="Helvetica, Arial, sans-serif" font-size="13" role="img" aria-label="Post-training recipe for thaitea/laya-vision. Start from SmolVLM-256M-Instruct. Stage 1, finetune_long run cauldron-score-2ep-bidir-full: 19 Cauldron subsets and 4 rubric sets with VLFeedback weighted 3x, block option attention, language model and head trained with the vision tower frozen, 2 epochs, 30,080 steps at batch 32, 180 minutes on an A100, then temperatures fitted; this gives laya-vision-smolvlm-256m-score, 237M parameters. Stage 2, autoresearch long run: cut the language model to its first 20 of 30 layers, train on the same pool with 45 percent of draws from games, batch 64, 28,414 steps in 120 minutes on an H100, vision tower still frozen, then fit temperatures; this gives laya-vision, 201M parameters.">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="380" fill="#fff"/>
+
+  <text x="30" y="40" font-size="20" font-weight="bold" fill="#222">Post-training recipe: SmolVLM → Laya Vision</text>
+  <text x="30" y="62" fill="#666">How the recommended checkpoint, thaitea/laya-vision, was made</text>
+
+  <!-- start -->
+  <rect x="30" y="150" width="130" height="80" rx="8" fill="#fff" stroke="#999"/>
+  <text x="95" y="178" text-anchor="middle" font-weight="bold" fill="#333">SmolVLM-256M</text>
+  <text x="95" y="196" text-anchor="middle" fill="#555">Instruct</text>
+  <text x="95" y="214" text-anchor="middle" fill="#888" font-size="12">pretrained</text>
+  <line x1="160" y1="190" x2="186" y2="190" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- stage 1 -->
+  <rect x="190" y="90" width="270" height="200" rx="8" fill="#5b6f9e"/>
+  <text x="206" y="116" font-size="12" font-weight="bold" fill="#dfe5f3" letter-spacing="1.2">STAGE 1 · TEACH THE TASK</text>
+  <g fill="#fff">
+    <text x="206" y="144">19 Cauldron subsets + 4 rubric sets</text>
+    <text x="206" y="166">options attend to each other</text>
+    <text x="206" y="188">train LM + head, vision frozen</text>
+    <text x="206" y="210">2 epochs · batch 32 · 30k steps</text>
+    <text x="206" y="232">180 min on an A100</text>
+    <text x="206" y="264" font-weight="bold">→ fit temperatures</text>
+  </g>
+  <line x1="460" y1="190" x2="486" y2="190" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- intermediate checkpoint -->
+  <rect x="490" y="150" width="130" height="80" rx="8" fill="#fff" stroke="#5b6f9e" stroke-width="1.5"/>
+  <text x="555" y="178" text-anchor="middle" font-weight="bold" fill="#333">…-256m-score</text>
+  <text x="555" y="196" text-anchor="middle" fill="#555">30 layers</text>
+  <text x="555" y="214" text-anchor="middle" fill="#555">237M</text>
+  <line x1="620" y1="190" x2="646" y2="190" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- stage 2 -->
+  <rect x="650" y="90" width="200" height="200" rx="8" fill="#4c8a4c"/>
+  <text x="666" y="116" font-size="12" font-weight="bold" fill="#dcefdc" letter-spacing="0.6">STAGE 2 · SHRINK + PLAY</text>
+  <g fill="#fff">
+    <text x="666" y="144">cut LM to 20 of 30 layers</text>
+    <text x="666" y="166">same data, 45% games</text>
+    <text x="666" y="188">vision still frozen</text>
+    <text x="666" y="210">batch 64 · 28k steps</text>
+    <text x="666" y="232">120 min on an H100</text>
+    <text x="666" y="264" font-weight="bold">→ fit temperatures</text>
+  </g>
+  <line x1="850" y1="190" x2="866" y2="190" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- result -->
+  <rect x="870" y="150" width="110" height="80" rx="8" fill="#fff" stroke="#4c8a4c" stroke-width="2.5"/>
+  <text x="925" y="178" text-anchor="middle" font-weight="bold" fill="#333">laya-vision</text>
+  <text x="925" y="196" text-anchor="middle" fill="#555">20 layers</text>
+  <text x="925" y="214" text-anchor="middle" fill="#555">201M</text>
+
+  <!-- loss -->
+  <rect x="190" y="310" width="660" height="44" rx="8" fill="#fafafa" stroke="#bbb" stroke-dasharray="6 4"/>
+  <text x="520" y="337" text-anchor="middle" fill="#444">Both stages use the same loss: proper-scoring-rule policy gradient + soft cross-entropy + decide/escalate head</text>
+</svg>

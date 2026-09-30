@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 380" font-family="Helvetica, Arial, sans-serif" font-size="13" role="img" aria-label="Fine-tuning recipe for your own data. Step 1: prepare typed questions as train and val JSONL with images. Step 2: run finetune_long with init-from a Laya Vision checkpoint and your dataset; the language model and head train, the vision tower stays frozen, and the best checkpoint by validation accuracy is kept. Step 3: temperatures are fitted on a calibration holdout; question types missing from your data keep the starting checkpoint's temperature. Optional step 4, with no training: agent.calibrate on a few hundred of your labelled questions refits the temperatures for your threshold. The result is your checkpoint, used with predict as before.">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#666"/>
+    </marker>
+  </defs>
+  <rect width="1000" height="380" fill="#fff"/>
+
+  <text x="30" y="40" font-size="20" font-weight="bold" fill="#222">Fine-tuning recipe: Laya Vision → your task</text>
+  <text x="30" y="62" fill="#666">Start from a released checkpoint and train on your own typed questions</text>
+
+  <!-- step 1 -->
+  <rect x="30" y="100" width="200" height="180" rx="8" fill="#fff" stroke="#999"/>
+  <text x="46" y="126" font-size="12" font-weight="bold" fill="#777" letter-spacing="1.2">1 · YOUR DATA</text>
+  <g fill="#333">
+    <text x="46" y="154">image + state</text>
+    <text x="46" y="176">typed question:</text>
+    <text x="46" y="198">choice · score · noul</text>
+    <text x="46" y="220">+ the right answer</text>
+    <text x="46" y="256" font-family="Menlo, Consolas, monospace" font-size="11" fill="#666">train.jsonl · val.jsonl</text>
+  </g>
+  <line x1="230" y1="190" x2="256" y2="190" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- step 2 -->
+  <rect x="260" y="100" width="260" height="180" rx="8" fill="#4c8a4c"/>
+  <text x="276" y="126" font-size="12" font-weight="bold" fill="#dcefdc" letter-spacing="1.2">2 · FINE-TUNE</text>
+  <g fill="#fff">
+    <text x="276" y="154">start from a Laya Vision checkpoint</text>
+    <text x="276" y="176">train LM + head, vision frozen</text>
+    <text x="276" y="198">same loss as post-training</text>
+    <text x="276" y="220">keep the best val checkpoint</text>
+    <text x="276" y="256" font-family="Menlo, Consolas, monospace" font-size="11" fill="#dcefdc">finetune_long --init-from</text>
+  </g>
+  <line x1="520" y1="190" x2="546" y2="190" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- step 3 -->
+  <rect x="550" y="100" width="200" height="180" rx="8" fill="#5b6f9e"/>
+  <text x="566" y="126" font-size="12" font-weight="bold" fill="#dfe5f3" letter-spacing="1.2">3 · CALIBRATE</text>
+  <g fill="#fff">
+    <text x="566" y="154">fit one temperature</text>
+    <text x="566" y="176">per question type</text>
+    <text x="566" y="198">on a held-out slice</text>
+    <text x="566" y="220">missing types keep</text>
+    <text x="566" y="242">the start's temperature</text>
+  </g>
+  <line x1="750" y1="190" x2="776" y2="190" stroke="#666" stroke-width="2" marker-end="url(#a)"/>
+
+  <!-- result -->
+  <rect x="780" y="140" width="190" height="100" rx="8" fill="#fff" stroke="#4c8a4c" stroke-width="2.5"/>
+  <text x="875" y="176" text-anchor="middle" font-weight="bold" fill="#333">your checkpoint</text>
+  <text x="875" y="198" text-anchor="middle" fill="#555">agent.predict(state,</text>
+  <text x="875" y="216" text-anchor="middle" fill="#555">questions)</text>
+
+  <!-- optional shortcut -->
+  <rect x="30" y="302" width="940" height="52" rx="8" fill="#fafafa" stroke="#bbb" stroke-dasharray="6 4"/>
+  <text x="46" y="324" font-weight="bold" fill="#444">No GPU? Skip step 2.</text>
+  <text x="46" y="343" fill="#555"><tspan font-family="Menlo, Consolas, monospace" font-size="12">agent.calibrate(rows)</tspan> refits only the temperatures on a few hundred of your labelled questions: better probabilities, same weights.</text>
+</svg>
