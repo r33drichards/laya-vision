@@ -21,8 +21,8 @@ preprocessing backends serve it. The sequence framing is ``laya.vlm``'s (the ima
 ``<img><IMG_CONTEXT>...</img>``), not Qwen's chat template: the head is trained on top either way.
 
 Licence: the weights are under the NVIDIA License, non-commercial research use only (Qwen Research License for
-the language model). Anything fine-tuned from them inherits that; do not publish such a checkpoint as the
-Apache-licensed ``thaitea/laya-vision``.
+the language model). Anything fine-tuned from them inherits that, on top of the CC BY-NC-SA 4.0 that Laya
+Vision's weights already carry.
 """
 import json
 import os

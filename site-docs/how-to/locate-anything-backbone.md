@@ -7,8 +7,8 @@ are unchanged. No checkpoint has been trained or evaluated on it yet, so there a
 
 **Licence.** The LocateAnything weights are under the
 [NVIDIA License](https://huggingface.co/nvidia/LocateAnything-3B/blob/main/LICENSE), for non-commercial research
-only, and the language model is under the Qwen Research License. A model fine-tuned from them inherits those terms.
-Do not publish one as `thaitea/laya-vision` or under Apache-2.0.
+only, and the language model is under the Qwen Research License. A model fine-tuned from them inherits those terms on
+top of the CC BY-NC-SA 4.0 that Laya Vision's weights already carry.
 
 ## What changes
 
