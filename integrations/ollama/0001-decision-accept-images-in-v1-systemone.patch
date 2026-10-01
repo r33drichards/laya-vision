@@ -1,0 +1,679 @@
+From 978ba583d94de9834f6d968f08513e3ec5d931b7 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 1 Oct 2026 19:26:25 +0000
+Subject: [PATCH] decision: accept images in /v1/systemone
+
+Add an images field to System One requests, base64 like /api/generate. Every
+question carries the images on its user message, so prompts render through the
+same image tagging as chat (imageTaggedMessages), and the request needs a model
+with the vision capability.
+
+The llama-server scorer sends rows with media as multimodal prompts: each
+[img-N] tag is replaced by the runner's media marker and must appear exactly
+once and in order. Those rows skip the token-id primer (llama-server's prompt
+cache still reuses the shared prefix), and usage counts the embedded image
+positions llama-server reports.
+
+The 64 KiB cap still applies to the text of the request; base64 images may add
+up to 32 MiB.
+---
+ decision/systemone.go          |   7 ++-
+ decision/systemone_test.go     |  36 ++++++++++++
+ decision/types.go              |   3 +
+ docs/capabilities/decision.mdx |  19 ++++++
+ docs/openapi.yaml              |  15 +++--
+ llm/llama_server_score.go      |  91 ++++++++++++++++++++++++-----
+ llm/llama_server_score_test.go |  64 ++++++++++++++++++++
+ llm/score.go                   |   3 +
+ server/routes.go               |  44 ++++++++++++--
+ server/systemone_test.go       | 104 +++++++++++++++++++++++++++++++++
+ 10 files changed, 361 insertions(+), 25 deletions(-)
+
+diff --git a/decision/systemone.go b/decision/systemone.go
+index 8f07da7..e31e116 100644
+--- a/decision/systemone.go
++++ b/decision/systemone.go
+@@ -41,6 +41,11 @@ func Compile(req Request) (*Compiled, error) {
+ 	if strings.TrimSpace(context) == "" {
+ 		return nil, fmt.Errorf("state must not be empty")
+ 	}
++	for i, image := range req.Images {
++		if len(image) == 0 {
++			return nil, fmt.Errorf("image %d must not be empty", i)
++		}
++	}
+ 	c := &Compiled{}
+ 	for name, q := range req.Questions.All() {
+ 		f, err := compileField(name, q)
+@@ -62,7 +67,7 @@ func Compile(req Request) (*Compiled, error) {
+ 			return nil, err
+ 		}
+ 		c.messages = append(c.messages, []api.Message{
+-			{Role: "user", Content: string(data) + "\n\nRequested field: " + string(name)},
++			{Role: "user", Content: string(data) + "\n\nRequested field: " + string(name), Images: req.Images},
+ 		})
+ 		var row llm.ScoreRow
+ 		for _, choice := range f.Choices {
+diff --git a/decision/systemone_test.go b/decision/systemone_test.go
+index 3e6a16b..08a66c3 100644
+--- a/decision/systemone_test.go
++++ b/decision/systemone_test.go
+@@ -229,3 +229,39 @@ func TestContent(t *testing.T) {
+ 		}
+ 	}
+ }
++
++func TestCompileImages(t *testing.T) {
++	req := testRequest(t)
++	req.Images = []api.ImageData{[]byte("png-a"), []byte("png-b")}
++	compiled, err := Compile(req)
++	if err != nil {
++		t.Fatal(err)
++	}
++	var rendered int
++	if err := compiled.Render(func(messages []api.Message) (string, error) {
++		rendered++
++		if len(messages) != 1 || len(messages[0].Images) != 2 || string(messages[0].Images[1]) != "png-b" {
++			t.Fatalf("every question must carry the request's images in order: %+v", messages)
++		}
++		return messages[0].Content, nil
++	}); err != nil {
++		t.Fatal(err)
++	}
++	if rendered != 3 {
++		t.Fatalf("rendered %d prompts for 3 questions", rendered)
++	}
++	text, err := Compile(testRequest(t))
++	if err != nil {
++		t.Fatal(err)
++	}
++	for i := range text.messages {
++		if text.messages[i][0].Content != compiled.messages[i][0].Content {
++			t.Fatal("images must not change the prompt text the compiler builds")
++		}
++	}
++
++	req.Images = []api.ImageData{[]byte("png-a"), {}}
++	if _, err := Compile(req); err == nil || !strings.Contains(err.Error(), "image 1") {
++		t.Fatalf("an empty image must be rejected: %v", err)
++	}
++}
+diff --git a/decision/types.go b/decision/types.go
+index a3dfb64..ff9ec0c 100644
+--- a/decision/types.go
++++ b/decision/types.go
+@@ -15,6 +15,9 @@ type Request struct {
+ 	Model     string          `json:"model"`
+ 	State     json.RawMessage `json:"state"`
+ 	Questions *Questions      `json:"questions"`
++	// Images are shared by every question, like the state. They require a
++	// model with the vision capability.
++	Images    []api.ImageData `json:"images,omitempty"`
+ 	KeepAlive *api.Duration   `json:"keep_alive,omitempty"`
+ }
+ 
+diff --git a/docs/capabilities/decision.mdx b/docs/capabilities/decision.mdx
+index 5ba05da..e8812c1 100644
+--- a/docs/capabilities/decision.mdx
++++ b/docs/capabilities/decision.mdx
+@@ -110,4 +110,23 @@ curl http://localhost:11434/v1/systemone \
+ 
+ This returns a refund probability of `0.9989` and an urgency score of `0.8308` on the 0–2 scale (rounded). Results can vary with the model and configuration.
+ 
++## Ask about images
++
++A decision model with the vision capability can answer questions about images. Pass them as base64 strings in `images`, as with `/api/generate`; every question sees all of them, along with the state:
++
++```shell images.sh
++curl http://localhost:11434/v1/systemone \
++  -H 'Content-Type: application/json' \
++  -d '{
++    "model": "my-vision-decision-model",
++    "state": {"note": "The customer says the parcel arrived damaged."},
++    "images": ["'"$(base64 -w0 parcel.jpg)"'"],
++    "questions": {
++      "damaged": {"type": "noul", "instructions": "Does the parcel in the photo look damaged?"}
++    }
++  }'
++```
++
++A model without the vision capability returns 400 for a request with images. The model must be trained to answer System One prompts with images, with the image tags placed where its template puts them.
++
+ See the [API reference](/api/systemone) for request fields, limits, errors, and token usage.
+diff --git a/docs/openapi.yaml b/docs/openapi.yaml
+index 655d1ec..45de449 100644
+--- a/docs/openapi.yaml
++++ b/docs/openapi.yaml
+@@ -904,6 +904,12 @@ components:
+           description: Local model trained for System One, such as nimble. Requires compatible GGUF weights and a scoring-capable runner; cloud and MLX/Safetensors models are not supported.
+         state:
+           $ref: "#/components/schemas/SystemOneContent"
++        images:
++          type: array
++          items:
++            type: string
++            format: byte
++          description: Base64-encoded images shared by every question, like the state. Requires a model with the vision capability and weights trained to answer System One prompts with images.
+         questions:
+           type: object
+           description: Named questions about the shared state. Each is scored separately against the full state and question schema; answers are not passed to later questions.
+@@ -1034,8 +1040,9 @@ paths:
+           Currently available locally in Ollama.
+           </Note>
+ 
+-          - Returns one JSON response; streaming, images, tools, and generation controls are not supported.
+-          - Requests must fit within 64 KiB. Each rendered prompt must fit the loaded context window with two token positions left for scoring. Input is never truncated.
++          - Returns one JSON response; streaming, tools, and generation controls are not supported.
++          - Images require a model with the vision capability; every question sees all of them.
++          - Requests must fit within 64 KiB, not counting base64 images, which may add up to 32 MiB. Each rendered prompt must fit the loaded context window with two token positions left for scoring. Input is never truncated.
+       x-codeSamples:
+         - lang: bash
+           label: Choose a label
+@@ -1108,13 +1115,13 @@ paths:
+               schema:
+                 $ref: "#/components/schemas/ErrorResponse"
+         "413":
+-          description: Request body exceeds 64 KiB.
++          description: Request body exceeds 64 KiB, not counting base64 images, or the images exceed 32 MiB.
+           content:
+             application/json:
+               schema:
+                 $ref: "#/components/schemas/ErrorResponse"
+               example:
+-                error: request body must not exceed 64 KiB
++                error: request body must not exceed 64 KiB, not counting images
+         "500":
+           description: Model loading, rendering, or scoring failed.
+           content:
+diff --git a/llm/llama_server_score.go b/llm/llama_server_score.go
+index b5d64a2..9d40a35 100644
+--- a/llm/llama_server_score.go
++++ b/llm/llama_server_score.go
+@@ -3,12 +3,15 @@ package llm
+ import (
+ 	"bytes"
+ 	"context"
++	"encoding/base64"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"math"
+ 	"net/http"
+ 	"slices"
++	"strings"
+ 
+ 	"github.com/ollama/ollama/api"
+ )
+@@ -28,6 +31,9 @@ var scoreFloorLogit = float32(math.Log(math.SmallestNonzeroFloat32))
+ 
+ type scoreRowTokens struct {
+ 	tokens, candidates []int
++	// prompt is set instead of tokens being sent when the row has media:
++	// llama-server places the media at its markers in the prompt string.
++	prompt *llamaServerMultimodalPrompt
+ }
+ 
+ func (s *llamaServerRunner) Score(ctx context.Context, input ScoreRequest) (ScoreResponse, error) {
+@@ -52,12 +58,29 @@ func (s *llamaServerRunner) Score(ctx context.Context, input ScoreRequest) (Scor
+ 		return result, fmt.Errorf("unexpected server status: %s", status)
+ 	}
+ 
++	var mediaData []string
++	for _, media := range input.Media {
++		data, err := llamaServerMediaBytes(media.Data)
++		if err != nil {
++			return badRequest("%v", err)
++		}
++		mediaData = append(mediaData, base64.StdEncoding.EncodeToString(data))
++	}
++
+ 	rows := make([]scoreRowTokens, len(input.Rows))
+ 	parseSpecial, ordinary := true, false
+ 	for i, row := range input.Rows {
+ 		if len(row.Candidates) < 1 || len(row.Candidates) > 26 {
+ 			return badRequest("prompt %d requires 1–26 candidates", i)
+ 		}
++		if len(input.Media) > 0 {
++			prompt, err := s.scoreMediaPrompt(row.Prompt, input.Media)
++			if err != nil {
++				return ScoreResponse{}, fmt.Errorf("prompt %d: %w", i, err)
++			}
++			row.Prompt = prompt
++			rows[i].prompt = &llamaServerMultimodalPrompt{PromptString: prompt, MultimodalData: mediaData}
++		}
+ 		tokens, err := s.tokenize(ctx, row.Prompt, false, &parseSpecial)
+ 		if err != nil {
+ 			return result, err
+@@ -92,19 +115,25 @@ func (s *llamaServerRunner) Score(ctx context.Context, input ScoreRequest) (Scor
+ 		}
+ 	}
+ 
+-	result.OutputTokens, err = s.primeSharedPrefix(ctx, rows)
+-	if err != nil {
+-		return ScoreResponse{}, err
++	// The primer sends token ids, which cannot carry media; llama-server's own
++	// prompt cache still reuses the shared prefix of media rows.
++	if len(input.Media) == 0 {
++		result.OutputTokens, err = s.primeSharedPrefix(ctx, rows)
++		if err != nil {
++			return ScoreResponse{}, err
++		}
+ 	}
+ 
+ 	// Rows are scored in order: the first row continues from the primer.
+ 	result.Logits = make([][]float32, len(rows))
+ 	for i, row := range rows {
+-		logits, outputTokens, err := s.scoreRow(ctx, row)
++		logits, evaluated, outputTokens, err := s.scoreRow(ctx, row)
+ 		if err != nil {
+ 			return ScoreResponse{}, err
+ 		}
+ 		result.Logits[i] = logits
++		// Media is embedded as more positions than its marker has text tokens.
++		result.InputTokens += evaluated - len(row.tokens)
+ 		result.OutputTokens += outputTokens
+ 	}
+ 	return result, nil
+@@ -172,7 +201,7 @@ func (s *llamaServerRunner) primeSharedPrefix(ctx context.Context, rows []scoreR
+ // scoreCompletionRequest is the part of llama-server's /completion request
+ // that scoring uses.
+ type scoreCompletionRequest struct {
+-	Prompt            []int        `json:"prompt"`
++	Prompt            any          `json:"prompt"` // []int, or *llamaServerMultimodalPrompt
+ 	Stream            bool         `json:"stream"`
+ 	CachePrompt       bool         `json:"cache_prompt"`
+ 	NPredict          int          `json:"n_predict"`
+@@ -201,11 +230,17 @@ type scoreCompletionResponse struct {
+ // scoreRow reads every candidate from one next-token distribution. Biasing the
+ // candidates by the same amount keeps their relative logits, so the returned
+ // probabilities are the softmax over the candidates' original logits.
+-func (s *llamaServerRunner) scoreRow(ctx context.Context, row scoreRowTokens) ([]float32, int, error) {
++// It also returns the number of prompt positions evaluated, which counts media
++// as embedded.
++func (s *llamaServerRunner) scoreRow(ctx context.Context, row scoreRowTokens) ([]float32, int, int, error) {
+ 	var outputTokens int
++	var prompt any = row.tokens
++	if row.prompt != nil {
++		prompt = row.prompt
++	}
+ 	for _, bias := range []float64{scoreBias, scoreRetryBias} {
+ 		req := scoreCompletionRequest{
+-			Prompt: row.tokens, CachePrompt: true, NPredict: 1,
++			Prompt: prompt, CachePrompt: true, NPredict: 1,
+ 			NProbs: len(row.candidates), PostSamplingProbs: true,
+ 			Samplers: []string{"top_k", "temperature"}, TopK: len(row.candidates), Temperature: 1,
+ 		}
+@@ -214,10 +249,11 @@ func (s *llamaServerRunner) scoreRow(ctx context.Context, row scoreRowTokens) ([
+ 		}
+ 		output, err := s.scoreCompletion(ctx, req)
+ 		if err != nil {
+-			return nil, 0, err
++			return nil, 0, 0, err
+ 		}
+-		if output.Truncated || output.TokensEvaluated != len(row.tokens) || output.TokensPredicted != 1 || len(output.Probabilities) != 1 || len(output.Probabilities[0].TopProbs) == 0 {
+-			return nil, 0, fmt.Errorf("scoring did not evaluate the complete prompt and return one distribution")
++		evaluated := output.TokensEvaluated == len(row.tokens) || row.prompt != nil && output.TokensEvaluated > 0
++		if output.Truncated || !evaluated || output.TokensPredicted != 1 || len(output.Probabilities) != 1 || len(output.Probabilities[0].TopProbs) == 0 {
++			return nil, 0, 0, fmt.Errorf("scoring did not evaluate the complete prompt and return one distribution")
+ 		}
+ 		outputTokens += output.TokensPredicted
+ 		logits := slices.Repeat([]float32{scoreFloorLogit}, len(row.candidates))
+@@ -225,7 +261,7 @@ func (s *llamaServerRunner) scoreRow(ctx context.Context, row scoreRowTokens) ([
+ 		outranked := false
+ 		for _, p := range output.Probabilities[0].TopProbs {
+ 			if p.ID == nil || p.Prob == nil || math.IsNaN(*p.Prob) || *p.Prob <= 0 || *p.Prob > 1 {
+-				return nil, 0, fmt.Errorf("scoring returned an invalid candidate probability")
++				return nil, 0, 0, fmt.Errorf("scoring returned an invalid candidate probability")
+ 			}
+ 			j := slices.Index(row.candidates, *p.ID)
+ 			if j < 0 {
+@@ -233,16 +269,43 @@ func (s *llamaServerRunner) scoreRow(ctx context.Context, row scoreRowTokens) ([
+ 				break
+ 			}
+ 			if seen[j] {
+-				return nil, 0, fmt.Errorf("scoring returned a candidate twice")
++				return nil, 0, 0, fmt.Errorf("scoring returned a candidate twice")
+ 			}
+ 			seen[j] = true
+ 			logits[j] = max(float32(math.Log(*p.Prob)), scoreFloorLogit)
+ 		}
+ 		if !outranked {
+-			return logits, outputTokens, nil
++			return logits, output.TokensEvaluated, outputTokens, nil
++		}
++	}
++	return nil, 0, 0, fmt.Errorf("scoring candidates were outranked by other tokens")
++}
++
++// scoreMediaPrompt replaces each media item's stable [img-N] marker with
++// llama-server's media marker. Every item must appear exactly once, in order,
++// so that llama-server pairs the markers with the right data.
++func (s *llamaServerRunner) scoreMediaPrompt(prompt string, media []MediaData) (string, error) {
++	marker := s.llamaServerMediaMarker()
++	if strings.Contains(prompt, marker) {
++		return "", errors.New("prompt contains the media marker")
++	}
++	last := -1
++	for i, m := range media {
++		if m.ID != i {
++			return "", fmt.Errorf("media %d has id %d", i, m.ID)
++		}
++		tag := fmt.Sprintf("[img-%d]", m.ID)
++		at := strings.Index(prompt, tag)
++		if at < 0 || strings.Count(prompt, tag) != 1 {
++			return "", fmt.Errorf("the rendered prompt must place image %d exactly once", m.ID)
++		}
++		if at < last {
++			return "", errors.New("the rendered prompt places images out of order")
+ 		}
++		last = at
++		prompt = strings.Replace(prompt, tag, marker, 1)
+ 	}
+-	return nil, 0, fmt.Errorf("scoring candidates were outranked by other tokens")
++	return prompt, nil
+ }
+ 
+ func (s *llamaServerRunner) scoreCompletion(ctx context.Context, input scoreCompletionRequest) (scoreCompletionResponse, error) {
+diff --git a/llm/llama_server_score_test.go b/llm/llama_server_score_test.go
+index 931eca1..bbba003 100644
+--- a/llm/llama_server_score_test.go
++++ b/llm/llama_server_score_test.go
+@@ -419,3 +419,67 @@ func TestLlamaServerScoreCancellation(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestLlamaServerScoreMedia(t *testing.T) {
++	type multimodalRequest struct {
++		Prompt struct {
++			PromptString   string   `json:"prompt_string"`
++			MultimodalData []string `json:"multimodal_data"`
++		} `json:"prompt"`
++		NPredict  int          `json:"n_predict"`
++		LogitBias [][2]float64 `json:"logit_bias"`
++	}
++	var prompts []string
++	runner := newLlamaScoreTestRunner(t, func(w http.ResponseWriter, r *http.Request) {
++		var req multimodalRequest
++		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
++			t.Errorf("media rows must send llama-server's multimodal prompt object: %v", err)
++			return
++		}
++		if req.NPredict != 1 {
++			t.Errorf("media rows must not be primed: %+v", req)
++		}
++		if !slices.Equal(req.Prompt.MultimodalData, []string{"aW1nMA==", "aW1nMQ=="}) {
++			t.Errorf("media data changed or reordered: %v", req.Prompt.MultimodalData)
++		}
++		prompts = append(prompts, req.Prompt.PromptString)
++		// The two images are embedded as 70 positions instead of their markers.
++		evaluated := len(req.Prompt.PromptString) - 2*len("<m>") + 70
++		_ = json.NewEncoder(w).Encode(scoreCompletionTestResponse(evaluated, map[int]float64{'A': 0.2, 'B': 0.8}))
++	})
++	runner.mediaMarker = "<m>"
++	runner.options.NumCtx = 200
++	media := []MediaData{{ID: 0, Data: []byte("img0")}, {ID: 1, Data: []byte("img1")}}
++	result, err := runner.Score(t.Context(), ScoreRequest{MaxTokens: 200, Media: media, Rows: []ScoreRow{
++		{Prompt: "u:[img-0][img-1]shared context, field x", Candidates: []string{"A", "B"}},
++		{Prompt: "u:[img-0][img-1]shared context, field y", Candidates: []string{"A", "B"}},
++	}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if want := []string{"u:<m><m>shared context, field x", "u:<m><m>shared context, field y"}; !slices.Equal(prompts, want) {
++		t.Fatalf("markers were not replaced with llama-server's: %q", prompts)
++	}
++	text := len("u:<m><m>shared context, field x")
++	if result.InputTokens != 2*(text-6+70) || result.OutputTokens != 2 {
++		t.Fatalf("usage must count embedded media positions: %+v", result)
++	}
++	if want := []float32{float32(math.Log(0.2)), float32(math.Log(0.8))}; !reflect.DeepEqual(result.Logits[1], want) {
++		t.Fatalf("scores changed: %v", result.Logits)
++	}
++
++	for _, tt := range []struct{ name, prompt string }{
++		{"missing image", "u:[img-0]x"},
++		{"repeated image", "u:[img-0][img-1][img-1]x"},
++		{"reordered images", "u:[img-1][img-0]x"},
++		{"injected marker", "u:[img-0][img-1]<m>x"},
++	} {
++		t.Run(tt.name, func(t *testing.T) {
++			prompts = nil
++			_, err := runner.Score(t.Context(), ScoreRequest{MaxTokens: 200, Media: media, Rows: []ScoreRow{{Prompt: tt.prompt, Candidates: []string{"A", "B"}}}})
++			if err == nil || len(prompts) != 0 {
++				t.Fatalf("a prompt that misplaces media must not be scored: err=%v prompts=%q", err, prompts)
++			}
++		})
++	}
++}
+diff --git a/llm/score.go b/llm/score.go
+index e7d10ee..1395ba3 100644
+--- a/llm/score.go
++++ b/llm/score.go
+@@ -11,6 +11,9 @@ type Scorer interface {
+ type ScoreRequest struct {
+ 	Rows      []ScoreRow `json:"rows"`
+ 	MaxTokens int        `json:"max_tokens"`
++	// Media is shared by every row. Each prompt refers to every item once, by
++	// its stable [img-N] marker.
++	Media []MediaData `json:"media,omitempty"`
+ }
+ 
+ type ScoreRow struct {
+diff --git a/server/routes.go b/server/routes.go
+index 4347cf5..2636caa 100644
+--- a/server/routes.go
++++ b/server/routes.go
+@@ -28,6 +28,7 @@ import (
+ 
+ 	"github.com/gin-contrib/cors"
+ 	"github.com/gin-gonic/gin"
++	"github.com/gin-gonic/gin/binding"
+ 	"golang.org/x/image/webp"
+ 	"golang.org/x/sync/errgroup"
+ 
+@@ -838,22 +839,42 @@ func (s *Server) GenerateHandler(c *gin.Context) {
+ 	streamResponse(c, ch)
+ }
+ 
++const (
++	systemOneTextLimit  = 64 << 10
++	systemOneImageLimit = 32 << 20
++)
++
+ // SystemOneHandler compiles typed questions, scores their allowed answers, and
+ // returns probabilities. Callers must select weights trained for the prompt format.
+ func (s *Server) SystemOneHandler(c *gin.Context) {
+ 	// TODO(parthsareen): Check token limits before copying state and schema into
+ 	// each question's prompt. This byte cap limits memory use until then.
+-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 64<<10)
+-	var req decision.Request
+-	if err := c.ShouldBindJSON(&req); err != nil {
++	// Images are not copied into each prompt, so their base64 text has a cap of
++	// its own.
++	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, systemOneTextLimit+systemOneImageLimit)
++	body, err := io.ReadAll(c.Request.Body)
++	if err != nil {
+ 		var sizeErr *http.MaxBytesError
+ 		if errors.As(err, &sizeErr) {
+-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body must not exceed 64 KiB"})
++			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body must not exceed 64 KiB, not counting base64 images, which must not exceed 32 MiB"})
+ 			return
+ 		}
+ 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+ 		return
+ 	}
++	var req decision.Request
++	if err := binding.JSON.BindBody(body, &req); err != nil {
++		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
++		return
++	}
++	images := 0
++	for _, image := range req.Images {
++		images += base64.StdEncoding.EncodedLen(len(image))
++	}
++	if len(body)-images > systemOneTextLimit {
++		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body must not exceed 64 KiB, not counting images"})
++		return
++	}
+ 	compiled, err := decision.Compile(req)
+ 	if err != nil {
+ 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+@@ -882,7 +903,11 @@ func (s *Server) SystemOneHandler(c *gin.Context) {
+ 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("model %q is not supported by System One; use a local GGUF model", req.Model)})
+ 		return
+ 	}
+-	r, _, _, err := s.scheduleRunner(c.Request.Context(), m, []model.Capability{model.CapabilityCompletion, model.CapabilityDecision}, nil, req.KeepAlive, nil)
++	caps := []model.Capability{model.CapabilityCompletion, model.CapabilityDecision}
++	if len(req.Images) > 0 {
++		caps = append(caps, model.CapabilityVision)
++	}
++	r, _, _, err := s.scheduleRunner(c.Request.Context(), m, caps, nil, req.KeepAlive, nil)
+ 	if err != nil {
+ 		handleScheduleError(c, req.Model, err)
+ 		return
+@@ -892,12 +917,19 @@ func (s *Server) SystemOneHandler(c *gin.Context) {
+ 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("model %q does not support System One scoring; use a local Nimble or Tev model with a scoring-capable runner", req.Model)})
+ 		return
+ 	}
++	// Every question carries the same images, so every row renders the same media.
+ 	if err := compiled.Render(func(messages []api.Message) (string, error) {
+ 		if m.System != "" {
+ 			messages = append([]api.Message{{Role: "system", Content: m.System}}, messages...)
+ 		}
+ 		think := &api.ThinkValue{Value: false}
+-		if m.HasChatTemplate && chatModeForModel(m) == chatExecutionModeNative {
++		native := m.HasChatTemplate && chatModeForModel(m) == chatExecutionModeNative
++		messages, media, err := imageTaggedMessages(m, messages, 0, native)
++		if err != nil {
++			return "", err
++		}
++		compiled.Request.Media = media
++		if native {
+ 			return r.ApplyChatTemplate(c.Request.Context(), llm.ChatRequest{Messages: messages, Think: think})
+ 		}
+ 		return renderPrompt(m, messages, nil, think)
+diff --git a/server/systemone_test.go b/server/systemone_test.go
+index e406a2a..edcb676 100644
+--- a/server/systemone_test.go
++++ b/server/systemone_test.go
+@@ -1,7 +1,9 @@
+ package server
+ 
+ import (
++	"bytes"
+ 	"context"
++	"encoding/base64"
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
+@@ -207,3 +209,105 @@ func TestSystemOneHandler(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestSystemOneHandlerImages(t *testing.T) {
++	gin.SetMode(gin.TestMode)
++	t.Setenv("OLLAMA_MODELS", t.TempDir())
++	const template = "custom:{{ range .Messages }}{{ .Role }}:{{ .Content }}\n{{ end }}answer:"
++	for _, m := range []struct {
++		name   string
++		vision bool
++	}{{"decision-vision", true}, {"decision-text", false}} {
++		kv := gguftest.KV{"general.architecture": "llama"}
++		if m.vision {
++			kv["vision.block_count"] = uint32(1)
++		}
++		_, digest := createBinFile(t, kv, nil)
++		configLayer, err := createConfigLayer(model.ConfigV2{ModelFormat: "gguf", ModelFamily: "llama", Capabilities: []string{"completion", "decision"}})
++		if err != nil {
++			t.Fatal(err)
++		}
++		layers := []manifest.Layer{{MediaType: "application/vnd.ollama.image.model", Digest: digest}}
++		for _, layer := range []struct{ content, mediaType string }{
++			{"Answer with a letter.", "application/vnd.ollama.image.system"},
++			{template, "application/vnd.ollama.image.template"},
++		} {
++			l, err := manifest.NewLayer(strings.NewReader(layer.content), layer.mediaType)
++			if err != nil {
++				t.Fatal(err)
++			}
++			layers = append(layers, l)
++		}
++		if err := manifest.WriteManifest(model.ParseName(m.name), *configLayer, layers); err != nil {
++			t.Fatal(err)
++		}
++	}
++
++	png := base64.StdEncoding.EncodeToString([]byte("\x89PNG\r\n\x1a\n-image-"))
++	questions := `"questions":{"red":{"type":"noul","instructions":"Is it red?"}}`
++	bigState := strings.Repeat("x", 60<<10)
++	bigImage := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("\x89PNG\r\n\x1a\n"), 128<<10))
++	for _, tt := range []struct {
++		name, body string
++		status     int
++		media      int
++	}{
++		{"one image", `{"model":"decision-vision","state":"photo","images":["` + png + `"],` + questions + `}`, 200, 1},
++		{"two images", `{"model":"decision-vision","state":"photo","images":["` + png + `","` + png + `"],` + questions + `}`, 200, 2},
++		{"text only on a vision model", `{"model":"decision-vision","state":"photo",` + questions + `}`, 200, 0},
++		{"images do not count toward the text limit", `{"model":"decision-vision","state":"` + bigState + `","images":["` + bigImage + `"],` + questions + `}`, 200, 1},
++		{"model without vision", `{"model":"decision-text","state":"photo","images":["` + png + `"],` + questions + `}`, 400, 0},
++		{"invalid base64", `{"model":"decision-vision","state":"photo","images":["not base64!"],` + questions + `}`, 400, 0},
++		{"empty image", `{"model":"decision-vision","state":"photo","images":[""],` + questions + `}`, 400, 0},
++		{"text over the limit", `{"model":"decision-vision","state":"` + strings.Repeat("x", 65<<10) + `","images":["` + png + `"],` + questions + `}`, 413, 0},
++	} {
++		t.Run(tt.name, func(t *testing.T) {
++			runner := &systemOneTestRunner{}
++			ref := &runnerRef{llama: runner, refCount: 1, sessionDuration: time.Hour}
++			s := newServerWithMockRunner(t, &runner.mockRunner)
++			s.sched.loadFn = func(req *LlmRequest, _ ml.SystemInfo, _ []ml.DeviceInfo, _ bool) bool {
++				runner.contextLength = req.opts.NumCtx
++				ref.model = req.model
++				ref.modelKey = schedulerModelKey(req.model)
++				s.sched.loadedMu.Lock()
++				s.sched.loaded[ref.modelKey] = ref
++				s.sched.loadedMu.Unlock()
++				req.successCh <- ref
++				return false
++			}
++			router := gin.New()
++			router.POST("/v1/systemone", s.SystemOneHandler)
++			w := httptest.NewRecorder()
++			req := httptest.NewRequest(http.MethodPost, "/v1/systemone", strings.NewReader(tt.body))
++			req.Header.Set("Content-Type", "application/json")
++			router.ServeHTTP(w, req)
++			if w.Code != tt.status {
++				t.Fatalf("status=%d body=%s", w.Code, w.Body)
++			}
++			if tt.status != 200 {
++				if runner.calls != 0 {
++					t.Fatal("scored a rejected request")
++				}
++				return
++			}
++			got := runner.request
++			if len(got.Media) != tt.media {
++				t.Fatalf("scorer received %d media, want %d", len(got.Media), tt.media)
++			}
++			prompt := got.Rows[0].Prompt
++			var tags string
++			for i, m := range got.Media {
++				if m.ID != i || m.Kind != llm.MediaKindImage {
++					t.Fatalf("media %d has id %d kind %v", i, m.ID, m.Kind)
++				}
++				tags += fmt.Sprintf("[img-%d]", i)
++			}
++			if !strings.HasPrefix(prompt, "custom:system:Answer with a letter.\nuser:"+tags+`{"context":`) {
++				t.Fatalf("images must be tagged before the user content: %q", prompt)
++			}
++			if runner.request.MaxTokens < 2048 && tt.media > 0 {
++				t.Fatalf("vision models get at least 2048 context, got %d", runner.request.MaxTokens)
++			}
++		})
++	}
++}
+-- 
+2.43.0
+

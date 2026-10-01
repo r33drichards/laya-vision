@@ -24,6 +24,9 @@
                                                      # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
     modal run modal_app.py::bench_prefix_cache       # predict latency, prefix cache off vs on, L4 bf16
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
+    modal run --detach modal_app.py::finetune_ollama --run-name <run>
+                                                     # train a checkpoint to answer Ollama's /v1/systemone letters
+                                                     # (laya/ollama_train.py) -> /ckpt/smolvlm-ollama/<run>/hf
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
         --metrics modernvbert/cauldron-2ep/metrics.json --card hf_model_card_modernvbert.md   # the ModernVBERT one
@@ -716,6 +719,118 @@ def evaluate(run_name: str, datasets: str = ",".join(VQA_DATASETS + CAULDRON_DAT
             metas[name] = None
     return {"val_raw": raw, "val_calibrated": cal, "temperature": list(agent.temperature), "dataset_meta": metas,
             "gpu": gpu}
+
+
+OLLAMA_CKPT_ROOT = "/ckpt/smolvlm-ollama"
+
+
+@app.function(
+    image=image,
+    gpu=["A100-80GB", "H100", "A100-40GB", "L40S"],
+    cpu=16,
+    memory=65536,
+    timeout=240 * 60,
+    volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol},
+    retries=modal.Retries(max_retries=1, initial_delay=10.0),
+)
+def finetune_ollama(
+    run_name: str,
+    checkpoint: str = "thaitea/laya-vision",
+    revision: str = "f2fe3c12cb6d04c59d8a190250bf3fb40fc828dc",
+    datasets: str = "cauldron,score",
+    val_datasets: str = "vqa,cauldron,score",
+    steps: int = 6000,
+    batch_size: int = 32,
+    lr: float = 3e-5,
+    warmup: int = 200,
+    max_questions: int = 4,
+    max_train: int = 0,
+    max_val: int = 300,
+    n_calib: int = 100,
+    max_len: int = 2048,
+    max_minutes: float = 200.0,
+    num_workers: int = 14,
+    seed: int = 0,
+):
+    """Train a Laya Vision checkpoint's language-model head (and text model) to answer Ollama's /v1/systemone
+    prompt with the right letter (``laya.ollama_train``), and save it under /ckpt/smolvlm-ollama/<run_name>/hf for
+    ``convert_hf_to_gguf.py``. The validation rows are scored three ways: the checkpoint's own option head
+    (``predict``'s numbers), the letter readout before training, and after training with the folded temperature."""
+    import random
+
+    import torch
+
+    from laya.ollama_train import (build_lm, collect, fit_temperature, fold_temperature, requests_from,
+                                   save_for_gguf, set_trainable, train)
+    from laya.vlm import VLMAgent
+    from laya.vlm_train import collect_logits, format_metrics, metrics_from
+
+    out_dir = os.path.join(OLLAMA_CKPT_ROOT, run_name)
+    if os.path.exists(os.path.join(out_dir, "hf")):
+        raise SystemExit("%s/hf exists; results are create-only, pick a new run name" % out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    t0 = time.time()
+    train_ex, calib_ex, val_ex = _load_data(datasets, "train", "val", n_calib, max_train, max_val, {},
+                                            val_datasets=val_datasets)
+    rng = random.Random(seed)
+    train_rows = requests_from(train_ex, rng, max_questions=max_questions)
+    calib_rows = requests_from(calib_ex, random.Random(seed + 1), p_single=1.0, shuffle=False)
+    val_rows = requests_from(val_ex, random.Random(seed + 2), p_single=1.0, shuffle=False)
+    print("rows: %d train (from %d questions), %d calib, %d val" % (len(train_rows), len(train_ex), len(calib_rows),
+                                                                    len(val_rows)), flush=True)
+    log = {"run": run_name, "args": {k: v for k, v in locals().items() if isinstance(v, (str, int, float, bool))}}
+
+    agent = VLMAgent(checkpoint, revision=revision, device="cuda")
+    head = metrics_from(collect_logits(agent.model, agent.processor, val_ex, batch_size=32, num_workers=num_workers),
+                        [agent._checkpoint_temperature(t, 0) for t in range(3)])
+    log["val_option_head"] = head
+    print("[option head, calibrated] " + format_metrics(head), flush=True)
+    log["checkpoint"] = {"id": checkpoint, "revision": revision, "backbone_revision": agent.cfg.get("backbone_revision")}
+    del agent
+    torch.cuda.empty_cache()
+
+    model, processor = build_lm(checkpoint, revision=revision)
+    model.to("cuda")
+    tok = processor.tokenizer
+    log["trainable_params"] = set_trainable(model)
+    ev = dict(batch_size=32, num_workers=num_workers, max_len=max_len)
+    log["val_letters_before"] = metrics_from(collect(model, val_rows, tok, **ev))
+    print("[letters before training] " + format_metrics(log["val_letters_before"]), flush=True)
+
+    curve_rows = random.Random(seed + 3).sample(val_rows, min(2000, len(val_rows)))  # every set, not the first few
+
+    def eval_fn(step):
+        m = metrics_from(collect(model, curve_rows, tok, **ev))
+        log.setdefault("val_curve", []).append({"step": step, "acc": m["all"]["acc"], "ece": m["all"]["ece"],
+                                                "nll": m["all"]["nll"]})
+        print("[step %d val (2000-row sample)] %s" % (step, format_metrics(m)), flush=True)
+        with open(os.path.join(out_dir, "metrics.json"), "w") as f:
+            json.dump(log, f, indent=1)
+        ckpt_vol.commit()
+
+    log["train_stats"] = train(model, train_rows, tok, steps=steps, batch_size=batch_size, lr=lr, warmup=warmup,
+                               num_workers=num_workers, max_minutes=max_minutes, eval_fn=eval_fn,
+                               eval_every=max(500, steps // 6), seed=seed, max_len=max_len)
+    print("trained: %s" % log["train_stats"], flush=True)
+    raw = collect(model, val_rows, tok, **ev)
+    log["val_letters_raw"] = metrics_from(raw)
+    temperature = fit_temperature(collect(model, calib_rows, tok, **ev))
+    fold_temperature(model, temperature)
+    log["temperature_folded"] = temperature
+    log["val_letters"] = metrics_from(collect(model, val_rows, tok, **ev))
+    print("[letters after training, T=%.3f folded] %s" % (temperature, format_metrics(log["val_letters"])), flush=True)
+
+    model.to(torch.float32).cpu()
+    save_for_gguf(model, processor, os.path.join(out_dir, "hf"), temperature,
+                  {**model.laya_sources, "run": run_name, "steps": log["train_stats"]["steps"]})
+    log["minutes"] = (time.time() - t0) / 60
+    with open(os.path.join(out_dir, "metrics.json"), "w") as f:
+        json.dump(log, f, indent=1)
+    ckpt_vol.commit()
+    print("saved %s/hf (%.1f min)" % (out_dir, log["minutes"]))
+    return {k: log[k] for k in ("run", "temperature_folded", "train_stats", "minutes")} | {
+        "val_option_head": head["all"], "val_letters": log["val_letters"]["all"]}
+
 
 
 def _file_sha256(path: str) -> str:
