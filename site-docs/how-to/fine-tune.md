@@ -147,8 +147,8 @@ modal run --detach modal_app.py::finetune_long --init-from hub/laya-vision-8b318
 - `--val-datasets my_dataset,vqa` also scores A-OKVQA, ScienceQA and VQAv2 yes/no at every evaluation (when they
   are prepared on your volume), so you see whether the model is forgetting its general skills. The best checkpoint is chosen by the mean accuracy over all
   validation sets.
-- To keep those skills, train on your data mixed with The Cauldron (prepared with `prepare_cauldron`): `--datasets my_dataset,cauldron` with
-  `--mix my_dataset=5` to draw your set five times as often as each Cauldron subset, and `--max-passes 4` to stop
+- To keep those skills, train on your data mixed with The Cauldron (prepared with `prepare_cauldron`):
+  `--datasets my_dataset,cauldron` with `--mix my_dataset=5` to draw your set five times as often as each Cauldron subset, and `--max-passes 4` to stop
   a small set from repeating too often.
 - Without `--init-from`, the run starts from the pretrained backbone (`--backbone`) with an untrained head; that
   needs far more data than continuing from the checkpoint.
@@ -159,7 +159,7 @@ Follow the run with `modal app logs laya-smolvlm`, then download the result:
 modal volume get laya-checkpoints /smolvlm/my-dataset-3ep/best my-laya
 ```
 
-To score it on every prepared set, run `modal run modal_app.py::evaluate --run-name my-dataset-3ep/best --datasets
+To score it on your validation set and the VQA sets, run `modal run modal_app.py::evaluate --run-name my-dataset-3ep/best --datasets
 my_dataset,vqa`; the full suite is in [Evaluate a checkpoint](evaluate.md).
 
 ## 3. Use the fine-tuned model
