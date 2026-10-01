@@ -47,3 +47,21 @@ def test_item_stream_uses_the_weights():
     draws = rng.choices(keys, weights=[s.weights[k] for k in keys], k=9000)
     counts = {k: draws.count(k) for k in keys}
     assert abs(counts["a"] - 4000) < 200 and abs(counts["b"] - 4000) < 200 and abs(counts["c"] - 1000) < 150
+
+
+def test_pg_loss_pushes_taken_answer_by_advantage():
+    import torch
+    from laya.vlm_train import pg_loss
+
+    logits = torch.zeros(3, 4, requires_grad=True)
+    target = torch.tensor([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, 1, 0]], dtype=torch.float32)
+    mask = torch.tensor([[1, 1, 1, 0]] * 3, dtype=torch.bool)
+    adv = torch.tensor([2.0, float("nan"), -1.0])
+    loss, rows = pg_loss(logits, target, mask, adv)
+    assert rows.tolist() == [True, False, True]
+    loss.backward()
+    g = logits.grad
+    assert g[0, 1] < 0 and g[2, 2] > 0          # descent raises the good answer, lowers the bad one
+    assert torch.all(g[1] == 0) and g[0, 3] == 0  # ordinary rows and masked options get nothing
+    none, rows = pg_loss(logits, target, mask, torch.full((3,), float("nan")))
+    assert not rows.any() and float(none) == 0.0

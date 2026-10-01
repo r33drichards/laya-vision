@@ -97,3 +97,12 @@ after the images. An answer whose question was cut carries a `truncated` field, 
 
 `indistinguishable` lists options that are the same tokens once cut, which the model cannot tell apart.
 `predict(..., strict=True)` raises `ValueError` instead, naming the question and what would be cut.
+
+The budgets are config, and `load_vlm` takes overrides as keywords. To keep long option descriptions whole:
+
+```python
+agent = laya.load_vlm("thaitea/laya-vision", option_max_len=256, head_max_len=1024, max_len=2048)
+```
+
+The published checkpoints were trained with options of at most 48 tokens and `head_max_len` 256, so longer inputs
+are outside what they saw in training.
