@@ -121,4 +121,4 @@ on the server's disk. A request takes at most 16 images.
 - **Other endpoints.** `GET /api/tags` lists the served names and `GET /` answers `Laya is running`. There are no
   other Ollama endpoints (`/api/pull`, `/api/generate` and so on).
 
-Laya Vision checkpoints are not packaged for Ollama, so `ollama pull` cannot fetch them; run this server instead.
+To run a checkpoint inside Ollama itself, see [Serve with Ollama](serve-with-ollama.md).

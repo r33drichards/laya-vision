@@ -29,6 +29,7 @@ nav:
       - Overview: how-to/overview.md
       - Fine-tune on your own dataset: how-to/fine-tune.md
       - Calibrate on your own data: how-to/calibrate.md
+      - Serve with Ollama: how-to/serve-with-ollama.md
       - Serve an Ollama-style decision API: how-to/serve-systemone.md
       - Run jobs on Modal: how-to/run-on-modal.md
       - Evaluate a checkpoint: how-to/evaluate.md
