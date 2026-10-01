@@ -6,6 +6,8 @@ These are **task-oriented** recipes for getting specific things done. They assum
 
 ## Guides
 
+- [Fine-tune on your own dataset](fine-tune.md): write your labelled questions as JSONL and train the checkpoint
+  on them, locally or on Modal.
 - [Calibrate on your own data](calibrate.md): fit per-type temperatures on your labelled questions and check that
   they help.
 - [Run jobs on Modal](run-on-modal.md): the volumes and secret `modal_app.py` expects, and the commands for data
