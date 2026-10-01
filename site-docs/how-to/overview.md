@@ -10,6 +10,8 @@ These are **task-oriented** recipes for getting specific things done. They assum
   on them, locally or on Modal.
 - [Calibrate on your own data](calibrate.md): fit per-type temperatures on your labelled questions and check that
   they help.
+- [Serve an Ollama-style decision API](serve-systemone.md): put a checkpoint behind `POST /v1/systemone`, the
+  endpoint Ollama serves decision models on, so Ollama and TypeSafe clients can call it, with images.
 - [Run jobs on Modal](run-on-modal.md): the volumes and secret `modal_app.py` expects, and the commands for data
   preparation, training, evaluation and publishing.
 - [Evaluate a checkpoint](evaluate.md): run the whole evaluation suite on one checkpoint and turn the results into
