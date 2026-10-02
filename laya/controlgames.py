@@ -52,15 +52,13 @@ def _expert_action(game: str, env, obs) -> int:
 class ControlGame:
     """One seeded episode of a ``GAMES`` environment, stepped by action name."""
 
-    def __init__(self, game: str, seed: int = 0):
-        if game not in GAMES:
-            raise ValueError("unknown control game %r (%s)" % (game, ", ".join(GAMES)))
-        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")  # headless pygame, no audio device
-        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
-        import gymnasium as gym
+    SPECS = GAMES  # the games this class plays; ``laya.mujocogames.MujocoGame`` swaps in its own
 
-        self.game, self.actions = game, GAMES[game]["actions"]
-        self.env = gym.make(GAMES[game]["env_id"], render_mode="rgb_array")
+    def __init__(self, game: str, seed: int = 0):
+        if game not in self.SPECS:
+            raise ValueError("unknown control game %r (%s)" % (game, ", ".join(self.SPECS)))
+        self.game, self.actions = game, self.SPECS[game]["actions"]
+        self.env = self._make(self.SPECS[game])
         self.obs, _ = self.env.reset(seed=seed)
         self.env.action_space.seed(seed)
         self.score, self.steps, self.terminated, self.truncated = 0.0, 0, False, False
@@ -73,9 +71,20 @@ class ControlGame:
     def expert(self) -> str:
         return self.actions[_expert_action(self.game, self.env, self.obs)]
 
+    def _make(self, spec: Dict):
+        os.environ.setdefault("SDL_VIDEODRIVER", "dummy")  # headless pygame, no audio device
+        os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+        import gymnasium as gym
+
+        return gym.make(spec["env_id"], render_mode="rgb_array")
+
+    def _env_action(self, action):
+        """What ``env.step`` takes for an action name (a subclass may take other action forms)."""
+        return self.actions.index(action)
+
     def step(self, action: str) -> float:
         self._prev, self._frame = self._frame, None
-        self.obs, reward, self.terminated, self.truncated, _ = self.env.step(self.actions.index(action))
+        self.obs, reward, self.terminated, self.truncated, _ = self.env.step(self._env_action(action))
         self.score += float(reward)
         self.steps += 1
         return float(reward)
@@ -100,24 +109,25 @@ class ControlGame:
         self.env.close()
 
 
-def play_episodes(game: str, policy, episodes: int, seed: int = 0, max_steps: int = 0) -> Dict:
+def play_episodes(game: str, policy, episodes: int, seed: int = 0, max_steps: int = 0, make=ControlGame) -> Dict:
     """Play ``episodes`` seeded episodes (seed ``seed + i``); ``policy(env) -> action name``. ``max_steps`` caps
-    an episode below the environment's own limit (0 = no extra cap)."""
+    an episode below the environment's own limit (0 = no extra cap). ``make`` is the game class (``ControlGame``
+    or a subclass such as ``laya.mujocogames.MujocoGame``)."""
     from collections import Counter
 
     counts, eps = Counter(), []
     for i in range(episodes):
-        env = ControlGame(game, seed + i)
+        env = make(game, seed + i)
         while not env.done and not (max_steps and env.steps >= max_steps):
             a = policy(env)
-            counts[a] += 1
+            counts.update(a.values() if isinstance(a, dict) else [a])  # per-joint actions: count each joint's level
             env.step(a)
         eps.append({"score": round(env.score, 3), "steps": env.steps, "terminated": env.terminated})
         env.close()
-    scores = [e["score"] for e in eps]
+    scores, solved = [e["score"] for e in eps], make.SPECS[game]["solved"]  # None: no threshold
     return {"game": game, "episodes": episodes, "seed": seed, "actions": dict(counts), "results": eps,
             "mean_score": float(np.mean(scores)), "std_score": float(np.std(scores)),
-            "solved_rate": float(np.mean([s >= GAMES[game]["solved"] for s in scores])),
+            "solved_rate": None if solved is None else float(np.mean([s >= solved for s in scores])),
             "mean_steps": float(np.mean([e["steps"] for e in eps]))}
 
 

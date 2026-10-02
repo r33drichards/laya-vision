@@ -19,6 +19,46 @@ no extra flag (`--frames 1|2` overrides); `--sample` draws from the probabilitie
 Trained for 7 minutes on 20,000 auto-labelled frames, a checkpoint plays ViZDoom `basic` at expert level (mean
 reward +75.4 against the expert's +75.8 over 50 unseen episodes).
 
+## Play the MuJoCo environments
+
+[`laya/mujocogames.py`](https://github.com/r33drichards/laya-vision/blob/main/laya/mujocogames.py) wraps all eleven
+of Gymnasium's MuJoCo environments (`-v5`) the way `laya/controlgames.py` wraps classic control: the image is the
+ghosted screen and the question is `laya.games.control_question`. MuJoCo actions are continuous, so the model picks
+among named pushes:
+
+- InvertedPendulum and InvertedDoublePendulum push the cart, seen from a fixed side view: `LEFT`, `NONE`, `RIGHT`,
+  plus gentle and hard pushes for the double pole. A scripted controller keeps each pole up for all 1000 steps.
+- Reacher, Pusher, Swimmer, Hopper, Walker2d, HalfCheetah, Ant, Humanoid and HumanoidStandup set every joint at
+  once: one question per joint (`laya.games.mujoco_questions`), each over five torque levels from `STRONG_NEG` to
+  `STRONG_POS`, all answered in one `predict`, which encodes the frame once. Squeezing a strong expert's actions into
+  one joint per step kept at most 6% of its return on the walking robots; five levels per joint kept 78-100%.
+  The experts are the Farama Foundation's pretrained Stable-Baselines3 policies on the Hugging Face Hub
+  (`laya.mujocogames.HUB_EXPERTS`, pinned by commit), rounded to the nearest level on each joint; they need
+  `stable-baselines3` and `sb3-contrib`.
+
+[`examples/mujoco_video.py`](https://github.com/r33drichards/laya-vision/blob/main/examples/mujoco_video.py) records
+one episode, with the chosen push and the model's probabilities beside the screen, and
+[`examples/mujoco_baseline.py`](https://github.com/r33drichards/laya-vision/blob/main/examples/mujoco_baseline.py)
+records and scores a checkpoint on every game against random play, doing nothing and the expert:
+
+```bash
+pip install -e . torchvision "gymnasium[mujoco]" "imageio[ffmpeg]" stable-baselines3 sb3-contrib
+python examples/mujoco_video.py --game Hopper --policy expert --out hopper-expert.webm
+python examples/mujoco_baseline.py --model thaitea/laya-vision \
+    --revision 8b318c99d7ad3ce19c24369263463882eada9d1e --out mujoco-baseline/
+```
+
+The model takes about 1 s a step on a CPU, so the whole baseline takes an hour there. On Modal every game runs on
+its own GPU at the same time, and the videos and `baseline.json` land in `--out` locally:
+
+```bash
+modal run modal_app.py::mujoco_eval --model thaitea/laya-vision \
+    --revision 8b318c99d7ad3ce19c24369263463882eada9d1e --max-steps 0 --out mujoco-baseline/
+```
+
+On a machine with no display it renders through EGL (`apt-get install libegl1`), or set `MUJOCO_GL=osmesa`
+(`libosmesa6`, which the Modal image uses). The MuJoCo games are not in the games suite yet, and no checkpoint has been trained on them.
+
 ## Score a checkpoint on the games suite
 
 ```bash

@@ -85,7 +85,60 @@ CONTROL_GOALS = {
     "MountainCar": "The car is too weak to drive straight up; rock back and forth to build speed and reach the "
                    "flag on the right hill.",
     "LunarLander": "Fire the engines to land the lander gently and upright between the two flags.",
+    "InvertedPendulum": "A pole is hinged on a cart that slides along a rail; push the cart left or right to keep "
+                        "the pole upright.",
+    "InvertedDoublePendulum": "Two poles are hinged end to end on a cart that slides along a rail; push the cart "
+                              "left or right to keep both poles upright.",
+    "Reacher": "A two-joint arm lies flat on a table; move its fingertip onto the red target and keep it there "
+               "with little effort.",
+    "Pusher": "A seven-joint arm stands by a table; push the white cylinder onto the red goal.",
+    "Swimmer": "A three-segment swimmer lies in a thick fluid; wriggle its two joints to swim forward.",
+    "Hopper": "A one-legged robot stands upright; hop forward as fast as you can without falling.",
+    "Walker2d": "A two-legged robot stands upright; walk forward as fast as you can without falling.",
+    "HalfCheetah": "A two-legged running robot; run forward as fast as you can.",
+    "Ant": "A four-legged robot; walk forward as fast as you can without flipping over.",
+    "Humanoid": "A humanoid robot stands upright; walk forward as fast as you can without falling.",
+    "HumanoidStandup": "A humanoid robot lies on the ground; get up and raise your head as high as you can.",
 }
+
+# MuJoCo joint-torque games (``laya.mujocogames``): the actuated joints in the environment's actuator order. Each
+# joint gets its own ``choice`` every step (``mujoco_questions``), over ``TORQUE_LEVELS``.
+TORQUE_JOINTS = {
+    "Reacher": ("shoulder", "elbow"),
+    "Pusher": ("shoulder pan", "shoulder lift", "upper arm roll", "elbow flex", "forearm roll", "wrist flex",
+               "wrist roll"),
+    "Swimmer": ("front joint", "back joint"),
+    "Hopper": ("thigh", "knee", "foot"),
+    "Walker2d": ("right thigh", "right knee", "right foot", "left thigh", "left knee", "left foot"),
+    "HalfCheetah": ("back thigh", "back shin", "back foot", "front thigh", "front shin", "front foot"),
+    "Ant": ("leg 4 hip", "leg 4 ankle", "leg 1 hip", "leg 1 ankle", "leg 2 hip", "leg 2 ankle", "leg 3 hip",
+            "leg 3 ankle"),
+    "Humanoid": ("abdomen y", "abdomen z", "abdomen x", "right hip x", "right hip z", "right hip y", "right knee",
+                 "left hip x", "left hip z", "left hip y", "left knee", "right shoulder 1", "right shoulder 2",
+                 "right elbow", "left shoulder 1", "left shoulder 2", "left elbow"),
+}
+TORQUE_JOINTS["HumanoidStandup"] = TORQUE_JOINTS["Humanoid"]
+TORQUE_LEVELS = {"STRONG_NEG": "full torque the negative way", "NEG": "half torque the negative way",
+                 "NONE": "no torque", "POS": "half torque the positive way",
+                 "STRONG_POS": "full torque the positive way"}
+
+
+def joint_key(joint: str) -> str:
+    """The answer key for a joint: ``"right knee"`` -> ``"right_knee"``."""
+    return joint.replace(" ", "_")
+
+
+def mujoco_questions(game: str) -> Dict[str, Dict]:
+    """One ``choice`` per joint of a ``TORQUE_JOINTS`` game, all asked about the same frame. The game and its goal come
+    first and the joint last, so the questions share a prefix (``laya.vlm`` computes it once)."""
+    return {joint_key(j): {
+        "type": "choice",
+        "instructions": "You are playing the control task %s. %s A faint copy shows where things were one step "
+                        "earlier. How should you torque the %s now?" % (game, CONTROL_GOALS[game], j),
+        "criteria": dict(TORQUE_LEVELS),
+    } for j in TORQUE_JOINTS[game]}
+
+
 CONTROL_ACTIONS = {
     "CartPole": {"LEFT": "push the cart left", "RIGHT": "push the cart right"},
     "Acrobot": {"CLOCKWISE": "twist the lower link clockwise", "NONE": "do nothing",
@@ -93,11 +146,16 @@ CONTROL_ACTIONS = {
     "MountainCar": {"LEFT": "accelerate left", "NONE": "do not accelerate", "RIGHT": "accelerate right"},
     "LunarLander": {"NOOP": "do nothing", "LEFT_ENGINE": "fire the left orientation engine",
                     "MAIN_ENGINE": "fire the main engine", "RIGHT_ENGINE": "fire the right orientation engine"},
+    "InvertedPendulum": {"LEFT": "push the cart left", "NONE": "do not push", "RIGHT": "push the cart right"},
+    "InvertedDoublePendulum": {"HARD_LEFT": "push the cart left hard", "LEFT": "push the cart left gently",
+                               "NONE": "do not push", "RIGHT": "push the cart right gently",
+                               "HARD_RIGHT": "push the cart right hard"},
 }
 
 
 def control_question(game: str) -> Dict:
-    """The question for a ``laya.controlgames`` game; the screen ghosts the previous frame to show motion."""
+    """The question for a ``laya.controlgames`` game or a MuJoCo pendulum; the screen ghosts the previous frame to show
+    motion. The MuJoCo torque games ask one question per joint instead (``mujoco_questions``)."""
     return {"action": {
         "type": "choice",
         "instructions": "You are playing the control task %s. %s A faint copy shows where things were one step "
