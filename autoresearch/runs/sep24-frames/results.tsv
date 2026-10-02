@@ -1,0 +1,4 @@
+commit	quality	macro_acc	ece_hard	games	params_m	latency_x	status	description
+81a84d4	0.6782	0.7059	0.0277	0.2215	201.1613	0.8569	keep	baseline: published recipe, single
+6e8885c	0.6837	0.7094	0.0257	0.1794	201.1613	0.8391	keep	exp: stack-2 frames (previous + current as two images) on the published recipe
+b4adc8c	0.6714	0.7015	0.0301	0.2203	201.1613	0.8911	discard	exp: trail-4 frames (last 4 frames blended into one image) on the published recipe

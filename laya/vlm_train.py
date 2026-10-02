@@ -561,6 +561,8 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
         ex["value"] = float(rec["value"])
     if rec.get("next_target") is not None:  # optional next-move-head target, checked by make_item
         ex["next_target"] = [float(p) for p in rec["next_target"]]
+    if rec.get("history") is not None:  # a game frame's previous decision screens (paths), oldest first
+        ex["history"] = [os.path.join(root, p) for p in rec["history"]]
     return ex
 
 
@@ -618,16 +620,59 @@ def with_next_targets(recs: List[Dict]) -> List[Dict]:
     return out
 
 
+def with_frame_history(recs: List[Dict], max_frames: int = 4) -> List[Dict]:
+    """The records, each with ``"history"``: the ``image`` paths of up to ``max_frames`` previous steps of the same
+    recorded episode, oldest first (``laya.frames`` builds a multi-frame state from it). A record that already has
+    a ``history`` (``experthist``, recorded at play time) keeps it. Otherwise it is derived from ``episode_step``:
+    steps ``s - 1, s - 2, ...`` back to the episode's step 0, stopping at the first one the file does not hold, so
+    it is exact only where every earlier step was recorded (true of ``doom_basic``, whose every decision step has a
+    monster in view: 20,000 of 20,000 train frames). Records ``episode_step`` cannot place get none."""
+    at: Dict = {}
+    for r in recs:
+        key = episode_step(r)
+        if key is not None and r.get("image"):
+            at[key] = r["image"]
+    out = []
+    for r in recs:
+        if r.get("history") is not None:
+            out.append(dict(r, history=list(r["history"])[-max_frames:] if max_frames else []))
+            continue
+        key = episode_step(r)
+        hist = []
+        if key is not None:
+            for j in range(1, max_frames + 1):
+                p = at.get((key[0], key[1] - j))
+                if p is None:
+                    break
+                hist.insert(0, p)
+        out.append(dict(r, history=hist))
+    return out
+
+
+def history_coverage(recs: List[Dict], n: int) -> Dict[str, int]:
+    """How many records have ``n`` previous frames in ``history`` or reach back to their episode's start (so
+    padding by repetition is the play-time rule, not a stand-in for a missing frame)."""
+    full = 0
+    for r in recs:
+        key = episode_step(r)
+        h = len(r.get("history") or [])
+        full += h >= n or (key is not None and h >= key[1])
+    return {"records": len(recs), "full": full, "partial": len(recs) - full}
+
+
 def load_jsonl_examples(root: str, name: str, split: str, limit: Optional[int] = None,
-                        next_targets: bool = False) -> List[Dict]:
+                        next_targets: bool = False, history: int = 0) -> List[Dict]:
     """Load ``<root>/<name>/<split>.jsonl``; ``limit`` keeps the first records in file order. ``next_targets`` adds
     each recorded game frame's ``next_target`` from the whole file (``with_next_targets``) before ``limit`` applies;
-    off, the examples are exactly as before."""
+    off, the examples are exactly as before. ``history`` > 0 gives each game frame's example ``"history"``, up to
+    that many previous frames' paths (``with_frame_history``)."""
     base = os.path.join(root, name)
     with open(os.path.join(base, split + ".jsonl")) as f:
         recs = [json.loads(line) for line in f if line.strip()]
     if next_targets:
         recs = with_next_targets(recs)
+    if history:
+        recs = with_frame_history(recs, history)
     if limit:
         recs = recs[:limit]
     out = [jsonl_example(r, base, name) for r in recs]

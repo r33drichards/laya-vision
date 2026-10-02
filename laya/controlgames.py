@@ -7,8 +7,10 @@ A scripted expert and a random policy play the same seeded episodes, so a score 
 
 A single frame hides velocity, which all four games need (which way is the pole falling, is the car rolling back),
 so ``render`` ghosts the previous frame under the current one: the faint copy is where things were one step
-earlier. Episodes end when the environment terminates or at its own time limit (CartPole 500 steps, Acrobot 500,
-MountainCar 200, LunarLander 1000); the score is the environment's summed reward.
+earlier. That is the ``"single"`` game frame mode for these games (``laya.frames``: ``trail-2``); the other
+modes build their state from ``frame()`` over the episode's history instead. Episodes end when the environment
+terminates or at its own time limit (CartPole 500 steps, Acrobot 500, MountainCar 200, LunarLander 1000); the
+score is the environment's summed reward.
 
 Experts (10 episodes on the eval seeds): CartPole a linear controller on the pole angle and cart state (500, the
 cap); Acrobot torque along the lower joint's velocity (about -85); MountainCar push the way the car is moving
@@ -23,6 +25,9 @@ from typing import Dict, Optional
 
 import numpy as np
 
+from . import frames as F
+from .frames import GHOST, blend  # GHOST: weight of the previous frame in ``render`` (0.35)
+
 # game -> Gymnasium id, action names in the environment's action order, and the score counted as solved
 GAMES = {
     "CartPole": {"env_id": "CartPole-v1", "actions": ("LEFT", "RIGHT"), "solved": 475.0},
@@ -31,7 +36,6 @@ GAMES = {
     "LunarLander": {"env_id": "LunarLander-v3", "actions": ("NOOP", "LEFT_ENGINE", "MAIN_ENGINE", "RIGHT_ENGINE"),
                     "solved": 200.0},
 }
-GHOST = 0.35  # weight of the previous frame in ``render``
 
 
 def _expert_action(game: str, env, obs) -> int:
@@ -91,10 +95,7 @@ class ControlGame:
         from PIL import Image
 
         cur = self.frame()
-        if self._prev is None:
-            return Image.fromarray(cur)
-        mix = (1 - GHOST) * cur.astype(np.float32) + GHOST * self._prev.astype(np.float32)
-        return Image.fromarray(mix.round().astype(np.uint8))
+        return Image.fromarray(cur if self._prev is None else blend([self._prev, cur]))
 
     def close(self) -> None:
         self.env.close()
@@ -135,12 +136,19 @@ def random_policy(seed: int = 0):
     return lambda env: rng.choice(env.actions)
 
 
-def model_policy(agent, game: str):
-    """The model's most likely action from the rendered (ghosted) screen, via ``predict``."""
+def model_policy(agent, game: str, mode: str = "single"):
+    """The model's most likely action, via ``predict``, in the game frame mode ``mode``
+    (``laya.frames.mode_for(agent.cfg, "control")``): ``single`` sends the rendered (ghosted) screen, exactly as
+    before modes existed; any other mode sends ``laya.frames.state`` of the episode's ``frame()`` history
+    (``trail-N`` one blended image, ``stack-N`` N images) with the question describing that screen."""
     from laya.games import control_question
 
-    q = control_question(game)
-    return lambda env: agent.predict({"image": env.render()}, q)["answers"]["action"]["choice"]
+    if mode == "single":
+        q = control_question(game)
+        return lambda env: agent.predict({"image": env.render()}, q)["answers"]["action"]["choice"]
+    q = control_question(game, mode)
+    return F.episode_policy(lambda env, st: agent.predict(st, q)["answers"]["action"]["choice"],
+                            lambda env: env.frame(), mode, "control")
 
 
 __all__ = ["GAMES", "ControlGame", "play_episodes", "normalized", "expert_policy", "random_policy", "model_policy"]

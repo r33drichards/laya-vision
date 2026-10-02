@@ -13,8 +13,9 @@ then, identically for every experiment:
    really holds is measured (a layer an experiment drops has to be gone from the saved config too);
 3. scores the reloaded model on a fixed sample of every eval set (``EVAL_PER_SET`` seeded questions from each
    ``EVAL_DATASETS`` val split);
-4. counts its parameters and times ``predict`` on an L4 in bf16 on ``LATENCY_N`` fixed images, alternating with the
-   ``REFERENCE`` checkpoint in the same container.
+4. counts its parameters and times ``predict`` on an L4 in bf16 on ``LATENCY_N`` fixed images, and one game move
+   (``LATENCY_MOVES`` decisions along a fixed CartPole frame history, in the checkpoint's own frame mode),
+   alternating with the ``REFERENCE`` checkpoint in the same container.
 
 5. plays the games benchmark (``games_eval.py``: Maze, Snake, classic control, Atari Freeway and Breakout, ViZDoom
    basic, fixed seeds) with the reloaded checkpoint, one L4 container per game family, alongside the latency job.
@@ -26,9 +27,20 @@ The four objectives (see ``pareto.py``):
 * **games** = mean normalized game score, per game (model - random) / (expert - random) clipped to [-0.5, 1.5]
   against the fixed baselines in ``game_baselines.json``. Higher is better.
 * **params_m**: parameters of the saved model, in millions. Lower is better.
-* **latency_x**: median ``predict`` time on the L4 (preprocessing included) divided by the ``REFERENCE``
-  checkpoint's, timed alternately in the same container: raw milliseconds swing by ~50% between L4 hosts (52 vs
-  76 ms for one model). Lower is better; the raw times are kept in the result JSON.
+* **latency_x** = max(``latency_q_x``, ``game_move_x``), lower is better; the raw times are kept in the result JSON.
+  ``latency_q_x`` is the median ``predict`` time on the L4 (preprocessing included) divided by the ``REFERENCE``
+  checkpoint's, timed alternately in the same container: raw milliseconds swing by ~50% between L4 hosts (52 vs 76
+  ms for one model). ``game_move_x`` = ``game_move_ms`` / ``game_move_ref_ms``: the median time of one game move at
+  batch 1 in the checkpoint's own game frame mode (``laya.frames``; state building, e.g. a trail's blend, included)
+  over the reference's in ``single``, alternating the same way. The move is ``games_eval.move_fn``, what play runs:
+  for ``stack-N`` the encoder-feature cache is warm, so in the steady state only the new frame is encoded but the
+  language model reads N images. A stack-4 model's extra per-move cost shows here, where a single-image
+  ``predict`` would hide it.
+
+Game frame modes. ``experiment.py``'s ``GAME_FRAMES`` (``"single"``, ``"trail-N"``, ``"stack-N"``, N <= 5; see
+``laya.frames``) picks how game states are shown: it passes the mode to ``toolkit`` and ``ctx.game_examples`` and
+writes it into ``agent.cfg["game_frames"]``, so the saved checkpoint carries it and the games benchmark and the
+latency job play in it.
 
 The result lands in ``autoresearch/runs/<tag>/<commit>.json`` and ``pareto.py`` appends it to
 ``autoresearch/runs/<tag>/results.tsv`` as keep / discard.
@@ -59,6 +71,13 @@ refuses to rebuild a missing part of an older version. History:
 * ``v2``: 6,000 per set, every kind;
 * ``v3``: ``games`` rebuilt with ``next_target`` (the next-move head's auxiliary target), otherwise the same seeded
   frames as v2; ``train``, ``calib`` and ``eval`` are read unchanged from ``pool-v2``.
+* ``v4``: ``games`` rebuilt with each frame's history: ``"history"``, the encoded screens of up to
+  ``POOL_HISTORY`` previous decisions of its episode, oldest first (fewer at an episode's start, or after an Atari
+  auto-FIRE), so ``ctx.game_examples(frames=...)`` can build any frame mode. Atari comes from
+  ``/data/atari/experthist`` (the ``expert`` recording replayed with the same seeds, which reproduced all 20,000 train
+  records per game exactly, plus the screens play keeps; the old recording skipped every other step in parts of
+  long episodes, so 15% of Breakout and 7% of Freeway frames had no exact 4-frame history), ViZDoom's from the
+  recorded steps (all present). Same seeded selection and ``next_target`` as v3; the other kinds stay on v2.
 
 Memory snapshots. Both GPU jobs are ``@app.cls(enable_memory_snapshot=True, single_use_containers=True)`` classes
 whose ``@modal.enter(snap=True)`` method does the experiment-independent CPU work, which Modal then restores from a
@@ -79,7 +98,7 @@ import os
 import subprocess
 import sys
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import modal
 
@@ -95,9 +114,13 @@ N_CALIB = 100              # last train records per calibration set, held out fr
 TRAIN_POOL_PER_SET = 6000  # seeded train examples per trainable set in the pool (fewer where a set is smaller)
 SEED = 0
 REFERENCE = "cauldron-score-2ep-bidir-full/best"   # latency is reported relative to this checkpoint (= thaitea/laya-vision)
-POOL_VERSION = "v3"         # the newest pool version (history in the module docstring)
-# The version whose directory holds each kind's parts: v3 rebuilt only ``games`` (adding next_target).
-POOL_KIND_VERSIONS = {"train": "v2", "calib": "v2", "eval": "v2", "games": "v3"}
+POOL_VERSION = "v4"         # the newest pool version (history in the module docstring)
+# The version whose directory holds each kind's parts: v3 rebuilt only ``games`` (adding next_target), v4 again
+# (adding each frame's history).
+POOL_KIND_VERSIONS = {"train": "v2", "calib": "v2", "eval": "v2", "games": "v4"}
+POOL_HISTORY = 4           # previous frames stored per game frame in the pool: states of up to 5 frames
+LATENCY_MOVES = 60         # game moves timed per checkpoint (after LATENCY_MOVE_WARMUP untimed ones)
+LATENCY_MOVE_WARMUP = 8
 POOL_ROOT = "/data/autoresearch"
 POOL_DIR = os.path.join(POOL_ROOT, "pool-" + POOL_VERSION)   # where this version's own parts go
 
@@ -116,10 +139,11 @@ TRAINABLE_DATASETS = CAULDRON + SCORE
 # Expert game frames experiments may train on (``ctx.game_examples()``): name -> (root, prepared name). The games
 # eval plays on seeds these were never recorded on.
 GAME_DATASETS = {
-    "game_atari_freeway": ("/data/atari/expert", "Freeway"),
-    "game_atari_breakout": ("/data/atari/expert", "Breakout"),
+    "game_atari_freeway": ("/data/atari/experthist", "Freeway"),
+    "game_atari_breakout": ("/data/atari/experthist", "Breakout"),
     "game_doom_basic": ("/data/vqa", "doom_basic"),
 }
+GAME_FAMILY = {"game_atari_freeway": "atari", "game_atari_breakout": "atari", "game_doom_basic": "doom"}
 
 app = modal.App("laya-autoresearch")
 hf_vol = modal.Volume.from_name("laya-hf-cache")
@@ -170,23 +194,32 @@ def load_split(name: str, split: str) -> List[Dict]:
         return []
 
 
-def _with_bytes(ex: Dict) -> Dict:
-    """An example whose image paths are replaced by the files' bytes (``laya.vlm`` loads either)."""
+def _with_bytes(ex: Dict, shared: Optional[Dict[str, bytes]] = None) -> Dict:
+    """An example whose image paths are replaced by the files' bytes (``laya.vlm`` loads either), including a game
+    frame's ``history``. With ``shared`` (path -> bytes) a file read once is the same bytes object everywhere it
+    appears, so pickling stores it once: a game frame is also in its successors' histories."""
+    def read(p):
+        if shared is not None and p in shared:
+            return shared[p]
+        with open(p, "rb") as f:
+            b = f.read()
+        if shared is not None:
+            shared[p] = b
+        return b
+
     state = ex["state"]
     if not isinstance(state, dict):
         return ex
     state = dict(state)
     for key in ("image",):
         if isinstance(state.get(key), str):
-            with open(state[key], "rb") as f:
-                state[key] = f.read()
+            state[key] = read(state[key])
     if state.get("images"):
-        imgs = []
-        for p in state["images"]:
-            with open(p, "rb") as f:
-                imgs.append(f.read())
-        state["images"] = imgs
-    return dict(ex, state=state)
+        state["images"] = [read(p) for p in state["images"]]
+    out = dict(ex, state=state)
+    if ex.get("history"):  # a game frame's previous screens
+        out["history"] = [read(p) for p in ex["history"]]
+    return out
 
 
 def pool_selection(kind: str, name: str) -> List[Dict]:
@@ -198,8 +231,10 @@ def pool_selection(kind: str, name: str) -> List[Dict]:
     rng = random.Random("%d:%s:%s" % (SEED, kind, name))
     if kind == "games":
         root, prepared = GAME_DATASETS[name]
-        # next_target from the whole split, before sampling; the list, and so the seeded sample, is v2's
-        exs = [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train", next_targets=True)]
+        # next_target and history from the whole split, before sampling; the list, and so the seeded sample, is
+        # v2's (experthist replays expert record for record)
+        exs = [dict(ex, dataset=name) for ex in load_jsonl_examples(root, prepared, "train", next_targets=True,
+                                                                      history=POOL_HISTORY)]
         return rng.sample(exs, min(TRAIN_POOL_PER_SET, len(exs)))
     if kind == "eval":
         exs = load_split(name, "val")
@@ -246,6 +281,42 @@ def load_pool(kinds=("train", "calib", "eval", "games")) -> Dict[str, Dict[str, 
     return out
 
 
+def game_states(examples: List[Dict], frames: str, family: str) -> List[Dict]:
+    """Pool game examples (encoded ``state["image"]`` plus ``"history"``, the previous screens) with their state in
+    frame mode ``frames`` and no ``history`` key. ``single`` for Atari and Doom is the frame alone, so the examples
+    are then the pool's, untouched."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from laya import frames as F
+
+    kind, n = F.resolve(frames, family)
+    if n == 1:
+        return [{k: v for k, v in ex.items() if k != "history"} for ex in examples]
+    if any(ex.get("history") is None for ex in examples):
+        raise ValueError("these game examples carry no frame history (pool %s); %r needs it" % (pool_dir("games"),
+                                                                                               frames))
+
+    def png(arr):
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.fromarray(arr).save(buf, format="PNG", compress_level=1)
+        return buf.getvalue()
+
+    def one(ex):
+        st = F.state(list(ex["history"]) + [ex["state"]["image"]], frames, family,
+                     encode=png if kind == "trail" else None)
+        rest = {k: v for k, v in ex["state"].items() if k != "image"}
+        return dict({k: v for k, v in ex.items() if k != "history"}, state=dict(rest, **st))
+
+    if kind == "trail":
+        with ThreadPoolExecutor(16) as pool:  # decode, blend and encode; PIL and numpy release the GIL
+            return list(pool.map(one, examples))
+    return [one(ex) for ex in examples]
+
+
 class Context:
     """What an experiment gets: the budget, the device, checkpoint lookup and training data. Training data never
     includes the val splits or the calibration tail the harness fits temperatures on."""
@@ -257,16 +328,18 @@ class Context:
         self._train = train  # name -> train records minus the calibration tail
         self._games = games  # name -> expert game frames
 
-    def game_examples(self, names=tuple(GAME_DATASETS)) -> List[Dict]:
+    def game_examples(self, names=tuple(GAME_DATASETS), frames: str = "single") -> List[Dict]:
         """Expert frames from the data pool: Atari Freeway and Breakout (the expert agents' action distributions as
         soft targets where recorded) and ViZDoom basic (the scripted labeller). Each frame whose next step of the same
         episode was recorded carries that step's target as ``next_target`` (for a ``"next_head"`` model).
-        ``toolkit.py`` generates Maze, Snake and classic-control examples on the fly."""
+        ``frames`` is the ``laya.frames`` game frame mode of the states, built from each frame's recorded history
+        (a trail is blended here, once per call, and PNG-encoded). ``toolkit.py`` generates Maze, Snake and
+        classic-control examples on the fly."""
         out = []
         for name in names:
             if name not in GAME_DATASETS:
                 raise ValueError("%s is not a game dataset here (one of %s)" % (name, tuple(GAME_DATASETS)))
-            out += self._games[name]
+            out += game_states(self._games[name], frames, GAME_FAMILY[name])
         return out
 
     def train_examples(self, names=TRAINABLE_DATASETS) -> List[Dict]:
@@ -407,6 +480,57 @@ def _latency_cases(evals: Dict[str, List[Dict]]) -> List:
     return cases[:LATENCY_N]
 
 
+def _latency_game_frames() -> List:
+    """The fixed frame history the game move is timed on: CartPole (seed 0) under its scripted expert, one frame per
+    decision, ``LATENCY_MOVE_WARMUP + LATENCY_MOVES`` of them (the expert keeps the pole up, so the episode lasts)."""
+    from laya.controlgames import ControlGame
+
+    g = ControlGame("CartPole", 0)
+    frames = []
+    for _ in range(LATENCY_MOVE_WARMUP + LATENCY_MOVES):
+        frames.append(g.frame())
+        g.step(g.expert())
+    g.close()
+    return frames
+
+
+def time_game_moves(cand, ref, frames: List) -> Dict:
+    """Median time of one CartPole move at batch 1, each checkpoint in its own frame mode (the reference in
+    ``single``), as play makes it (``games_eval.move_fn``: state from the frame history, e.g. a trail's blend, then
+    the forward; stack-N keeps its frame cache across moves, so after the first N only the new frame is encoded).
+    Move ``i`` sees the history ``frames[:i + 1]``; the two checkpoints alternate per move like the questions. The
+    first ``LATENCY_MOVE_WARMUP`` moves are untimed (they also fill the cache)."""
+    import numpy as np
+    import torch
+
+    import games_eval
+    from laya import frames as F
+    from laya.games import control_question
+
+    moves = {}
+    for name, agent in (("cand", cand), ("ref", ref)):
+        mode = F.mode_for(agent.cfg, "control")
+        moves[name] = (mode, games_eval.move_fn(agent, control_question("CartPole", mode), mode, "control"))
+
+    def timed(name, i):
+        torch.cuda.synchronize()
+        t = time.perf_counter()
+        moves[name][1](frames[max(0, i + 1 - F.MAX_FRAMES):i + 1])
+        torch.cuda.synchronize()
+        return (time.perf_counter() - t) * 1000
+
+    ms, ref_ms = [], []
+    for i in range(len(frames)):
+        pair = [("cand", ms), ("ref", ref_ms)] if i % 2 == 0 else [("ref", ref_ms), ("cand", ms)]
+        for name, out in pair:
+            t = timed(name, i)
+            if i >= LATENCY_MOVE_WARMUP:
+                out.append(t)
+    return {"game_move_x": float(np.median(ms) / np.median(ref_ms)), "game_move_ms": float(np.median(ms)),
+            "game_move_ref_ms": float(np.median(ref_ms)), "game_move_p90_ms": float(np.percentile(ms, 90)),
+            "game_frames": moves["cand"][0], "game_moves": len(ms)}
+
+
 @app.cls(image=image, gpu="L4", cpu=4, memory=16384, timeout=20 * 60, volumes=VOLUMES,
          enable_memory_snapshot=True, single_use_containers=True)
 class Latency:
@@ -420,13 +544,15 @@ class Latency:
         import laya.vlm_train  # noqa: F401
 
         self.cases = _latency_cases(load_pool(("eval",))["eval"])
-        _log(t, "imports and %d latency cases" % len(self.cases))
+        self.game_frames = _latency_game_frames()
+        _log(t, "imports, %d latency cases and %d game frames" % (len(self.cases), len(self.game_frames)))
 
     @modal.method()
     def run(self, tag: str, commit: str) -> Dict:
         """Median ``predict`` time of the experiment's checkpoint, as a ratio to the base checkpoint's: both are
         loaded here and timed alternately on each case, so the L4 host's speed (raw times vary by ~50% between
-        hosts) cancels out."""
+        hosts) cancels out. Then the same for one game move in each checkpoint's frame mode (``time_game_moves``);
+        ``latency_x`` is the larger of the two ratios."""
         import numpy as np
         import torch
 
@@ -452,9 +578,11 @@ class Latency:
             pair = [(cand, ms), (ref, ref_ms)] if i % 2 == 0 else [(ref, ref_ms), (cand, ms)]
             for agent, out in pair:
                 out.append(timed(agent, state, qs))
-        return {"latency_x": float(np.median(ms) / np.median(ref_ms)), "latency_ms": float(np.median(ms)),
+        q_x = float(np.median(ms) / np.median(ref_ms))
+        game = time_game_moves(cand, ref, self.game_frames)
+        return {"latency_x": max(q_x, game["game_move_x"]), "latency_q_x": q_x, "latency_ms": float(np.median(ms)),
                 "latency_ref_ms": float(np.median(ref_ms)), "latency_p90_ms": float(np.percentile(ms, 90)),
-                "n": len(ms), "gpu": torch.cuda.get_device_name(0)}
+                "n": len(ms), "gpu": torch.cuda.get_device_name(0), **game}
 
 
 @app.cls(image=games_image, gpu="L4", cpu=16, memory=32768, timeout=30 * 60, volumes=VOLUMES,
@@ -497,14 +625,20 @@ def build_pool_part(kind: str, name: str) -> Dict:
                                 "rebuild" % (path, kind, POOL_KIND_VERSIONS[kind], POOL_VERSION))
     exs = pool_selection(kind, name)
     with ThreadPoolExecutor(64) as pool:  # each small-file read is ~0.4 s of latency; overlap many
-        exs = list(pool.map(_with_bytes, exs))
+        shared: Dict[str, bytes] = {} if kind == "games" else None
+        exs = list(pool.map(lambda ex: _with_bytes(ex, shared), exs))
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".tmp", "wb") as f:
         pickle.dump(exs, f, protocol=5)
     os.replace(path + ".tmp", path)
     data_vol.commit()
-    return {"kind": kind, "name": name, "examples": len(exs), "mb": round(os.path.getsize(path) / 1e6, 1),
-            "seconds": round(time.time() - t, 1)}
+    out = {"kind": kind, "name": name, "examples": len(exs), "mb": round(os.path.getsize(path) / 1e6, 1),
+           "seconds": round(time.time() - t, 1)}
+    if kind == "games":  # previous frames per example: POOL_HISTORY, fewer only near an episode's start / an auto-FIRE
+        from collections import Counter
+
+        out["history"] = dict(sorted(Counter(len(ex.get("history") or []) for ex in exs).items()))
+    return out
 
 
 def build_pool():
@@ -515,7 +649,8 @@ def build_pool():
             print("FAILED:", repr(r)[:300])
             continue
         total += r["mb"]
-        print("%-6s %-28s %6d examples %8.1f MB %6.1f s" % (r["kind"], r["name"], r["examples"], r["mb"], r["seconds"]))
+        print("%-6s %-28s %6d examples %8.1f MB %6.1f s%s" % (r["kind"], r["name"], r["examples"], r["mb"], r["seconds"],
+                                                           "  history lengths %s" % r["history"] if "history" in r else ""))
     print("pool %s: %.1f GB (%s)" % (POOL_VERSION, total / 1e3, ", ".join(
         "%s from pool-%s" % kv for kv in POOL_KIND_VERSIONS.items())))
 
@@ -624,7 +759,7 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         # the latency job and one games job per family, all on the saved checkpoint, at once
         lat = latency().run.spawn(tag, commit)
         fams = {f: games().run.spawn(tag, commit, f) for f in games_eval.FAMILIES}
-        res["summary"].update({k: v for k, v in lat.get().items() if k.startswith("latency")})
+        res["summary"].update({k: v for k, v in lat.get().items() if k.startswith(("latency", "game_move"))})
         played = {}
         for f, call in fams.items():
             played.update(call.get())
@@ -648,7 +783,8 @@ def main(tag: str = "", desc: str = "", prune: bool = True, prepare_pool: bool =
         json.dump(res, f, indent=2)
     s = res["summary"]
     print("---")
-    for k in ("quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x", "latency_ms", "latency_ref_ms"):
+    for k in ("quality", "macro_acc", "ece_hard", "games", "params_m", "latency_x", "latency_q_x", "latency_ms",
+              "latency_ref_ms", "game_move_x", "game_move_ms", "game_move_ref_ms"):
         print("%-17s %.4f" % (k + ":", s[k]))
     print("%-17s %.1f" % ("train_seconds:", res["train_s"]))
     print("%-17s %.1f" % ("total_seconds:", res["total_s"]))

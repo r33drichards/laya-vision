@@ -1,0 +1,405 @@
+{
+ "format_check": {
+  "single": {
+   "steps_compared": 150,
+   "pixel_mismatches": 0,
+   "label_mismatches": 0,
+   "question_same": true
+  },
+  "stack-2": {
+   "steps_compared": 150,
+   "pixel_mismatches": 0,
+   "label_mismatches": 0,
+   "question_same": true
+  },
+  "train_distribution": {
+   "states": 4568,
+   "right_frac": 0.513,
+   "abs_margin_pct": {
+    "10": 0.0081,
+    "25": 0.0282,
+    "50": 0.0867,
+    "75": 0.1232,
+    "90": 0.2091
+   }
+  }
+ },
+ "fit": [
+  {
+   "arm": {
+    "ckpt": "single",
+    "vision": false
+   },
+   "mode": "single",
+   "n_train": 3000,
+   "steps": 7905,
+   "train_minutes": 13.4,
+   "loss_first100": 0.6204038372635842,
+   "loss_last100": 0.1296782422810793,
+   "before": {
+    "train_acc": 0.537,
+    "heldout_acc": 0.501,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.48,
+      561
+     ],
+     "0.02-0.05": [
+      0.433,
+      30
+     ],
+     "0.05-0.1": [
+      0.457,
+      46
+     ],
+     "0.1-0.2": [
+      0.529,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 79,
+     "RIGHT": 1121
+    },
+    "play_scores": [
+     10.0,
+     14.0,
+     36.0,
+     10.0,
+     75.0,
+     13.0,
+     12.0,
+     10.0
+    ],
+    "play_mean": 22.5
+   },
+   "after": {
+    "train_acc": 0.948,
+    "heldout_acc": 0.495,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.537,
+      561
+     ],
+     "0.02-0.05": [
+      0.267,
+      30
+     ],
+     "0.05-0.1": [
+      0.522,
+      46
+     ],
+     "0.1-0.2": [
+      0.464,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 538,
+     "RIGHT": 662
+    },
+    "play_scores": [
+     22.0,
+     23.0,
+     105.0,
+     28.0,
+     52.0,
+     31.0,
+     35.0,
+     11.0
+    ],
+    "play_mean": 38.375
+   }
+  },
+  {
+   "arm": {
+    "ckpt": "single",
+    "vision": true
+   },
+   "mode": "single",
+   "n_train": 3000,
+   "steps": 4415,
+   "train_minutes": 13.6,
+   "loss_first100": 0.6250676369667053,
+   "loss_last100": 0.6066234016418457,
+   "before": {
+    "train_acc": 0.537,
+    "heldout_acc": 0.501,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.48,
+      561
+     ],
+     "0.02-0.05": [
+      0.433,
+      30
+     ],
+     "0.05-0.1": [
+      0.457,
+      46
+     ],
+     "0.1-0.2": [
+      0.529,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 79,
+     "RIGHT": 1121
+    },
+    "play_scores": [
+     10.0,
+     14.0,
+     36.0,
+     10.0,
+     75.0,
+     13.0,
+     12.0,
+     10.0
+    ],
+    "play_mean": 22.5
+   },
+   "after": {
+    "train_acc": 0.515,
+    "heldout_acc": 0.5,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.471,
+      561
+     ],
+     "0.02-0.05": [
+      0.533,
+      30
+     ],
+     "0.05-0.1": [
+      0.478,
+      46
+     ],
+     "0.1-0.2": [
+      0.529,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 0,
+     "RIGHT": 1200
+    },
+    "play_scores": [
+     9.0,
+     10.0,
+     9.0,
+     10.0,
+     8.0,
+     10.0,
+     10.0,
+     9.0
+    ],
+    "play_mean": 9.375
+   }
+  },
+  {
+   "arm": {
+    "ckpt": "stack-2",
+    "vision": false
+   },
+   "mode": "stack-2",
+   "n_train": 3000,
+   "steps": 5109,
+   "train_minutes": 14.0,
+   "loss_first100": 0.6208686965703964,
+   "loss_last100": 0.16361239984631537,
+   "before": {
+    "train_acc": 0.562,
+    "heldout_acc": 0.502,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.483,
+      561
+     ],
+     "0.02-0.05": [
+      0.567,
+      30
+     ],
+     "0.05-0.1": [
+      0.478,
+      46
+     ],
+     "0.1-0.2": [
+      0.52,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 425,
+     "RIGHT": 775
+    },
+    "play_scores": [
+     24.0,
+     35.0,
+     15.0,
+     11.0,
+     11.0,
+     33.0,
+     33.0,
+     23.0
+    ],
+    "play_mean": 23.125
+   },
+   "after": {
+    "train_acc": 0.94,
+    "heldout_acc": 0.492,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.488,
+      561
+     ],
+     "0.02-0.05": [
+      0.433,
+      30
+     ],
+     "0.05-0.1": [
+      0.522,
+      46
+     ],
+     "0.1-0.2": [
+      0.497,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 523,
+     "RIGHT": 677
+    },
+    "play_scores": [
+     13.0,
+     12.0,
+     35.0,
+     14.0,
+     15.0,
+     16.0,
+     19.0,
+     21.0
+    ],
+    "play_mean": 18.125
+   }
+  },
+  {
+   "arm": {
+    "ckpt": "stack-2",
+    "vision": true
+   },
+   "mode": "stack-2",
+   "n_train": 3000,
+   "steps": 3113,
+   "train_minutes": 13.8,
+   "loss_first100": 0.6295883461833001,
+   "loss_last100": 0.5974050337076187,
+   "before": {
+    "train_acc": 0.562,
+    "heldout_acc": 0.502,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.483,
+      561
+     ],
+     "0.02-0.05": [
+      0.567,
+      30
+     ],
+     "0.05-0.1": [
+      0.478,
+      46
+     ],
+     "0.1-0.2": [
+      0.52,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 425,
+     "RIGHT": 775
+    },
+    "play_scores": [
+     24.0,
+     35.0,
+     15.0,
+     11.0,
+     11.0,
+     33.0,
+     33.0,
+     23.0
+    ],
+    "play_mean": 23.125
+   },
+   "after": {
+    "train_acc": 0.515,
+    "heldout_acc": 0.5,
+    "heldout_by_abs_margin": {
+     "0-0.02": [
+      0.471,
+      561
+     ],
+     "0.02-0.05": [
+      0.533,
+      30
+     ],
+     "0.05-0.1": [
+      0.478,
+      46
+     ],
+     "0.1-0.2": [
+      0.529,
+      563
+     ],
+     "0.2-1e+09": [
+      null,
+      0
+     ]
+    },
+    "heldout_pred": {
+     "LEFT": 0,
+     "RIGHT": 1200
+    },
+    "play_scores": [
+     9.0,
+     10.0,
+     9.0,
+     10.0,
+     8.0,
+     10.0,
+     10.0,
+     9.0
+    ],
+    "play_mean": 9.375
+   }
+  }
+ ]
+}

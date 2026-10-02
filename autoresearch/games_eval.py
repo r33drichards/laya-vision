@@ -22,7 +22,17 @@ Families (the unit the harness runs in one container):
 Play is batched lockstep: all episodes of a game step together and each step is one batched model forward over
 every live episode's screen (``batched_probs``). For grid and control, if ``agent.cfg["search"]`` is truthy the
 actions come from ``laya.search.plan(agent, envs, question, settings)`` instead, where ``envs`` are the adapters
-below (``clone``, ``step``, ``render``, ``actions``, ``done``).
+below (``clone``, ``step``, ``render``, ``actions``, ``done``); search plays the ``single`` frame mode only.
+
+Frame modes (``laya.frames``). Every family plays in the checkpoint's own game frame mode,
+``laya.frames.mode_for(agent.cfg, family)``: ``cfg["game_frames"]`` (``"single"``, ``"trail-N"``, ``"stack-N"``), or
+``stack-2`` for Atari from an old ``atari_frames: 2`` checkpoint, else ``single``. Each episode keeps its frame
+history (the screens at its decision points, oldest first; the adapters' ``history()``, ``laya.atari_train.play``'s
+``hists``, ``play_doom``'s per-instance history, reset with each episode and, in Atari, after an auto-FIRE), and the
+state is ``laya.frames.state`` of it: at an episode's start the first frame is repeated. ``single`` plays exactly as
+before modes existed (the control games' two-frame ghost, one frame elsewhere). For ``stack-N`` the vision tower
+runs once per distinct frame (``FrameFeatureCache``, kept for N steps), as the Atari player does; the language model
+sees N images per decision. The random and expert baselines do not depend on the mode.
 
 Seeds: episode ``i`` of a game uses seed ``SEED_BASE[family] + i`` (see ``SUITE``). They lie in 700,000-799,999,
 off every range the repo trains or evaluates on: Atari expert data 1,000+ (val) / 2,000+ (train) and its baselines
@@ -46,6 +56,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
+
+from laya import frames as F
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BASELINES_PATH = os.path.join(HERE, "game_baselines.json")
@@ -98,9 +110,32 @@ def family_games(family: str, suite: Dict[str, GameSpec] = SUITE) -> List[GameSp
 # ---------------------------------------------------------------------------------------------------------------
 
 
-class GridAdapter:
+class _Frames:
+    """Frame history for an adapter: ``history()`` is the episode's screens at its decision points so far, oldest
+    first, ending with the current one (at most ``laya.frames.MAX_FRAMES``). The current screen joins the history
+    the first time it is asked for at a step; lockstep play asks every live episode every step."""
+
+    _hist: List = []
+    _seen = -1
+
+    def history(self) -> List:
+        if self._seen != self.steps:
+            self._hist = (list(self._hist) + [self.frame()])[-F.MAX_FRAMES:]
+            self._seen = self.steps
+        return self._hist
+
+    def state(self, mode: str) -> Dict:
+        return F.state(self.history(), mode, self.family)
+
+    def _copy_history(self, other) -> None:
+        other._hist, other._seen = list(self._hist), self._seen
+
+
+class GridAdapter(_Frames):
     """A ``laya.gridgames`` Maze or Snake episode. ``score`` is the benchmark metric for this episode (1 when the
     maze is solved; food eaten in Snake) and ``step`` returns its change as the reward."""
+
+    family = "grid"
 
     def __init__(self, env, actions: Sequence[str], seed: int = 0):
         self.env, self.actions, self.seed = env, tuple(actions), seed
@@ -126,20 +161,26 @@ class GridAdapter:
     def render(self):
         return self.env.render()
 
+    def frame(self) -> np.ndarray:
+        return np.asarray(self.env.render())
+
     def expert(self) -> str:
         return self.env.expert()
 
     def clone(self) -> "GridAdapter":
-        return GridAdapter(copy.deepcopy(self.env), self.actions, self.seed)
+        c = GridAdapter(copy.deepcopy(self.env), self.actions, self.seed)
+        self._copy_history(c)
+        return c
 
 
-class ControlAdapter:
+class ControlAdapter(_Frames):
     """A ``laya.controlgames.ControlGame`` episode capped at ``cap`` steps; the reward is the environment's.
     Cloning deep-copies the Gymnasium env minus its pygame surface and clock (recreated on the next render).
     A game whose env cannot be deep-copied (LunarLander: its Box2D world) is not ``searchable``: it is played
     greedy, and ``clone`` raises TypeError."""
 
     _clonable: Dict[str, bool] = {}  # game -> whether its env survives deepcopy (probed once)
+    family = "control"
 
     def __init__(self, game, cap: Optional[int], actions: Sequence[str], seed: int = 0):
         self.game, self.cap, self.actions, self.seed = game, cap, tuple(actions), seed
@@ -172,13 +213,18 @@ class ControlAdapter:
     def render(self):
         return self.game.render()
 
+    def frame(self) -> np.ndarray:
+        return self.game.frame()
+
     def expert(self) -> str:
         return self.game.expert()
 
     def clone(self) -> "ControlAdapter":
         if not self.searchable:
             raise TypeError("%s cannot be cloned (its env does not survive deepcopy)" % self.game.game)
-        return ControlAdapter(self._copy(), self.cap, self.actions, self.seed)
+        c = ControlAdapter(self._copy(), self.cap, self.actions, self.seed)
+        self._copy_history(c)
+        return c
 
     def close(self) -> None:
         self.game.close()
@@ -209,13 +255,14 @@ def _faithful_copy(name: str) -> bool:
         g.close()
 
 
-def question_for(spec: GameSpec) -> Dict:
+def question_for(spec: GameSpec, frames: str = "single") -> Dict:
+    """The fixed question of a grid or control game; the control questions describe the frame mode's screen."""
     from laya.games import control_question, maze_question, snake_question
 
     if spec.family == "grid":
         return maze_question() if spec.params["game"] == "maze" else snake_question()
     if spec.family == "control":
-        return control_question(spec.params["game"])
+        return control_question(spec.params["game"], frames)
     raise ValueError("no fixed question for %s" % spec.name)
 
 
@@ -248,21 +295,60 @@ def _pool() -> ThreadPoolExecutor:
     return _POOL
 
 
+ProbsFn = Callable[..., np.ndarray]
 FORWARD_BATCH = 16  # sequences per model forward: small enough to overlap with the next chunk's preprocessing
 
 
-def _item(agent, q: Dict, frame, prev=None) -> Dict:
-    """One sequence as ``laya.atari_train.action_probs`` builds it (the processor runs here on that backend)."""
+def _item(agent, q: Dict, frames: Sequence) -> Dict:
+    """One sequence as ``laya.atari_train.action_probs`` builds it (the processor runs here on that backend):
+    ``frames`` is the state's images, oldest first; one image is ``{"image": frame}``."""
     from laya.common import QTYPES
     from laya.vlm import build_vlm_inputs
 
-    state = {"image": frame} if prev is None else {"images": [prev, frame]}
+    state = {"image": frames[0]} if len(frames) == 1 else {"images": list(frames)}
     it = build_vlm_inputs(agent.processor, state, q, agent.cfg.get("max_len", 1024), agent.cfg.get("head_max_len", 256))
     it["qtype"] = QTYPES["choice"]
     return it
 
 
-def _forward(agent, items: List[Dict], k: int) -> np.ndarray:
+def _text_item(agent, q: Dict, n_images: int) -> Dict:
+    """The sequence for ``n_images`` images whose features come from elsewhere (the frame cache): the ids depend
+    only on the image count (``laya.preprocess.prefix_ids``, what the processor writes without splitting), so no
+    pixel is touched."""
+    from laya.common import QTYPES
+    from laya.preprocess import prefix_ids
+    from laya.vlm import MASK_PREFIX_TEXT, PREFIX_TEXT, build_vlm_inputs, processor_readout
+
+    if agent.prep.split_edge:
+        raise ValueError("the frame cache needs one view per image (image_split_edge 0)")
+    text = MASK_PREFIX_TEXT if processor_readout(agent.processor) == "mask" else PREFIX_TEXT
+    prefix = {"ids": prefix_ids(agent.processor, text, n_images, agent.prep.image_seq_len), "pixel_values": None,
+              "pixel_attention_mask": None, "raw_images": None, "n_images": n_images}
+    it = build_vlm_inputs(agent.processor, {}, q, agent.cfg.get("max_len", 1024), agent.cfg.get("head_max_len", 256),
+                          prefix=prefix)
+    it["qtype"] = QTYPES["choice"]
+    return it
+
+
+def _encode(agent, frames: Sequence[np.ndarray]):
+    """Vision tower + connector over raw frames -> ``[n, image_seq_len, d]`` (``laya.atari_train.encode_frames``),
+    with the processor's per-frame CPU work spread over the thread pool on that backend."""
+    import torch
+
+    from laya.vlm import vlm_prefix
+
+    if agent.prep.on_gpu:
+        with torch.no_grad():
+            return agent.model.encode_raw_images(list(frames))
+    per = list(_pool().map(lambda f: vlm_prefix(agent.processor, [f], agent.prep), frames))
+    dev, dtype = agent.device, agent.model.encoder.dtype
+    pv = torch.stack([p["pixel_values"][0] for p in per]).to(dev, dtype)
+    pam = torch.stack([p["pixel_attention_mask"][0] for p in per]).to(dev)
+    with torch.no_grad():
+        return agent.model.encode_images(pv, pam)
+
+
+def _forward(agent, items: List[Dict], k: int, feats=None) -> np.ndarray:
     """``action_probs``'s forward and calibration (no feature cache) over prepared items. Checked on an L4 in
     bf16: ``batched_probs`` and ``action_probs`` on the same 24 frames agree exactly (max difference 0.0)."""
     import torch
@@ -270,9 +356,11 @@ def _forward(agent, items: List[Dict], k: int) -> np.ndarray:
     from laya.common import QTYPES, temp_bucket
     from laya.vlm import collate_vlm
 
-    b = collate_vlm(items, agent.processor.tokenizer.pad_token_id)
+    b = collate_vlm(items, agent.processor.tokenizer.pad_token_id, with_pixels=feats is None)
     dev, dtype = agent.device, agent.model.encoder.dtype
-    if b["pixel_values"] is not None:
+    if feats is not None:
+        pix = dict(image_hidden_states=feats)
+    elif b["pixel_values"] is not None:
         pix = dict(pixel_values=b["pixel_values"].to(dev, dtype), pixel_attention_mask=b["pixel_attention_mask"].to(dev))
     else:
         pix = dict(raw_pixels=b["raw_pixels"].to(dev), image_mask=b["image_mask"].to(dev))
@@ -285,10 +373,17 @@ def _forward(agent, items: List[Dict], k: int) -> np.ndarray:
     return torch.softmax(logits[:, :k].float() / max(1e-3, float(t)), -1).cpu().numpy()
 
 
-def batched_probs(agent, frames: Sequence, question: Dict, prev_frames: Optional[Sequence] = None) -> np.ndarray:
+def batched_probs(agent, frames: Sequence, question: Dict, prev_frames: Optional[Sequence] = None,
+                  cache=None) -> np.ndarray:
     """The calibrated option probabilities (question order) for many frames, as
     ``laya.atari_train.action_probs(agent, frames, question, prev_frames)`` computes them -- the same sequences,
     forward and temperature, so the same answer as ``predict`` with one option order -- but fast for big batches.
+
+    Each entry of ``frames`` is one state: a frame (one image) or a list of frames (``{"images": [...]}``, oldest
+    first); ``prev_frames`` makes the states ``[prev, frame]`` (old callers). With a ``cache``
+    (``laya.preprocess.FrameFeatureCache``; the states must then all have the same number of images) the vision
+    tower runs only on frames the cache has not seen, and the language model gets their features: stack-N play
+    encodes each frame once.
 
     With the Hugging Face processor backend (the released checkpoint) preprocessing costs 30-45 ms of CPU per
     frame (measured on a Modal L4 host; the forward is ~10 ms per frame there) and would dominate, so every frame's sequence is built on a thread pool and the model runs a forward of
@@ -303,40 +398,99 @@ def batched_probs(agent, frames: Sequence, question: Dict, prev_frames: Optional
     n = len(frames)
     if n == 0:
         return np.zeros((0, k), np.float32)
-    frames = [np.asarray(f) for f in frames]
-    prev = [None] * n if prev_frames is None else [np.asarray(f) for f in prev_frames]
+    states = [[np.asarray(g) for g in f] if isinstance(f, (list, tuple)) else [np.asarray(f)] for f in frames]
+    if prev_frames is not None:
+        states = [[np.asarray(p)] + st for p, st in zip(prev_frames, states)]
+    if cache is not None:
+        import torch
+
+        m = len(states[0])
+        if any(len(st) != m for st in states):
+            raise ValueError("cached states must all have the same number of images")
+        item = _text_item(agent, q, m)
+        flat = [f for st in states for f in st]
+        feats = torch.stack(cache.features(lambda fs: _encode(agent, fs), flat))
+        return np.concatenate([_forward(agent, [item] * (min(n, s + FORWARD_BATCH) - s), k,
+                                        feats[s * m:min(n, s + FORWARD_BATCH) * m])
+                               for s in range(0, n, FORWARD_BATCH)], 0)
     if agent.prep.on_gpu:
-        get = lambda j: _item(agent, q, frames[j], prev[j])  # noqa: E731
+        get = lambda j: _item(agent, q, states[j])  # noqa: E731
     else:
-        futures = [_pool().submit(_item, agent, q, f, p) for f, p in zip(frames, prev)]
+        futures = [_pool().submit(_item, agent, q, st) for st in states]
         get = lambda j: futures[j].result()  # noqa: E731
     return np.concatenate([_forward(agent, [get(j) for j in range(s, min(n, s + FORWARD_BATCH))], k)
                            for s in range(0, n, FORWARD_BATCH)], 0)
 
 
-ProbsFn = Callable[..., np.ndarray]
+def frame_cache(mode: str, family: str):
+    """The encoder-feature cache play uses in ``mode``: one for ``stack-N`` (N > 1), holding each frame's features
+    for the N steps it stays in the window; None otherwise (one image per state, nothing repeats)."""
+    from laya.preprocess import FrameFeatureCache
+
+    kind, n = F.resolve(mode, family)
+    return FrameFeatureCache(keep=n) if kind == "stack" and n > 1 else None
 
 
-def greedy_policy(agent, question: Dict, probs_fn: ProbsFn = batched_probs):
-    """``policy(envs) -> actions``: one batched forward over every env's rendered screen, argmax per env.
+def state_input(history: Sequence, mode: str, family: str):
+    """What ``batched_probs`` gets for one episode: its frame history's state in ``mode`` as a frame (one image)
+    or a list of frames (a stack)."""
+    imgs = [np.asarray(x) for x in F.state_images(F.state(history, mode, family))]
+    return imgs[0] if len(imgs) == 1 else imgs
 
-    The question is fixed, so the answer is a function of the screen alone: each distinct screen goes to the model
-    once per game and repeats reuse its action. A maze agent that walks into a wall sees the same screen again and
-    would bump it until the cap; this makes those steps free (and the answer to a screen consistent across batch
-    compositions). ``policy.frames`` counts the screens actually sent to the model."""
+
+def move_fn(agent, question: Dict, mode: str, family: str, probs_fn: ProbsFn = None):
+    """One decision of one episode exactly as play makes it, for timing (the harness's per-move latency):
+    ``move(history) -> probs`` builds the state from the frame history (blending a trail), then runs the forward,
+    with the mode's frame cache kept across calls, so consecutive histories of one episode encode only the new
+    frame (the steady state of stack-N play)."""
+    probs_fn = probs_fn or batched_probs
+    cache = frame_cache(mode, family)
+    q = question["action"]
+
+    def move(history):
+        x = state_input(history, mode, family)
+        return probs_fn(agent, [x], q, cache=cache) if cache is not None else probs_fn(agent, [x], q)
+
+    return move
+
+
+
+
+def _key(x) -> tuple:
+    frames = x if isinstance(x, list) else [x]
+    return tuple((f.shape, hashlib.blake2b(f.tobytes(), digest_size=16).digest()) for f in frames)
+
+
+def greedy_policy(agent, question: Dict, probs_fn: ProbsFn = batched_probs, mode: str = "single"):
+    """``policy(envs) -> actions``: one batched forward over every env's state, argmax per env.
+
+    In the ``single`` frame mode the state is the rendered screen (``render()``: the control games ghost the
+    previous frame); in any other mode it is ``laya.frames.state`` of the env's frame history. The question is
+    fixed, so the answer is a function of the state alone: each distinct state goes to the model once per game and
+    repeats reuse its action. A maze agent that walks into a wall sees the same screen again and would bump it
+    until the cap; this makes those steps free (and the answer to a state consistent across batch compositions).
+    ``policy.frames`` counts the states actually sent to the model."""
     q = question["action"]
     memo: Dict = {}
+    cache = None
 
     def policy(envs):
-        frames = [np.asarray(e.render()) for e in envs]
-        keys = [(f.shape, hashlib.blake2b(f.tobytes(), digest_size=16).digest()) for f in frames]
+        nonlocal cache
+        if mode == "single":
+            frames = [np.asarray(e.render()) for e in envs]
+        else:
+            frames = [state_input(e.history(), mode, e.family) for e in envs]
+            if cache is None and envs:
+                cache = frame_cache(mode, envs[0].family)
+        keys = [_key(f) for f in frames]
         new, seen = [], set()
         for j, k in enumerate(keys):
             if k not in memo and k not in seen:
                 seen.add(k)
                 new.append((k, j))
         if new:
-            p = probs_fn(agent, [frames[j] for _, j in new], q)
+            batch = [frames[j] for _, j in new]
+            p = probs_fn(agent, batch, q, cache=cache) if cache is not None else probs_fn(agent, batch, q)
             for (k, _), row in zip(new, p):
                 memo[k] = int(row.argmax())
             policy.frames += len(new)
@@ -398,16 +552,25 @@ def play_lockstep(spec: GameSpec, policy, envs: Optional[List] = None) -> Dict:
             "decisions": decisions}
 
 
-def atari_model_policy(agent, game: str, actions: Sequence[str], probs_fn: ProbsFn = batched_probs):
-    """``laya.atari_train.model_policy`` (greedy, frame count from the checkpoint) with the batched forward."""
+def atari_model_policy(agent, game: str, actions: Sequence[str], probs_fn: ProbsFn = batched_probs,
+                       mode: Optional[str] = None):
+    """``laya.atari_train.model_policy`` (greedy, frame mode from the checkpoint) with the batched forward. In a
+    mode other than ``single`` the policy asks ``play`` for each episode's observation history (``hists``)."""
     from laya.games import atari_question
 
     q = atari_question(game, actions)["action"]
-    two = int(agent.cfg.get("atari_frames", 1)) == 2
+    mode = F.mode_for(getattr(agent, "cfg", None), "atari") if mode is None else mode
+    cache = frame_cache(mode, "atari")
 
-    def policy(obs, prevs, ids=None):
-        return [int(r.argmax()) for r in probs_fn(agent, obs, q, prevs if two else None)]
+    def policy(obs, prevs, ids=None, hists=None):
+        if mode == "single":
+            p = probs_fn(agent, obs, q)
+        else:
+            x = [state_input(h, mode, "atari") for h in hists]
+            p = probs_fn(agent, x, q, cache=cache) if cache is not None else probs_fn(agent, x, q)
+        return [int(r.argmax()) for r in p]
 
+    policy.wants_history = mode != "single"
     return policy
 
 
@@ -433,12 +596,14 @@ def _doom_game(scenario: str, labels: bool):
     return g
 
 
-def play_doom(spec: GameSpec, policy: str, agent=None, probs_fn: ProbsFn = batched_probs) -> Dict:
+def play_doom(spec: GameSpec, policy: str, agent=None, probs_fn: ProbsFn = batched_probs,
+              mode: Optional[str] = None) -> Dict:
     """ViZDoom ``basic`` as ``modal_app.play_doom`` plays it (320x240 RGB, ``DOOM_TICS`` tics per decision,
     ``doom_question``), but ``DOOM_PARALLEL`` instances step in lockstep so the model sees a batch per step.
     Episode ``i`` is ``set_seed(seed + i)`` on whichever instance plays it, so results do not depend on the
     batching. ``policy``: ``model``, ``expert`` (labels-buffer script, ATTACK when no monster is visible) or
-    ``random``."""
+    ``random``. The model plays in ``mode`` (default: the checkpoint's), from each episode's screens at its
+    decision points (``DOOM_TICS`` apart), as ``prepare_doom_basic`` records them."""
     from laya.games import doom_basic_expert, doom_buttons, doom_question
 
     scenario = spec.params["scenario"]
@@ -450,8 +615,13 @@ def play_doom(spec: GameSpec, policy: str, agent=None, probs_fn: ProbsFn = batch
     todo = list(range(spec.episodes))
     slot: Dict[int, int] = {}  # game instance -> episode it is playing
     rngs = {i: random.Random(spec.seed + i) for i in range(spec.episodes)}
+    if policy == "model":
+        mode = F.mode_for(getattr(agent, "cfg", None), "doom") if mode is None else mode
+        cache = frame_cache(mode, "doom")
+    hist: Dict[int, List] = {}  # game instance -> its episode's screens so far
 
     def start(k):
+        hist[k] = []
         if todo:
             ep = todo.pop(0)
             games[k].set_seed(spec.seed + ep)
@@ -466,7 +636,13 @@ def play_doom(spec: GameSpec, policy: str, agent=None, probs_fn: ProbsFn = batch
         live = sorted(slot)
         states = [games[k].get_state() for k in live]
         if policy == "model":
-            p = probs_fn(agent, [s.screen_buffer for s in states], q)
+            if mode == "single":
+                p = probs_fn(agent, [s.screen_buffer for s in states], q)
+            else:
+                for k, s in zip(live, states):
+                    hist[k] = (hist[k] + [s.screen_buffer])[-F.MAX_FRAMES:]
+                x = [state_input(hist[k], mode, "doom") for k in live]
+                p = probs_fn(agent, x, q, cache=cache) if cache is not None else probs_fn(agent, x, q)
             acts = [buttons[int(r.argmax())] for r in p]
         elif policy == "expert":
             acts = [doom_basic_expert(s.labels) or "ATTACK" for s in states]
@@ -513,22 +689,28 @@ def normalize(model: float, rnd: float, expert: float) -> Optional[float]:
 
 
 def play_model(spec: GameSpec, agent, probs_fn: ProbsFn = batched_probs) -> Dict:
-    """One game with the model; adds ``search`` (whether the search hook chose the actions)."""
+    """One game with the model, in the checkpoint's frame mode; adds ``search`` (whether the search hook chose
+    the actions) and ``frames`` (the mode)."""
+    mode = F.mode_for(getattr(agent, "cfg", None), spec.family)
     if spec.family in ("grid", "control"):
-        q = question_for(spec)
+        q = question_for(spec, mode)
         settings = (getattr(agent, "cfg", None) or {}).get("search")
         use_search = bool(settings) and make_env(spec, 0).searchable
-        policy = search_policy(agent, q, settings) if use_search else greedy_policy(agent, q, probs_fn)
+        if use_search and mode != "single":
+            raise ValueError("search plays the single frame mode only, not %r" % mode)
+        policy = search_policy(agent, q, settings) if use_search else greedy_policy(agent, q, probs_fn, mode)
         out = play_lockstep(spec, policy)
         out["search"] = use_search
         out["model_frames"] = getattr(policy, "frames", None)
-        return out
-    if spec.family == "atari":
+    elif spec.family == "atari":
         from laya.atari_train import game_actions
 
-        return play_atari(spec, atari_model_policy(agent, spec.params["game"], game_actions(spec.params["game"]),
-                                                   probs_fn))
-    return play_doom(spec, "model", agent, probs_fn)
+        out = play_atari(spec, atari_model_policy(agent, spec.params["game"], game_actions(spec.params["game"]),
+                                                  probs_fn, mode))
+    else:
+        out = play_doom(spec, "model", agent, probs_fn, mode)
+    out["frames"] = mode
+    return out
 
 
 def run_family(agent, family: str, suite: Dict[str, GameSpec] = SUITE, baselines: Optional[Dict[str, Dict]] = None,
@@ -558,7 +740,7 @@ def _run_games(agent, family, suite, baselines, probs_fn, out) -> None:
                           "episodes": spec.episodes, "seconds": round(time.time() - t0, 1),
                           "random": base["random"], "expert": base["expert"], "scores": res["scores"],
                           "decisions": res["decisions"], "model_frames": res.get("model_frames", res["decisions"]),
-                          "search": res.get("search", False)}
+                          "search": res.get("search", False), "frames": res.get("frames", "single")}
 
 
 def summarize(results: Dict[str, Dict], suite: Dict[str, GameSpec] = SUITE) -> Dict:

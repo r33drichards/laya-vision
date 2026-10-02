@@ -2002,8 +2002,15 @@ def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int
     """Play ``episodes`` of ViZDoom ``basic`` and report reward and kill rate.
 
     ``policy`` is ``model`` (``model`` = a run under /ckpt/smolvlm or a Hub id), ``expert`` (the scripted labeller),
-    ``random``, or ``always_attack``. Seeds are disjoint from the training and val data.
+    ``random``, or ``always_attack``. Seeds are disjoint from the training and val data. The model plays in its
+    game frame mode (``laya.frames.mode_for(cfg, "doom")``, recorded as ``frames``) from each episode's screens at
+    its decision points; ``single`` sends the current screen alone, as before modes existed.
     """
+    return _play_doom(policy, model, episodes, tics, seed)
+
+
+def _play_doom(policy: str, model: str, episodes: int, tics: int, seed: int, agent=None) -> dict:
+    """``play_doom``'s body; ``agent`` overrides loading ``model`` (tests pass a stub)."""
     import random
     from collections import Counter
 
@@ -2011,17 +2018,16 @@ def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int
     import vizdoom as vzd
     from PIL import Image
 
+    from laya import frames as F
     from laya.games import doom_basic_expert, doom_buttons, doom_question
 
     g = _doom_game("basic", labels=policy == "expert")
     buttons = doom_buttons(g)
     one_hot = {b: [i == j for j in range(len(buttons))] for i, b in enumerate(buttons)}
-    agent = None
+    mode = None
     if policy == "model":
-        from laya.vlm import VLMAgent
-
-        path = _ckpt_path(model)
-        agent = VLMAgent(path if os.path.exists(path) else model, device="cuda", dtype="bf16")
+        agent = agent or _load_policy_agent(model)
+        mode = F.mode_for(agent.cfg, "doom")
     qs = doom_question("basic", buttons)
     rng = random.Random(seed)
     rets, kills, lengths, counts = [], 0, [], Counter()
@@ -2030,10 +2036,12 @@ def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int
         g.set_seed(seed + ep)
         g.new_episode()
         steps = 0
+        hist = F.History(F.frames_needed(mode, "doom")) if mode else None  # this episode's decision screens
         while not g.is_episode_finished():
             s = g.get_state()
             if policy == "model":
-                act = agent.predict({"image": Image.fromarray(s.screen_buffer)}, qs)["answers"]["action"]["choice"]
+                hist.push(s.screen_buffer)
+                act = agent.predict(hist.state(mode, "doom", Image.fromarray), qs)["answers"]["action"]["choice"]
             elif policy == "expert":
                 act = doom_basic_expert(s.labels) or "ATTACK"
             elif policy == "always_attack":
@@ -2050,6 +2058,8 @@ def play_doom(policy: str = "model", model: str = "all3-3ep/best", episodes: int
     out = {"policy": policy if policy != "model" else "model:" + model, "episodes": episodes,
            "mean_reward": float(np.mean(rets)), "std_reward": float(np.std(rets)), "kill_rate": kills / episodes,
            "mean_steps": float(np.mean(lengths)), "actions": dict(counts), "seconds": round(time.time() - t0, 1)}
+    if mode:
+        out["frames"] = mode
     print(json.dumps(out))
     return out
 
@@ -2134,18 +2144,27 @@ def _load_policy_agent(model: str):
     return VLMAgent(path if os.path.exists(path) else model, device="cuda", dtype="bf16")
 
 
-def _play_grid(game: str, policy: str, model: str, episodes: int, size: int, seed: int, max_steps: int) -> dict:
+def _play_grid(game: str, policy: str, model: str, episodes: int, size: int, seed: int, max_steps: int,
+               agent=None) -> dict:
+    """Maze or Snake with ``policy``; the model (``agent``, else loaded from ``model``) plays in its game frame
+    mode (``laya.frames.mode_for(cfg, "grid")``), recorded as ``frames``."""
+    from laya import frames as F
     from laya import gridgames
 
     t0 = time.time()
+    mode = None
     if policy == "model":
-        fn = gridgames.model_policy(_load_policy_agent(model), game)
+        agent = agent or _load_policy_agent(model)
+        mode = F.mode_for(agent.cfg, "grid")
+        fn = gridgames.model_policy(agent, game, mode)
     elif policy == "expert":
         fn = gridgames.expert_policy
     else:
         fn = gridgames.random_policy(seed)
     out = gridgames.play_episodes(game, fn, episodes, size, seed, max_steps)
     out.update(policy="model:" + model if policy == "model" else policy, seconds=round(time.time() - t0, 1))
+    if mode:
+        out["frames"] = mode
     print(json.dumps({k: v for k, v in out.items() if k != "results"}))
     return out
 
@@ -2222,15 +2241,24 @@ def _atari_baseline(game: str) -> dict:
 def play_atari_game(game: str, model: str, episodes: int = 3, max_steps: int = 4500, seed: int = 100_000,
                     random_episodes: int = 10):
     """One Atari game with a checkpoint, greedy, at the settings of ``modal_atari_train.play_atari`` (same seeds,
-    step cap, auto-FIRE and frame count from the checkpoint), so the numbers compare with ``atari_eval``'s.
+    step cap, auto-FIRE), so the numbers compare with ``atari_eval``'s, in the checkpoint's game frame mode
+    (``laya.frames.mode_for(cfg, "atari")``: ``game_frames``, else ``stack-2`` for an old ``atari_frames: 2``
+    checkpoint, else ``single``; recorded as ``frames``).
     ``normalized`` is (model - random) / (expert - random) against the expert data's baseline, when there is one."""
+    return _play_atari_game(game, model, episodes, max_steps, seed, random_episodes)
+
+
+def _play_atari_game(game: str, model: str, episodes: int, max_steps: int, seed: int, random_episodes: int,
+                     agent=None) -> dict:
+    """``play_atari_game``'s body; ``agent`` overrides loading ``model`` (tests pass a stub)."""
+    from laya import frames as F
     from laya.atari_train import game_actions, model_policy, play, random_policy
 
     t0 = time.time()
     actions = game_actions(game)
     rnd = play(game, random_policy(len(actions), seed), random_episodes, max_steps, seed)
-    agent = _load_policy_agent(model)
-    frames = int(agent.cfg.get("atari_frames", 1))
+    agent = agent or _load_policy_agent(model)
+    frames = F.mode_for(agent.cfg, "atari")
     res = play(game, model_policy(agent, game, actions, False, seed, frames), episodes, max_steps, seed)
     base = _atari_baseline(game)
     norm = None
@@ -2253,15 +2281,25 @@ control_image = _with_local_code(base_image.pip_install("gymnasium[classic-contr
 def play_control(game: str, model: str, episodes: int = 10, seed: int = GRID_SEED):
     """One classic-control game (``laya.controlgames``: CartPole, Acrobot, MountainCar, LunarLander) with a
     checkpoint, greedy, plus the scripted expert and random play on the same seeded episodes. Each step the
-    rendered screen (previous frame ghosted in) and ``laya.games.control_question`` go to ``predict``.
+    screen in the checkpoint's game frame mode (``laya.frames.mode_for(cfg, "control")``, recorded as ``frames``:
+    ``single`` is the rendered screen with the previous frame ghosted in, ``trail-N`` / ``stack-N`` come from the
+    episode's frame history) and ``laya.games.control_question`` for that mode go to ``predict``.
     ``normalized`` is (model - random) / (expert - random)."""
+    return _play_control(game, model, episodes, seed)
+
+
+def _play_control(game: str, model: str, episodes: int, seed: int, agent=None) -> dict:
+    """``play_control``'s body; ``agent`` overrides loading ``model`` (tests pass a stub)."""
     from laya import controlgames as cg
+    from laya import frames as F
 
     t0 = time.time()
     exp = cg.play_episodes(game, cg.expert_policy, episodes, seed)
     rnd = cg.play_episodes(game, cg.random_policy(seed), episodes, seed)
-    res = cg.play_episodes(game, cg.model_policy(_load_policy_agent(model), game), episodes, seed)
-    out = {"game": game, "model": model, "episodes": episodes, "seed": seed,
+    agent = agent or _load_policy_agent(model)
+    mode = F.mode_for(agent.cfg, "control")
+    res = cg.play_episodes(game, cg.model_policy(agent, game, mode), episodes, seed)
+    out = {"game": game, "model": model, "frames": mode, "episodes": episodes, "seed": seed,
            "model_score": res["mean_score"], "model_scores": [e["score"] for e in res["results"]],
            "model_solved": res["solved_rate"], "model_steps": res["mean_steps"], "actions": res["actions"],
            "random_score": rnd["mean_score"], "random_solved": rnd["solved_rate"],

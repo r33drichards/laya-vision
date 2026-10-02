@@ -130,8 +130,33 @@ def _fmt(v: Optional[float], fmt: str = "%.1f") -> str:
     return "–" if v is None else fmt % v
 
 
+def frame_modes(games: Dict) -> str:
+    """The game frame modes the model played in (``laya.frames``), as recorded in each result's ``frames``:
+    ``"stack-2"``, or ``"atari stack-2, control single, ..."`` when the families differ; ``""`` for a results file
+    from before modes were recorded (only Atari's old frame count, 1). An old count N > 1 reads as ``stack-N``."""
+    fams = {}
+    for fam in ("atari", "doom", "maze", "snake", "control"):
+        rows = games.get(fam) or []
+        rows = list(rows.values()) if isinstance(rows, dict) else rows
+        for r in rows:
+            m = r.get("frames")
+            if isinstance(m, int) and not isinstance(m, bool):
+                m = None if m == 1 else "stack-%d" % m
+            if m:
+                fams.setdefault(fam, set()).add(str(m))
+    if not fams:
+        return ""
+    modes = {m for ms in fams.values() for m in ms}
+    if len(modes) == 1:
+        return modes.pop()
+    return ", ".join("%s %s" % (f, "/".join(sorted(ms))) for f, ms in fams.items())
+
+
 def games_section(games: Dict) -> List[str]:
     lines = ["#### Games", ""]
+    modes = frame_modes(games)
+    if modes:
+        lines += ["Game frame mode (`laya.frames`): `%s`." % modes, ""]
     if games.get("atari"):
         lines += ["**Atari** (greedy; normalized: 0 = random, 1 = expert)", "",
                   "| game | model | random | expert | normalized | top actions |", "|---|---:|---:|---:|---:|---|"]
@@ -774,7 +799,8 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
 
     if g and any(g.values()):
         sec = ['<section><div class="eyebrow">Games</div><h2>Playing games from pixels</h2><p class="lede">Each step the screen is the '
-               'image and the options are the game\'s buttons. Every policy plays the same seeded episodes.</p><div class="stack">']
+               'image and the options are the game\'s buttons. Every policy plays the same seeded episodes.%s</p><div class="stack">'
+               % (" Game frame mode: <span class=\"mono\">%s</span>." % _e(frame_modes(g)) if frame_modes(g) else "")]
         if g.get("atari"):
             rows = []
             for r in sorted(g["atari"], key=lambda r: r["game"]):

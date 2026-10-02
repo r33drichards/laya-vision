@@ -23,6 +23,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from . import frames as F
+
 ACTIONS = ("UP", "DOWN", "LEFT", "RIGHT")
 MOVES = {"UP": (-1, 0), "DOWN": (1, 0), "LEFT": (0, -1), "RIGHT": (0, 1)}
 OPPOSITE = {"UP": "DOWN", "DOWN": "UP", "LEFT": "RIGHT", "RIGHT": "LEFT"}
@@ -272,12 +274,19 @@ def random_policy(seed: int = 0):
     return lambda env: rng.choice(ACTIONS)
 
 
-def model_policy(agent, game: str):
-    """The model's most likely action from the rendered screen, via ``predict`` like the live viewers."""
+def model_policy(agent, game: str, mode: str = "single"):
+    """The model's most likely action from the rendered screen, via ``predict`` like the live viewers.
+
+    ``mode`` is the checkpoint's game frame mode (``laya.frames.mode_for(agent.cfg, "grid")``): ``single`` sends
+    the rendered screen alone, exactly as before modes existed; any other mode sends ``laya.frames.state`` of the
+    episode's screens at its decision points (``episode_policy``)."""
     from laya.games import maze_question, snake_question
 
     q = maze_question() if game == "maze" else snake_question()
-    return lambda env: agent.predict({"image": env.render()}, q)["answers"]["action"]["choice"]
+    if mode == "single":
+        return lambda env: agent.predict({"image": env.render()}, q)["answers"]["action"]["choice"]
+    return F.episode_policy(lambda env, st: agent.predict(st, q)["answers"]["action"]["choice"],
+                            lambda env: env.render(), mode, "grid")
 
 
 __all__ = ["ACTIONS", "Maze", "Snake", "carve_maze", "bfs_path", "make_game", "play_episodes", "expert_policy",

@@ -62,6 +62,14 @@ the actions mapped by moving each move's vector; CartPole, Acrobot and LunarLand
 with LEFT/RIGHT, CLOCKWISE/COUNTERCLOCKWISE and LEFT_ENGINE/RIGHT_ENGINE swapped. MountainCar has none (the flag
 is on the right).
 
+Frame modes (``frames=``, a ``laya.frames`` mode, default ``"single"``): each state is built from the frames of the
+same trajectory up to that step, exactly as the benchmark builds it from an episode's history: ``"single"`` is the
+output above byte for byte (Maze and Snake one frame, control the two-frame ghost), ``"trail-N"`` one image blending
+the last N frames, ``"stack-N"`` ``{"images": [N PNGs, oldest first]}``; at an episode's start (or a maze walk's
+random start) the first frame is repeated. A symmetry or mirror applies to every frame of the history alike. The
+control generators draw their keep decisions ``N - 1`` steps ahead to render each kept frame's history (one step
+ahead, as always, for up to two frames), so a mode with N > 2 keeps different steps than ``"single"`` does.
+
 Generation runs in ``workers`` forked processes (children only use numpy/PIL/gymnasium, never CUDA); the output
 depends only on the arguments, not on ``workers``.
 """
@@ -174,10 +182,21 @@ def _grid_png(grid: np.ndarray, sym: int) -> bytes:
     g = sym_grid(grid, sym)
     px = _cell_px(g.shape[0])
     colors, idx = np.unique(g.reshape(-1, 3), axis=0, return_inverse=True)
+    if len(colors) > 256:  # a trail blend of many cells: no palette
+        return _png(Image.fromarray(np.ascontiguousarray(g.repeat(px, 0).repeat(px, 1))))
     small = idx.reshape(g.shape[:2]).astype(np.uint8)
     im = Image.fromarray(np.ascontiguousarray(small.repeat(px, 0).repeat(px, 1)), "P")
     im.putpalette(colors.astype(np.uint8).tobytes())
     return _png(im)
+
+
+def _grid_state(grids: Sequence[np.ndarray], frames: str, sym: int) -> Dict:
+    """The state for a grid game's history of colour grids (oldest first, ending now) in frame mode ``frames``:
+    symmetry ``sym`` goes to every frame alike. A trail blends the small grids, which is the blend of the rendered
+    screens pixel for pixel (every cell is a block of equal pixels)."""
+    from laya import frames as F
+
+    return F.state(list(grids), frames, "grid", encode=lambda g: _grid_png(np.asarray(g), sym))
 
 
 def _bfs_dist(passable, src: Tuple[int, int], shape: Tuple[int, int]) -> Dict[Tuple[int, int], int]:
@@ -290,7 +309,8 @@ def _maze_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
             target, expert = _maze_target(wall, dist, pos, cfg["soft"])
             sym = rng.randrange(8) if cfg["flip"] else 0
             d = dist[pos]
-            ex = {"state": {"image": _grid_png(_maze_grid(wall, pos, goal), sym)},
+            past = [at[s] for s in range(max(0, t - cfg["n_frames"] + 1), t) if s in at] + [pos]
+            ex = {"state": _grid_state([_maze_grid(wall, p, goal) for p in past], cfg["frames"], sym),
                   "target": _smooth(sym_target(target, sym), cfg["smooth"]),
                   "label": GRID_ACTIONS.index(sym_action(expert, sym)),
                   "id": "maze-%d-n%d-r%d-c%d-t%d-g%d" % (seed + i, maze.size, pos[0], pos[1], t, sym)}
@@ -315,12 +335,15 @@ def _maze_target(wall, dist, pos, soft: bool) -> Tuple[List[float], str]:
 def maze_examples(n: int, sizes: Sequence[int] = (4, 6), seed: int = 0, soft: bool = True, flip: bool = True,
                   value: bool = True, eps: float = 0.3, per_episode: int = 8, random_start: float = 0.5,
                   gamma: float = 0.97, smooth: float = 0.0, workers: int = 0,
-                  dataset: str = "game_maze", next_target: bool = True) -> List[Dict]:
-    """``n`` Maze examples from seeds ``seed, seed + 1, ...`` (must stay below 100_000); see the module docstring."""
+                  dataset: str = "game_maze", next_target: bool = True, frames: str = "single") -> List[Dict]:
+    """``n`` Maze examples from seeds ``seed, seed + 1, ...`` (must stay below 100_000); see the module docstring.
+    ``frames`` is the ``laya.frames`` game frame mode of the states (the walk's own previous positions)."""
+    from laya import frames as F
     from laya.games import maze_question
 
     cfg = dict(sizes=tuple(sizes), soft=soft, flip=flip, value=value, eps=eps, per_episode=per_episode,
-               random_start=random_start, gamma=gamma, smooth=smooth, next_target=next_target)
+               random_start=random_start, gamma=gamma, smooth=smooth, next_target=next_target, frames=frames,
+               n_frames=F.frames_needed(frames, "grid"))
     out = _generate(_maze_episodes, n, seed, cfg, workers, per_episode * 0.9)
     q = _internal(maze_question())
     for ex in out:
@@ -409,7 +432,9 @@ def _snake_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
         for st in keep:
             target, expert = _snake_target(st, cfg["soft"])
             sym = rng.randrange(8) if cfg["flip"] else 0
-            ex = {"state": {"image": _grid_png(_snake_grid(st), sym)},
+            j0 = step_of[id(st)]
+            past = snaps[max(0, j0 - cfg["n_frames"] + 1):j0 + 1]
+            ex = {"state": _grid_state([_snake_grid(p) for p in past], cfg["frames"], sym),
                   "target": _smooth(sym_target(target, sym), cfg["smooth"]),
                   "label": GRID_ACTIONS.index(sym_action(expert, sym)),
                   "id": "snake-%d-t%d-g%d" % (seed + i, st.steps, sym)}
@@ -435,12 +460,15 @@ def _snake_target(s, soft: bool) -> Tuple[List[float], str]:
 def snake_examples(n: int, sizes: Sequence[int] = (8, 10), seed: int = 0, soft: bool = True, flip: bool = True,
                    value: bool = True, eps: float = 0.2, per_episode: int = 12, horizon: int = 30,
                    episode_cap: int = 600, smooth: float = 0.0, workers: int = 0,
-                   dataset: str = "game_snake", next_target: bool = True) -> List[Dict]:
-    """``n`` Snake examples from seeds ``seed, seed + 1, ...`` (below 100_000); see the module docstring."""
+                   dataset: str = "game_snake", next_target: bool = True, frames: str = "single") -> List[Dict]:
+    """``n`` Snake examples from seeds ``seed, seed + 1, ...`` (below 100_000); see the module docstring.
+    ``frames`` is the ``laya.frames`` game frame mode of the states (the episode's own previous steps)."""
+    from laya import frames as F
     from laya.games import snake_question
 
     cfg = dict(sizes=tuple(sizes), soft=soft, flip=flip, value=value, eps=eps, per_episode=per_episode,
-               horizon=horizon, episode_cap=episode_cap, smooth=smooth, next_target=next_target)
+               horizon=horizon, episode_cap=episode_cap, smooth=smooth, next_target=next_target, frames=frames,
+               n_frames=F.frames_needed(frames, "grid"))
     out = _generate(_snake_episodes, n, seed, cfg, workers, per_episode * 0.9)
     q = _internal(snake_question())
     for ex in out:
@@ -462,6 +490,7 @@ def _control_success(game: str, env, last_reward: float) -> bool:
 def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
     from PIL import Image
 
+    from laya import frames as F
     from laya.controlgames import ControlGame
 
     game, out = cfg["game"], []
@@ -469,40 +498,47 @@ def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
     flips = CONTROL_FLIPS.get(game, {})
     flips = {**flips, **{v: k for k, v in flips.items()}}
     gamma = 1.0 - 1.0 / VALUE_HORIZON[game]
+    n_frames = F.frames_needed(cfg["frames"], "control")
+    ahead = max(1, n_frames - 1)  # keep decisions are drawn this many steps ahead (1, as always, up to 2 frames)
     for i in eps_ids:
         rng = random.Random("control-%s-%d-%d" % (game, seed, i))
         env = ControlGame(game, seed + i)
         actions = env.actions
         recs, experts = [], []  # experts[t]: the expert's action at every step t, kept or not
-        keep_now = rng.random() < cfg["keep"]
+        flags = deque(rng.random() < cfg["keep"] for _ in range(ahead))  # keep flags of steps t .. t + ahead - 1
+        shown: Dict[int, np.ndarray] = {}  # step -> rendered frame, for the steps a kept frame's history needs
         reward = 0.0
         while not env.done:
-            keep_next = rng.random() < cfg["keep"]
+            flags.append(rng.random() < cfg["keep"])
             expert = env.expert()
             experts.append(expert)
-            if keep_now:
-                img = env.render()  # ghosts the previous frame if it was rendered (it was, see keep_next)
-                recs.append((env.steps, expert, img))
-            elif keep_next:
-                env.frame()  # the next kept frame ghosts this one, as in the every-step eval loop
+            t = env.steps
+            if any(flags):  # kept, or in the history of a frame kept within the next ``ahead`` steps
+                shown[t] = env.frame()
+            if flags[0]:  # the frame and its history, exactly the frames the every-step eval loop renders
+                recs.append((t, expert, [shown[s] for s in range(max(0, t - n_frames + 1), t + 1)]))
+            shown.pop(t - n_frames + 1, None)
             a = rng.choice(actions) if rng.random() < cfg["eps"] else expert
             reward = env.step(a)
-            keep_now = keep_next
+            flags.popleft()
         success, end = _control_success(game, env, reward), env.steps
         # no env.close(): pygame.quit() costs ~30 ms an episode, and the renderer is only a Surface here
-        for t, expert, img in recs:
+        for t, expert, past in recs:
             k = end - t
             if game in _SURVIVAL:
                 v = 1.0 if success else 1.0 - gamma ** k
             else:
                 v = gamma ** k if success else 0.0
             flip = bool(flips) and cfg["flip"] and rng.random() < 0.5
-            label = expert
-            if flip:
-                img = img.transpose(Image.FLIP_LEFT_RIGHT)
-                label = flips.get(expert, expert)
+            label = flips.get(expert, expert) if flip else expert
+
+            def encode(frame, flip=flip):  # the mirror applies to every frame of the history alike
+                img = Image.fromarray(frame)
+                return _png(img.transpose(Image.FLIP_LEFT_RIGHT) if flip else img)
+
             target = _smooth([float(a == label) for a in actions], cfg["smooth"])
-            ex = {"state": {"image": _png(img)}, "target": target, "label": actions.index(label),
+            ex = {"state": F.state(past, cfg["frames"], "control", encode=encode), "target": target,
+                  "label": actions.index(label),
                   "id": "%s-%d-t%d%s" % (game.lower(), seed + i, t, "-f" if flip else "")}
             if cfg["value"]:
                 ex["value"] = float(v)
@@ -516,9 +552,10 @@ def _control_episodes(eps_ids: List[int], seed: int, cfg: Dict) -> List[Dict]:
 def control_examples(game: str, n: int, seed: int = 0, eps: Optional[float] = None, keep: Optional[float] = None,
                      smooth: float = 0.1,
                      flip: bool = True, value: bool = True, workers: int = 0,
-                     dataset: Optional[str] = None, next_target: bool = True) -> List[Dict]:
+                     dataset: Optional[str] = None, next_target: bool = True, frames: str = "single") -> List[Dict]:
     """``n`` examples of a ``laya.controlgames`` game from seeds ``seed, seed + 1, ...`` (below 100_000); see the
-    module docstring. ``eps`` / ``keep`` default per game (``CONTROL_EPS`` / ``CONTROL_KEEP``). Needs
+    module docstring. ``eps`` / ``keep`` default per game (``CONTROL_EPS`` / ``CONTROL_KEEP``). ``frames`` is the
+    ``laya.frames`` game frame mode of the states and of the question (``laya.games.control_question``). Needs
     ``gymnasium[classic-control,box2d]`` (imported lazily)."""
     from laya.controlgames import GAMES
     from laya.games import control_question
@@ -529,9 +566,10 @@ def control_examples(game: str, n: int, seed: int = 0, eps: Optional[float] = No
     keep = CONTROL_KEEP[game] if keep is None else keep
     mean_len = {"CartPole": 500, "Acrobot": 100, "MountainCar": 140, "LunarLander": 220}[game]
     per_ep = mean_len * keep
-    cfg = dict(game=game, eps=eps, keep=keep, smooth=smooth, flip=flip, value=value, next_target=next_target)
+    cfg = dict(game=game, eps=eps, keep=keep, smooth=smooth, flip=flip, value=value, next_target=next_target,
+               frames=frames)
     out = _generate(_control_episodes, n, seed, cfg, workers, per_ep)
-    q = _internal(control_question(game))
+    q = _internal(control_question(game, frames))
     for ex in out:
         ex["q"], ex["dataset"] = q, dataset or "game_" + game.lower()
     return out
