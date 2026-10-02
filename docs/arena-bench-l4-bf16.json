@@ -1,0 +1,382 @@
+{
+    "run": "cauldron-score-2ep-bidir-full/best",
+    "gpu": "NVIDIA L4",
+    "dtype": "bf16",
+    "budget": "0.02",
+    "option_attention": "block",
+    "preprocess": "processor",
+    "model_mb": 507.7,
+    "workloads": {
+        "agent": {
+            "off": {
+                "n_calls": 72,
+                "p50_ms": 50.44,
+                "p90_ms": 53.92,
+                "mean_ms": 51.24,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 72,
+                "same_top_answer_as_off": 72,
+                "repeat_bit_identical": "8/8"
+            },
+            "off_prefill": {
+                "n_calls": 72,
+                "p50_ms": 79.19,
+                "p90_ms": 85.39,
+                "mean_ms": 84.88,
+                "max_prob_gap_vs_off": 0.0416,
+                "identical_to_off": 1,
+                "same_top_answer_as_off": 69,
+                "repeat_bit_identical": "8/8"
+            },
+            "image": {
+                "n_calls": 72,
+                "p50_ms": 36.92,
+                "p90_ms": 53.3,
+                "mean_ms": 39.32,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 72,
+                "same_top_answer_as_off": 72,
+                "repeat_bit_identical": "8/8",
+                "arena_reserved_mb": 473.1,
+                "image": {
+                    "hit_rate": 0.8889,
+                    "hits": 64,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 0.59,
+                    "evictions": 0
+                }
+            },
+            "auto": {
+                "n_calls": 72,
+                "p50_ms": 39.34,
+                "p90_ms": 65.27,
+                "mean_ms": 44.08,
+                "max_prob_gap_vs_off": 0.033,
+                "identical_to_off": 8,
+                "same_top_answer_as_off": 71,
+                "repeat_bit_identical": "0/8",
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.7778,
+                    "hits": 56,
+                    "misses": 16,
+                    "entries": 8,
+                    "used_mb": 18.58,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.5,
+                    "hits": 8,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 0.59,
+                    "evictions": 0
+                }
+            },
+            "eager": {
+                "n_calls": 72,
+                "p50_ms": 37.39,
+                "p90_ms": 76.71,
+                "mean_ms": 42.52,
+                "max_prob_gap_vs_off": 0.033,
+                "identical_to_off": 0,
+                "same_top_answer_as_off": 71,
+                "repeat_bit_identical": "8/8",
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.8889,
+                    "hits": 64,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 18.58,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.0,
+                    "hits": 0,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 0.59,
+                    "evictions": 0
+                }
+            }
+        },
+        "agent_perm4": {
+            "off": {
+                "n_calls": 72,
+                "p50_ms": 50.7,
+                "p90_ms": 80.06,
+                "mean_ms": 57.49,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 72,
+                "same_top_answer_as_off": 72,
+                "repeat_bit_identical": "8/8"
+            },
+            "off_prefill": {
+                "n_calls": 72,
+                "p50_ms": 80.95,
+                "p90_ms": 170.86,
+                "mean_ms": 103.2,
+                "max_prob_gap_vs_off": 0.0205,
+                "identical_to_off": 17,
+                "same_top_answer_as_off": 72,
+                "repeat_bit_identical": "8/8"
+            },
+            "image": {
+                "n_calls": 72,
+                "p50_ms": 39.25,
+                "p90_ms": 71.57,
+                "mean_ms": 48.54,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 72,
+                "same_top_answer_as_off": 72,
+                "repeat_bit_identical": "8/8",
+                "arena_reserved_mb": 473.1,
+                "image": {
+                    "hit_rate": 0.8889,
+                    "hits": 64,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 0.59,
+                    "evictions": 0
+                }
+            },
+            "auto": {
+                "n_calls": 72,
+                "p50_ms": 43.88,
+                "p90_ms": 67.79,
+                "mean_ms": 48.63,
+                "max_prob_gap_vs_off": 0.0374,
+                "identical_to_off": 6,
+                "same_top_answer_as_off": 72,
+                "repeat_bit_identical": "2/8",
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.8056,
+                    "hits": 58,
+                    "misses": 14,
+                    "entries": 8,
+                    "used_mb": 18.58,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.4286,
+                    "hits": 6,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 0.59,
+                    "evictions": 0
+                }
+            },
+            "eager": {
+                "n_calls": 72,
+                "p50_ms": 44.0,
+                "p90_ms": 85.37,
+                "mean_ms": 49.27,
+                "max_prob_gap_vs_off": 0.0374,
+                "identical_to_off": 0,
+                "same_top_answer_as_off": 72,
+                "repeat_bit_identical": "8/8",
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.8889,
+                    "hits": 64,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 18.58,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.0,
+                    "hits": 0,
+                    "misses": 8,
+                    "entries": 8,
+                    "used_mb": 0.59,
+                    "evictions": 0
+                }
+            }
+        },
+        "game": {
+            "off": {
+                "n_calls": 160,
+                "p50_ms": 57.75,
+                "p90_ms": 58.75,
+                "mean_ms": 58.3,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 160,
+                "same_top_answer_as_off": 160
+            },
+            "off_prefill": {
+                "n_calls": 160,
+                "p50_ms": 87.02,
+                "p90_ms": 90.28,
+                "mean_ms": 87.96,
+                "max_prob_gap_vs_off": 0.0415,
+                "identical_to_off": 0,
+                "same_top_answer_as_off": 156
+            },
+            "image": {
+                "n_calls": 160,
+                "p50_ms": 34.9,
+                "p90_ms": 62.19,
+                "mean_ms": 41.65,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 160,
+                "same_top_answer_as_off": 160,
+                "arena_reserved_mb": 473.1,
+                "image": {
+                    "hit_rate": 0.75,
+                    "hits": 120,
+                    "misses": 40,
+                    "entries": 40,
+                    "used_mb": 2.95,
+                    "evictions": 0
+                }
+            },
+            "auto": {
+                "n_calls": 160,
+                "p50_ms": 53.02,
+                "p90_ms": 63.84,
+                "mean_ms": 49.92,
+                "max_prob_gap_vs_off": 0.0595,
+                "identical_to_off": 40,
+                "same_top_answer_as_off": 157,
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.5,
+                    "hits": 80,
+                    "misses": 80,
+                    "entries": 40,
+                    "used_mb": 92.9,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.5,
+                    "hits": 40,
+                    "misses": 40,
+                    "entries": 40,
+                    "used_mb": 2.95,
+                    "evictions": 0
+                }
+            },
+            "eager": {
+                "n_calls": 160,
+                "p50_ms": 36.35,
+                "p90_ms": 89.82,
+                "mean_ms": 49.88,
+                "max_prob_gap_vs_off": 0.0595,
+                "identical_to_off": 0,
+                "same_top_answer_as_off": 156,
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.75,
+                    "hits": 120,
+                    "misses": 40,
+                    "entries": 40,
+                    "used_mb": 92.9,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.0,
+                    "hits": 0,
+                    "misses": 40,
+                    "entries": 40,
+                    "used_mb": 2.95,
+                    "evictions": 0
+                }
+            }
+        },
+        "game_step_text": {
+            "off": {
+                "n_calls": 160,
+                "p50_ms": 58.04,
+                "p90_ms": 59.7,
+                "mean_ms": 58.51,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 160,
+                "same_top_answer_as_off": 160
+            },
+            "off_prefill": {
+                "n_calls": 160,
+                "p50_ms": 87.19,
+                "p90_ms": 90.47,
+                "mean_ms": 87.84,
+                "max_prob_gap_vs_off": 0.0544,
+                "identical_to_off": 0,
+                "same_top_answer_as_off": 152
+            },
+            "image": {
+                "n_calls": 160,
+                "p50_ms": 34.97,
+                "p90_ms": 62.13,
+                "mean_ms": 41.76,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 160,
+                "same_top_answer_as_off": 160,
+                "arena_reserved_mb": 473.1,
+                "image": {
+                    "hit_rate": 0.75,
+                    "hits": 120,
+                    "misses": 40,
+                    "entries": 40,
+                    "used_mb": 2.95,
+                    "evictions": 0
+                }
+            },
+            "auto": {
+                "n_calls": 160,
+                "p50_ms": 34.82,
+                "p90_ms": 61.65,
+                "mean_ms": 41.62,
+                "max_prob_gap_vs_off": 0.0,
+                "identical_to_off": 160,
+                "same_top_answer_as_off": 160,
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.0,
+                    "hits": 0,
+                    "misses": 160,
+                    "entries": 0,
+                    "used_mb": 0.0,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.75,
+                    "hits": 120,
+                    "misses": 40,
+                    "entries": 40,
+                    "used_mb": 2.95,
+                    "evictions": 0
+                }
+            },
+            "eager": {
+                "n_calls": 160,
+                "p50_ms": 65.25,
+                "p90_ms": 92.33,
+                "mean_ms": 72.09,
+                "max_prob_gap_vs_off": 0.07,
+                "identical_to_off": 0,
+                "same_top_answer_as_off": 152,
+                "arena_reserved_mb": 473.1,
+                "prefix": {
+                    "hit_rate": 0.0,
+                    "hits": 0,
+                    "misses": 160,
+                    "entries": 160,
+                    "used_mb": 371.59,
+                    "evictions": 0
+                },
+                "image": {
+                    "hit_rate": 0.75,
+                    "hits": 120,
+                    "misses": 40,
+                    "entries": 40,
+                    "used_mb": 2.95,
+                    "evictions": 0
+                }
+            }
+        }
+    },
+    "peak_allocated_mb": 1065.8
+}

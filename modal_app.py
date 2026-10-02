@@ -23,6 +23,8 @@
     modal run --detach modal_app.py::split_bench      # SmolVLM2, image splitting off vs 1024 vs 2048 on a 6-set subset:
                                                      # accuracy per set, tokens, L4 latency -> /ckpt/smolvlm2/split-bench/
     modal run modal_app.py::bench_prefix_cache       # predict latency, prefix cache off vs on, L4 bf16
+    modal run modal_app.py::bench_arena              # cross-call laya.cache.DeviceArena vs none: agent + game loops,
+                                                     # p50/p90, hit rates, memory, parity; L4 bf16 (+ test_cache.py)
     modal run modal_app.py::try_model --image photo.jpg [--questions q.json] [--text "..."]  # ask a checkpoint about an image
     modal run modal_app.py::publish [--repo user/name] [--run all3-3ep/best]  # push checkpoint + hf_model_card.md to the HF Hub
     modal run modal_app.py::publish --repo thaitea/laya-vision-modernvbert-250m --run modernvbert/cauldron-2ep/best \
@@ -219,6 +221,10 @@ def _expand_datasets(names: str) -> list:
             if n not in out:
                 out.append(n)
     return out
+
+
+#: what ``bench_latency`` times on when the run has no ``metrics.json`` naming its val sets (full_eval's datasets default)
+LATENCY_DEFAULT_DATASETS = "vqa,cauldron,score,eval"
 
 
 def _ready(names: str):
@@ -906,6 +912,10 @@ def robustness(run_name: str = "cauldron-score-2ep-bidir-full/best", datasets: s
     print("scored in %.1f min" % ((time.time() - t0) / 60))
     summary = R.summarize(preds, n_boot, seed)
     print(R.format_table(summary))
+    if "render" in summary:
+        from laya.robustness import render as R_render
+
+        print(R_render.format_table(summary["render"]))
     meta = {"run": run_name, "datasets": sorted({r["dataset"] for r in rows}), "n_per_dataset": n_per_dataset,
             "families": fams, "seed": seed, "n_boot": n_boot, "val_split": val_split,
             "temperature": list(agent.temperature), "gpu": torch.cuda.get_device_name(0), "row_counts": counts,
@@ -1061,8 +1071,15 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
     path = _ckpt_path(run_name)
     agent = VLMAgent(path, device="cuda", dtype=dtype)
     if not datasets:
-        with open(os.path.join(os.path.dirname(path.rstrip("/")), "metrics.json")) as f:
-            datasets = json.load(f)["args"]["val_datasets"]
+        # the run's own val sets; a run without a modal_app-style metrics.json (e.g. an autoresearch run) gets the
+        # same groups full_eval's datasets part uses, instead of failing with FileNotFoundError as the 201M run did
+        mpath = os.path.join(os.path.dirname(path.rstrip("/")), "metrics.json")
+        if os.path.exists(mpath):
+            with open(mpath) as f:
+                datasets = json.load(f)["args"]["val_datasets"]
+        else:
+            print("bench_latency: no %s, timing on %s" % (mpath, LATENCY_DEFAULT_DATASETS))
+            datasets = LATENCY_DEFAULT_DATASETS
     names = _ready(datasets)
     rng = random.Random(seed)
     per = max(1, n // max(1, len(names)))
@@ -1089,7 +1106,7 @@ def bench_latency(run_name: str, datasets: str = "", n: int = 200, dtype: str = 
     for state, _ in cases[:50]:
         views.append(vlm_prefix(agent.processor, [state["image"]], agent.prep)["n_images"])
     out = {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype, "n": len(cases),
-           "split_edge": agent.prep.split_edge, "max_len": agent.cfg["max_len"],
+           "split_edge": agent.prep.split_edge, "max_len": agent.cfg["max_len"], "datasets": names,
            "median_ms": float(np.median(ms)), "p90_ms": float(np.percentile(ms, 90)),
            "mean_input_tokens": float(np.mean(tokens)), "mean_views_per_image": float(np.mean(views))}
     print(json.dumps(out))
@@ -1147,6 +1164,199 @@ def bench_prefix_cache(run_name: str = "cauldron-score-2ep-bidir-full/best", dty
             rows.append(r)
     return {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype,
             "option_attention": agent.model.option_attention, "rows": rows}
+
+
+ARENA_QUESTIONS = {
+    "kind": {"type": "choice", "instructions": "What is the main subject of the photo?",
+             "criteria": ["a person", "an animal", "a vehicle", "food", "a building", "something else"]},
+    "indoor": {"type": "noul", "instructions": "Was the photo taken indoors?"},
+    "people": {"type": "score", "instructions": "How many people are visible?",
+               "criteria": ["none", "one", "two or three", "four or more"]},
+    "quality": {"type": "score", "instructions": "How sharp and well exposed is the photo?",
+                "criteria": ["unusable", "poor", "fine", "excellent"]},
+    "text": {"type": "noul", "instructions": "Is there any readable text in the photo?"},
+    "time": {"type": "choice", "instructions": "What time of day does it look like?",
+             "criteria": ["morning", "midday", "evening", "night", "cannot tell"]},
+    "safe": {"type": "noul", "instructions": "Is anyone in the photo in danger?"},
+    "colour": {"type": "choice", "instructions": "What is the dominant colour?",
+               "criteria": ["red", "green", "blue", "yellow", "white", "black", "other"]},
+    "crowd": {"type": "noul", "instructions": "Is the scene crowded?"},
+    "weather": {"type": "choice", "instructions": "What is the weather like?",
+                "criteria": ["sunny", "cloudy", "rainy", "snowy", "indoors / cannot tell"]},
+    "motion": {"type": "noul", "instructions": "Is something in the photo moving fast?"},
+    "clutter": {"type": "score", "instructions": "How cluttered is the scene?",
+                "criteria": ["empty", "sparse", "busy", "packed"]},
+}
+GAME_QUESTION = {"move": {"type": "choice", "instructions": "Which move gets the ball past the paddle?",
+                          "criteria": ["NOOP", "FIRE", "UP", "DOWN"]}}
+
+
+@app.function(image=image, gpu="L4", timeout=30 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def bench_arena(run_name: str = "cauldron-score-2ep-bidir-full/best", dtype: str = "bf16", budget: str = "0.02",
+                scenes: int = 8, calls: int = 8, steps: int = 160, hold: int = 4, seed: int = 0,
+                tests: bool = True, device: str = "cuda"):
+    """``predict`` with a cross-call ``laya.cache.DeviceArena`` against without, on two agent loops, L4 bf16.
+
+    * ``agent``: ``scenes`` photos (aokvqa val, else synthetic), each asked ``calls`` sequential question sets of
+      1-3 questions (drawn from ``ARENA_QUESTIONS``) about the same image + state text, at ``n_permutations`` 1 and 4.
+    * ``game``: ``steps`` Atari-sized frames of a moving ball that moves every ``hold`` steps, one fixed move
+      question per step; the state text is the score (changes when the frame does, ``game``) or the step counter
+      (changes every step, ``game_step_text``: only the image tier can hit).
+
+    Modes: ``off`` (no arena, as released), ``off_prefill`` (no arena, ``prefix_cache=True``: the in-call prefix
+    cache, the parity baseline for the prefix paths), ``image`` (an image-tier-only arena), ``auto`` (full arena,
+    default admission: a prefix is stored on its second sighting, or at once when the call prefills anyway) and
+    ``eager`` (full arena, ``prefix_cache=True``: stored on first sight). Each mode gets a fresh arena and the same call sequence. Per workload and mode: p50/p90
+    latency, the tiers' hit rates, arena memory, and the largest probability gap to ``off`` call by call. ``repeat``
+    re-asks each scene's first question set at the end and checks it against the first answer bit for bit.
+    ``tests`` first runs tests/test_cache.py on the GPU (fp32). ``bench_arena_cpu`` runs the same on a CPU
+    container (``device="cpu"``). Nothing is written."""
+    import random
+
+    if tests:
+        rc = subprocess.run([sys.executable, "-m", "pytest", "/root/tests/test_cache.py", "-q", "-p", "no:cacheprovider",
+                             "-W", "ignore"], cwd="/root").returncode
+        print("TESTS_RC", rc)
+
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    from laya.cache import DeviceArena
+    from laya.vlm import VLMAgent
+
+    agent = VLMAgent(_ckpt_path(run_name), device=device, dtype=dtype)
+    cuda = device == "cuda"
+    sync = torch.cuda.synchronize if cuda else (lambda: None)
+    rng = random.Random(seed)
+    photos = []
+    if os.path.exists("/data/vqa/cauldron_aokvqa/_READY"):
+        exs = [ex for ex in _load_split("cauldron_aokvqa", "val", 400)
+               if isinstance(ex["state"], dict) and ex["state"].get("image")]
+        for ex in rng.sample(exs, min(scenes + 2, len(exs))):
+            with Image.open(ex["state"]["image"]) as im:
+                photos.append(im.convert("RGB"))
+    while len(photos) < scenes + 2:
+        img = Image.new("RGB", (640, 480), tuple(rng.randrange(256) for _ in range(3)))
+        img.paste(Image.new("RGB", (200, 160), tuple(rng.randrange(256) for _ in range(3))), (120, 100))
+        photos.append(img)
+    warm_photos, photos = photos[:2], photos[2:scenes + 2]
+    qids = list(ARENA_QUESTIONS)
+
+    def agent_calls(imgs, perms):
+        seq = []
+        for i, img in enumerate(imgs):
+            state = {"image": img, "context": "Photo %d from the field team's upload queue; reviewer notes pending." % i}
+            sets = [rng.sample(qids, rng.randint(1, 3)) for _ in range(calls)]
+            for s in sets:
+                seq.append((state, {q: ARENA_QUESTIONS[q] for q in s}, perms, "loop"))
+            seq.append((state, {q: ARENA_QUESTIONS[q] for q in sets[0]}, perms, "repeat"))
+        return seq
+
+    def frame(t):
+        f = np.zeros((210, 160, 3), np.uint8)
+        f[:, :, 2] = 40
+        f[190:194, 60:100] = (200, 200, 200)                     # paddle
+        x, y = 20 + (t * 7) % 120, 30 + (t * 11) % 150           # ball
+        f[y:y + 6, x:x + 6] = (240, 90, 40)
+        f[5:12, 5:5 + 4 * (t % 30)] = (255, 255, 0)              # score bar
+        return f
+
+    def game_calls(step_text, n, start=0):
+        seq = []
+        for s in range(start, start + n):
+            t = s // hold
+            text = {"step": s} if step_text else {"score": t}
+            seq.append(({"image": frame(t), **text}, GAME_QUESTION, 1, "loop"))
+        return seq
+
+    workloads = {"agent": agent_calls(photos, 1), "agent_perm4": agent_calls(photos, 4),
+                 "game": game_calls(False, steps), "game_step_text": game_calls(True, steps)}
+    warm = (agent_calls(warm_photos, 1) + agent_calls(warm_photos, 4) + game_calls(False, 16, 10**4) if cuda
+            else agent_calls(warm_photos[:1], 1)[:2] + game_calls(False, 2, 10**4))
+
+    def probs(res):
+        out = []
+        for qid, a in sorted(res["answers"].items()):
+            out += list(a["probabilities"].values()) if "probabilities" in a else [a["noul"]]
+            out.append(a["action"]["act_probability"])
+        return np.array(out)
+
+    def run(seq, mode):
+        arena = None
+        if mode in ("image", "auto", "eager"):
+            arena = DeviceArena(agent, budget=budget, prefix_share=0.0 if mode == "image" else 0.875)
+        pc = {"off": None, "off_prefill": True, "image": None, "auto": None, "eager": True}[mode]
+        ms, outs = [], []
+        for state, qs, perms, _ in seq:
+            sync()
+            t0 = time.perf_counter()
+            res = agent.predict(state, qs, n_permutations=perms, prefix_cache=pc, cache=arena)
+            sync()
+            ms.append((time.perf_counter() - t0) * 1000)
+            outs.append(res)
+        return ms, outs, arena
+
+    modes = ("off", "off_prefill", "image", "auto", "eager")
+    for mode in modes:   # kernels, allocator, tokenizer caches
+        run(warm, mode)
+    if cuda:
+        torch.cuda.reset_peak_memory_stats()
+    base_alloc = torch.cuda.memory_allocated() if cuda else 0
+    report = {"run": run_name, "gpu": torch.cuda.get_device_name(0) if cuda else "cpu x%d" % torch.get_num_threads(),
+              "dtype": dtype, "budget": budget,
+              "option_attention": agent.model.option_attention, "preprocess": agent.prep.backend,
+              "model_mb": round(base_alloc / 1e6, 1), "workloads": {}}
+    for name, seq in workloads.items():
+        ref_ms, ref_outs, _ = run(seq, "off")
+        rows = {}
+        for mode in modes:
+            ms, outs, arena = (ref_ms, ref_outs, None) if mode == "off" else run(seq, mode)
+            gaps = [float(np.abs(probs(a) - probs(b)).max()) for a, b in zip(outs, ref_outs)]
+            top = lambda a: (max(a["probabilities"], key=a["probabilities"].get) if "probabilities" in a  # noqa: E731
+                             else a["noul"] > 0.5)
+            same_answer = sum(all(top(a["answers"][q]) == top(b["answers"][q]) for q in a["answers"])
+                              for a, b in zip(outs, ref_outs))
+            first, exact = {}, []
+            for (state, qs, perms, tag), res in zip(seq, outs):
+                key = (id(state), tuple(qs))
+                if tag == "repeat":
+                    exact.append(bool(np.array_equal(probs(res), probs(first[key]))))
+                else:
+                    first.setdefault(key, res)
+            r = {"n_calls": len(seq), "p50_ms": round(float(np.percentile(ms, 50)), 2),
+                 "p90_ms": round(float(np.percentile(ms, 90)), 2), "mean_ms": round(float(np.mean(ms)), 2),
+                 "max_prob_gap_vs_off": round(max(gaps), 5), "identical_to_off": sum(g == 0 for g in gaps),
+                 "same_top_answer_as_off": same_answer}
+            if exact:
+                r["repeat_bit_identical"] = "%d/%d" % (sum(exact), len(exact))
+            if arena is not None:
+                st = arena.stats()
+                r["arena_reserved_mb"] = st["reserved_mb"]
+                for tier in ("prefix", "image"):
+                    if tier in st:
+                        r[tier] = {k: st[tier][k] for k in ("hit_rate", "hits", "misses", "entries", "used_mb",
+                                                              "evictions")}
+                del arena
+                if cuda:
+                    torch.cuda.empty_cache()
+            rows[mode] = r
+            print(json.dumps({"workload": name, "mode": mode, **r}))
+        report["workloads"][name] = rows
+    report["peak_allocated_mb"] = round(torch.cuda.max_memory_allocated() / 1e6, 1) if cuda else None
+    print("ARENA_REPORT " + json.dumps(report))
+    return report
+
+
+@app.function(image=image, cpu=8, memory=16384, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def bench_arena_cpu(run_name: str = "cauldron-score-2ep-bidir-full/best", scenes: int = 3, calls: int = 4,
+                    steps: int = 24, hold: int = 4):
+    """``bench_arena`` on an 8-core CPU container in fp32 (no GPU), with a smaller workload: where the prefill is
+    compute-bound, which is where the prefix tier can pay."""
+    return bench_arena.local(run_name=run_name, dtype="fp32", budget="1GiB", scenes=scenes, calls=calls, steps=steps,
+                             hold=hold, tests=False, device="cpu")
 
 
 SPLIT_BENCH_DATASETS = ("cauldron_ai2d", "cauldron_aokvqa", "cauldron_tqa", "cauldron_ocrvqa", "cauldron_mapqa",
@@ -2116,6 +2326,169 @@ def decision_vs_generation(output: str = "results/raw/decision-vs-generation-l4.
         f.write(json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
     print(json.dumps(summary(report), indent=2))
     print("wrote", output)
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Best-of-N with Laya as the verifier (laya.bon)
+# ---------------------------------------------------------------------------------------------------------
+
+BON_MC_DATASETS = "aokvqa,scienceqa"
+
+
+@app.function(image=image, gpu="L4", cpu=4, memory=16384, timeout=60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol.read_only()})
+def bon_verifier_run(run_name: str, mc_datasets: str = BON_MC_DATASETS, n_items: int = 400, vlf_rows: int = 400,
+                     seed: int = 0, dtype: str = "bf16") -> str:
+    """Score every candidate of each group with ``laya.bon.verifier_scores`` (P(true) of a correctness ``noul`` and
+    the expected level of the helpfulness ``score`` rubric) and return the rows as JSON text.
+
+    Two kinds of groups, all from val splits:
+
+    * ``mc_datasets``: each multiple-choice question's options become candidate answers (reward 1 for the labelled
+      one), ``n_items`` seeded questions per set. Each row also keeps the checkpoint's own ``choice`` probabilities
+      for the same question, the reference a dedicated head sets.
+    * VLFeedback: the ``score_vlfeedback`` val rows (held out of training by row, so no response of theirs was
+      trained on), with *all* of their model responses as candidates (the prepared set keeps two per row) and the
+      GPT-4V helpfulness rating 1-5 as the reward; responses come from the source's ``vlfeedback_80k.jsonl`` at the
+      prepared set's recorded revision, downloaded to the container's disk. ``vlf_rows`` seeded rows.
+
+    Rows hold ids, scores and rewards only (no third-party text)."""
+    import random
+
+    import torch
+    from huggingface_hub import HfApi, hf_hub_download
+    from PIL import Image
+
+    from laya.bon import choice_candidates, verifier_scores, vlfeedback_candidates
+    from laya.vlm import VLMAgent
+
+    t0 = time.time()
+    agent = VLMAgent(_ckpt_path(run_name), device="cuda", dtype=dtype)
+    rows, meta = [], {"run": run_name, "gpu": torch.cuda.get_device_name(0), "dtype": dtype, "seed": seed,
+                      "n_items": n_items, "vlf_rows": vlf_rows, "datasets": {}}
+
+    def image_of(state):
+        with Image.open(state["image"]) as im:
+            return im.convert("RGB")
+
+    for name in _ready(mc_datasets):
+        exs = [ex for ex in _load_split(name, "val", 0)
+               if ex["q"]["t"] == "choice" and isinstance(ex["state"], dict) and ex["state"].get("image")]
+        picked = random.Random("%s-%d" % (name, seed)).sample(exs, min(n_items, len(exs)))
+        meta["datasets"][name] = {"kind": "multiple_choice", "val_choice_rows": len(exs), "groups": len(picked)}
+        for ex in picked:
+            img = image_of(ex["state"])
+            question, responses, rewards = choice_candidates(ex["q"], ex["label"])
+            ctx = ex["state"].get("context")
+            vq = "%s\n\n%s" % (ctx, question) if ctx else question  # e.g. ScienceQA's hint goes with the question
+            scores = verifier_scores(agent, img, vq, responses)
+            state = {"image": img, "context": ctx} if ctx else img
+            probs = agent.predict(state, {"q": _public_question(ex["q"])})["answers"]["q"]["probabilities"]
+            rows.append({"dataset": name, "id": ex.get("id"), "reward": rewards,
+                         "correct": [s["correct"] for s in scores], "helpful": [s["helpful"] for s in scores],
+                         "choice_prob": [float(probs[k]) for k in ex["q"]["crit"]]})
+        print("%s: %d groups, %.1f min" % (name, len(picked), (time.time() - t0) / 60), flush=True)
+
+    if vlf_rows:
+        base = "/data/vqa/score_vlfeedback"
+        repo = "MMInstruction/VLFeedback"
+        rev = None
+        if os.path.exists(os.path.join(base, "manifest.json")):
+            with open(os.path.join(base, "manifest.json")) as f:
+                rev = json.load(f).get("sources", {}).get(repo)
+        rev_recorded = rev is not None
+        rev = rev or HfApi().dataset_info(repo).sha
+        images = {}
+        with open(os.path.join(base, "val.jsonl")) as f:
+            for line in f:
+                rec = json.loads(line)
+                images[rec["id"].rsplit("-", 2)[0]] = (os.path.join(base, rec["image"]), rec["state_text"])
+        src = hf_hub_download(repo, "vlfeedback_80k.jsonl", repo_type="dataset", revision=rev, cache_dir="/tmp/hfdl")
+        # VLFeedback's ids are not unique (e.g. m3it subsets restart their numbering), and prepare_score_dataset
+        # saved each row's image as images/vlf-<id>.jpg, so a duplicated id's image may belong to another row. Only
+        # rows whose id occurs once in the source are used: their image and their responses are unambiguous.
+        id_count, cands = {}, {}
+        with open(src) as f:
+            for line in f:
+                row = json.loads(line)
+                rid = "vlf-%s" % row.get("id")
+                id_count[rid] = id_count.get(rid, 0) + 1
+                if rid in images:
+                    cands[rid] = vlfeedback_candidates(row)
+        found, mismatched = {}, 0
+        unique = [rid for rid in images if id_count.get(rid) == 1]
+        for rid in unique:
+            prompt, responses, ratings = cands[rid]
+            # the prepared record's text must be one of these candidates: same row, same clipping
+            if not any(images[rid][1] == "Question: %s\n\nResponse: %s" % (prompt, r) for r in responses):
+                mismatched += 1
+            elif len(responses) >= 2:
+                found[rid] = (prompt, responses, ratings)
+        picked = random.Random("vlfeedback-%d" % seed).sample(sorted(found), min(vlf_rows, len(found)))
+        meta["datasets"]["score_vlfeedback"] = {
+            "kind": "responses", "source": repo, "revision": rev, "revision_from_manifest": rev_recorded,
+            "val_rows": len(images), "val_rows_missing_in_source": sum(1 for rid in images if rid not in id_count),
+            "val_rows_duplicate_id": sum(1 for rid in images if id_count.get(rid, 0) > 1),
+            "source_duplicate_ids": sum(1 for v in id_count.values() if v > 1), "text_mismatch": mismatched,
+            "rows_with_2plus_rated": len(found), "groups": len(picked)}
+        for rid in picked:
+            prompt, responses, ratings = found[rid]
+            img = image_of({"image": images[rid][0]})
+            scores = verifier_scores(agent, img, prompt, responses)
+            rows.append({"dataset": "score_vlfeedback", "id": rid, "reward": ratings,
+                         "correct": [s["correct"] for s in scores], "helpful": [s["helpful"] for s in scores]})
+        print("score_vlfeedback: %d groups (%d val rows, %d with a unique id, %d text mismatches), %.1f min"
+              % (len(picked), len(images), len(unique), mismatched, (time.time() - t0) / 60), flush=True)
+    meta["minutes"] = round((time.time() - t0) / 60, 1)
+    meta["provenance"] = agent.predict(Image.new("RGB", (32, 32)), {"q": {"type": "noul", "instructions": "x"}})["provenance"]
+    return json.dumps({"meta": meta, "summary": bon_summary(rows), "rows": rows}, allow_nan=False)  # summary here: the local side has no numpy
+
+
+def bon_summary(rows: list, ns=(1, 2, 3, 4)) -> dict:
+    """``bon_verifier_run`` rows -> per dataset and scorer, ``laya.bon.bon_curve`` at each N. VLFeedback gets two
+    rewards: the rating (1-5) and ``top`` (1 when the response has the group's highest rating)."""
+    from laya.bon import bon_curve
+
+    out = {}
+    for name in sorted({r["dataset"] for r in rows}):
+        rs = [r for r in rows if r["dataset"] == name]
+        rewards = {"reward": [r["reward"] for r in rs]}
+        if name == "score_vlfeedback":
+            rewards = {"rating": [r["reward"] for r in rs],
+                       "top": [[int(x == max(r["reward"])) for x in r["reward"]] for r in rs]}
+        scorers = [s for s in ("correct", "helpful", "choice_prob") if all(s in r for r in rs)]
+        out[name] = {rk: {s: bon_curve([list(zip(r[s], rw)) for r, rw in zip(rs, rv)], ns) for s in scorers}
+                     for rk, rv in rewards.items()}
+    return out
+
+
+@app.local_entrypoint()
+def bon_verifier(run: str = "autoresearch/full/long-sep24-b64/best", mc_datasets: str = BON_MC_DATASETS,
+                 n_items: int = 400, vlf_rows: int = 400, seed: int = 0, dtype: str = "bf16", out: str = ""):
+    """modal run modal_app.py::bon_verifier [--run <run>/best] [--out results/bon/<new>.json]
+
+    Best-of-N with the checkpoint as the verifier (``laya.bon``): candidates per group are a multiple-choice
+    question's options (``--mc-datasets``) or VLFeedback's model responses, each scored by a correctness ``noul``
+    and the helpfulness ``score`` rubric; the exact expected reward of keeping the top-scored of a random N-subset
+    is reported against a random pick and the oracle (pass@N). Writes the rows and the summary to ``--out``, which
+    must not exist yet (default ``results/bon/<run>-<commit>.json``)."""
+    code = _git_state()
+    out = out or os.path.join("results", "bon", "%s-%s%s.json" % (run.replace("/", "-"), (code["commit"] or "nocommit")[:8],
+                                                                   "-dirty" if code["dirty"] else ""))
+    if os.path.exists(out):
+        raise SystemExit("%s exists; pass a new --out" % out)
+    res = json.loads(bon_verifier_run.remote(run, mc_datasets, n_items, vlf_rows, seed, dtype))
+    res["meta"]["code"] = code
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "w") as f:
+        json.dump(res, f, indent=1, allow_nan=False)
+    for name, by_reward in res["summary"].items():
+        for rk, by_scorer in by_reward.items():
+            print("\n== %s (reward: %s, %d groups)" % (name, rk, res["meta"]["datasets"][name]["groups"]))
+            for s, curve in by_scorer.items():
+                print("  %-11s " % s + "  ".join("N=%s sel %.3f rnd %.3f orc %.3f" % (n, c["selected"], c["random"], c["oracle"])
+                                                   for n, c in sorted(curve.items(), key=lambda kv: int(kv[0]))))
+    print("\nwrote", out)
 
 
 # ---------------------------------------------------------------------------------------------------------

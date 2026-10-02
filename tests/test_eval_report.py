@@ -57,6 +57,29 @@ def test_merge_takes_each_part_from_its_file():
         R.merge([parts[0], dict(parts[1], model="other")])
 
 
+def test_merge_supersedes_an_error_for_a_part_another_file_supplied():
+    # the 201M scorecard: bench_latency failed in the full run, a later --parts latency run succeeded
+    full = {"model": "m", "code": CODE, "started": "2026-09-24T04:28:09+00:00", "datasets": _datasets(),
+            "games": _games(), "latency": None,
+            "errors": [{"what": "bench_latency", "error": "FileNotFoundError(2, 'No such file or directory')"},
+                       {"what": "doom basic", "error": "boom"}]}
+    lat = {"model": "m", "code": CODE, "started": "2026-09-24T04:38:49+00:00", "datasets": None, "games": None,
+           "latency": {"median_ms": 40.8, "p90_ms": 46.3}, "errors": []}
+    r = R.merge([full, lat])
+    assert r["latency"]["median_ms"] == 40.8
+    assert r["errors"] == [{"what": "doom basic", "error": "boom"}]  # its games part is the one reported
+    assert [(e["what"], e["part"], e["source"]) for e in r["superseded"]] == [("bench_latency", "latency", 1)]
+    doc = R.render_doc(r)
+    [errors_line] = [ln for ln in doc.splitlines() if ln.startswith("> **Errors during the run:**")]
+    assert "doom basic" in errors_line and "bench_latency" not in errors_line
+    assert "> **Note:** bench_latency failed in one run" in doc and "2026-09-24 04:38 UTC" in doc
+    assert "_Note: bench_latency failed" in R.render(r)
+    assert 'class="note">Note: bench_latency failed' in R.render_html(r)
+    # the failed run alone: the error stays an error and there is no latency number
+    alone = R.merge([full])
+    assert "superseded" not in alone and not alone.get("latency") and len(alone["errors"]) == 2
+
+
 def test_render_starts_with_the_marker_and_has_every_section():
     r = R.merge([{"model": "run/best", "code": CODE, "datasets": _datasets(), "games": _games(),
                   "latency": {"median_ms": 41.0, "p90_ms": 45.0}}])

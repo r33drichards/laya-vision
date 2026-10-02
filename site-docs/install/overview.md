@@ -8,11 +8,13 @@ repository; checkpoints download from the Hugging Face Hub the first time you lo
 ```bash
 git clone https://github.com/r33drichards/laya-vision
 cd laya-vision
-pip install -e . torchvision
+pip install -e .
 ```
 
-- `torchvision` is needed by the SmolVLM image processor, and is not a declared dependency of the package.
-- ModernVBERT checkpoints need `transformers >= 5.3`.
+- Python 3.9 or newer, `transformers >= 4.56`. `torchvision` (the SmolVLM image processor) and `pillow` are
+  declared dependencies.
+- ModernVBERT checkpoints need `transformers >= 5.3` (`pip install -e ".[modernvbert]"`); SmolVLM2 backbones need
+  `num2words` (`".[smolvlm2]"`).
 
 Then load the recommended checkpoint:
 

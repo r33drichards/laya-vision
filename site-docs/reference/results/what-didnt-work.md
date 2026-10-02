@@ -9,6 +9,11 @@
   produce and lost to a prior-only baseline until the balancing was removed.
 - **A third epoch over the same rubric data**: half a point on VLFeedback, nothing elsewhere. More passes are flat;
   the next gains need new rubric data ([Score head results](score-results.md)).
+- **Two-tower and late-interaction option scoring** ([Two-tower scoring](two-tower.md)): options embedded once
+  without the image and scored against a pooled frame embedding. The answers were order-invariant (0 flips), but
+  macro accuracy fell 2.5 points (0.684 vs 0.708) after 60 minutes of distillation, 14-25 points on sets whose options
+  are free-text answers, and a single-frame step on an L4 got only 9-16% faster. A cross-attention head over the
+  frame's hidden states did worse than the plain dot product.
 - **An in-browser demo (ONNX Runtime Web, WebGPU)**: the model exported to ONNX and run on the visitor's device.
   It ran, and matched PyTorch closely at fp32, but the smaller exports it needed (fp16 on the GPU, 8- and 4-bit
   weights) and the browser's own image decoding moved the answers enough to misrepresent the model, so it was

@@ -62,9 +62,10 @@ from ..common import ece_score, render_options
 FAMILIES = ("option_order", "text", "image", "image_shuffle", "text_only")
 # Opt-in families from the extension modules, each summarised under its own key of ``summarize`` (not in the
 # accuracy/flip table: they change the question type, the option set or the label, or are adversarial):
-# ``options`` (option_set, abstain), ``form`` (form_choice, negation) and
-# ``injection`` (inject_text, inject_image).
-EXTRA_FAMILIES = ("option_set", "abstain", "form_choice", "negation", "inject_text", "inject_image")
+# ``options`` (option_set, abstain), ``form`` (form_choice, negation),
+# ``injection`` (inject_text, inject_image) and ``render`` (state_render, option_render).
+EXTRA_FAMILIES = ("option_set", "abstain", "form_choice", "negation", "inject_text", "inject_image",
+                  "state_render", "option_render")
 ALL_FAMILIES = FAMILIES + EXTRA_FAMILIES
 
 # ---------------------------------------------------------------------------------------------------------
@@ -393,9 +394,9 @@ def build_variants(rows: Sequence[Dict], families: Sequence[str] = FAMILIES, see
     makers = {"option_order": lambda: order_variants(rows, seed), "text": lambda: text_variants(rows),
               "image": lambda: image_variants(rows, seed), "image_shuffle": lambda: shuffle_variants(rows, seed),
               "text_only": lambda: text_only_variants(rows)}
-    from . import form, injection, options  # they import this package
+    from . import form, injection, options, render  # they import this package
 
-    for mod in (options, form, injection):
+    for mod in (options, form, injection, render):
         makers.update({f: (lambda mod=mod, f=f: mod.build(rows, (f,), seed)) for f in mod.FAMILIES})
     unknown = set(families) - set(makers)
     if unknown:
@@ -528,7 +529,7 @@ def summarize(preds: Sequence[Dict], n_boot: int = 1000, seed: int = 0, ece_floo
     included), its spread over the orders every row has, and the accuracy by the gold option's displayed position; for the image controls the label prior (majority-label accuracy on the
     source rows) and how often the shuffled-image and no-image predictions agree. ``"macro"`` averages each
     family's point estimates over the datasets that have it. Predictions from ``EXTRA_FAMILIES`` add ``"options"``,
-    ``"form"`` and ``"injection"`` (each module's own summary); ``ece_floor_sims`` > 0 adds ``"ece_floor"``, the ECE
+    ``"form"``, ``"injection"`` and ``"render"`` (each module's own summary); ``ece_floor_sims`` > 0 adds ``"ece_floor"``, the ECE
     noise floor of every (dataset, family) (``floor.summarize_floor``)."""
     rng = np.random.default_rng(seed)
     out: Dict[str, Dict] = {}
@@ -582,8 +583,10 @@ def summarize(preds: Sequence[Dict], n_boot: int = 1000, seed: int = 0, ece_floo
                 macro[fam][k] = float(np.nanmean([s[k] for s in per]))
     res = {"datasets": out, "macro": macro, "n_boot": n_boot, "seed": seed}
     fams = {p["family"] for p in preds}
-    from . import form, injection, options
+    from . import form, injection, options, render
 
+    if fams & set(render.FAMILIES):
+        res["render"] = render.summarize_render(preds, n_boot, seed)
     if fams & set(options.FAMILIES):
         res["options"] = options.summarize_options(preds)
     if fams & set(form.FAMILIES):
@@ -609,7 +612,7 @@ def compact(summary: Dict) -> Dict:
     out = {"datasets": {name: {fam: {k: s[k] for k in COMPACT_KEYS if k in s} for fam, s in rep.items()}
                         for name, rep in summary["datasets"].items()},
            "macro": summary.get("macro", {})}
-    for k in ("options", "form", "injection", "n_boot", "seed"):
+    for k in ("options", "form", "injection", "render", "n_boot", "seed"):
         if k in summary:
             out[k] = summary[k]
     return out

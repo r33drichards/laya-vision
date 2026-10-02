@@ -33,6 +33,7 @@ import numpy as np
 import torch
 
 from .common import QTYPES, ece_score, proper_reward, render_options
+from .prompt import record_state
 from .vlm import VLMAgent, VLMDecisionModel, build_vlm_inputs, collate_vlm, input_ids_sha256, set_trainable
 
 # ---------------------------------------------------------------------------------------------------------
@@ -123,13 +124,15 @@ def make_item(
     head_max_len: int = 256, order: Optional[List[int]] = None,
 ) -> Dict:
     """Tokenize one example with a random (or the given) option order; the target is permuted to marker order.
-    ``max_len`` defaults to the agent's (``laya.vlm.build_vlm_inputs``)."""
+    ``max_len`` defaults to the agent's (``laya.vlm.build_vlm_inputs``), and so does the state rendering unless the
+    example names one (``"state_format"``, ``laya.prompt.STATE_FORMATS``)."""
     k = len(render_options(ex["q"]))
     if order is None:
         order = list(range(k))
         if shuffle:
             rng.shuffle(order)
-    it = build_vlm_inputs(processor, ex["state"], ex["q"], max_len, head_max_len, option_order=order)
+    it = build_vlm_inputs(processor, ex["state"], ex["q"], max_len, head_max_len, option_order=order,
+                          state_format=ex.get("state_format"))
     it["target"] = [ex["target"][i] for i in order]
     it["label"] = max(range(k), key=lambda j: it["target"][j])
     it["qtype"] = QTYPES[ex["q"]["t"]]
@@ -545,18 +548,12 @@ def jsonl_example(rec: Dict, root: str, dataset: str = "") -> Optional[Dict]:
     label = int(rec["label"])
     if not 0 <= label < k:
         return None
-    state = {}
-    if rec.get("image"):
-        state["image"] = os.path.join(root, rec["image"])
-    elif rec.get("images"):
-        state["images"] = [os.path.join(root, p) for p in rec["images"]]
-    if rec.get("state_text"):
-        state["context"] = rec["state_text"]
+    state = record_state(rec, root)  # the layout predict callers get from laya.prompt.make_state
     target = _one_hot(label, k)
     soft = rec.get("target")
     if soft is not None and len(soft) == k and min(soft) >= 0 and sum(soft) > 0:
         target = [float(p) / sum(soft) for p in soft]
-    ex = {"state": state or "", "q": q, "target": target, "label": label, "dataset": dataset, "id": rec.get("id")}
+    ex = {"state": state, "q": q, "target": target, "label": label, "dataset": dataset, "id": rec.get("id")}
     if rec.get("value") is not None:  # optional value-head target in [0, 1]
         ex["value"] = float(rec["value"])
     if rec.get("next_target") is not None:  # optional next-move-head target, checked by make_item

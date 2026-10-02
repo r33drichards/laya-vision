@@ -22,23 +22,60 @@ def marker(model: str) -> str:
     return "<!-- laya-eval model=%s -->" % model
 
 
+#: which part a ``full_eval`` error (``_get``'s ``what``) belongs to
+ERROR_PART = {"evaluate": "datasets", "bench_latency": "latency", "robustness": "robustness", "atari game": "games",
+              "grid game": "games", "control game": "games"}
+
+
+def error_part(what: str) -> Optional[str]:
+    return ERROR_PART.get(what) or ("games" if what.startswith("doom ") else None)
+
+
 def merge(results: List[Dict]) -> Dict:
-    """Part files -> one result: the first non-empty value of each part, errors concatenated."""
+    """Part files -> one result: the first non-empty value of each part, errors concatenated.
+
+    An error for a part that the merged result takes from a *different* file (e.g. ``bench_latency`` failed in the
+    full run and a later ``--parts latency`` run succeeded) no longer describes the reported numbers: it goes to
+    ``superseded`` (with the index of the file that supplied the part) instead of ``errors``, so a report never shows
+    "bench_latency failed" next to a latency number without saying where that number came from."""
     if not results:
         raise ValueError("no result files")
     models = {r.get("model") for r in results}
     if len(models) != 1:
         raise ValueError("results are for different checkpoints: %s" % sorted(map(str, models)))
-    out = {"model": results[0]["model"], "code": results[0].get("code") or {}, "errors": [],
+    out = {"model": results[0]["model"], "code": results[0].get("code") or {}, "errors": [], "superseded": [],
            "started": min((r["started"] for r in results if r.get("started")), default=None)}
-    for r in results:
+    source = {}
+    for i, r in enumerate(results):
         for part in PARTS:
             if r.get(part) and not out.get(part):
                 out[part] = r[part]
+                source[part] = i
                 if part == "datasets":
                     out["val_split"] = r.get("val_split", "val")
-        out["errors"] += r.get("errors") or []
+    for i, r in enumerate(results):
+        for e in r.get("errors") or []:
+            part = error_part(e.get("what", ""))
+            if part in source and source[part] != i:
+                src = results[source[part]]
+                out["superseded"].append(dict(e, part=part, source=source[part],
+                                              source_code=(src.get("code") or {}).get("commit"),
+                                              source_started=src.get("started")))
+            else:
+                out["errors"].append(e)
+    if not out["superseded"]:
+        del out["superseded"]
     return out
+
+
+def superseded_note(result: Dict) -> str:
+    """One clause per superseded error: which part failed in which run, and that its numbers come from another."""
+    notes = []
+    for e in result.get("superseded") or []:
+        when = (" (started %s UTC)" % e["source_started"].replace("T", " ")[:16]) if e.get("source_started") else ""
+        notes.append("%s failed in one run (`%s`); the %s numbers come from a separate successful run%s"
+                     % (e["what"], e["error"][:120].replace("`", "'"), e["part"], when))
+    return "; ".join(notes)
 
 
 def group_of(name: str) -> str:
@@ -335,6 +372,8 @@ def render(result: Dict, status: Optional[Dict[str, str]] = None, run_url: str =
         lines += ["", "<details><summary>%d error(s) inside the run</summary>" % len(result["errors"]), ""]
         lines += ["- %s: `%s`" % (e["what"], e["error"].replace("`", "'")[:300]) for e in result["errors"]]
         lines += ["", "</details>"]
+    if result.get("superseded"):
+        lines += ["", "_Note: %s._" % superseded_note(result)]
     lines.append("")
     if result.get("datasets"):
         lines += datasets_section(result["datasets"], result.get("val_split", "val"))
@@ -438,6 +477,7 @@ section{display:flex;flex-direction:column;gap:16px}
 padding:5px 7px;border-radius:3px;text-align:center;border:1px solid currentColor}
 .pill.good{color:var(--good)}.pill.warn{color:var(--warn)}.pill.bad{color:var(--bad)}.pill.info{color:var(--accent)}
 .alert{border-left:3px solid var(--bad);padding:10px 14px;background:var(--panel)}
+.note{border-left:3px solid var(--muted);padding:10px 14px;background:var(--panel);color:var(--muted);font-size:13px}
 .chart{overflow-x:auto}
 .chart svg{display:block;max-width:100%;height:auto}
 .chart text{fill:var(--ink);font:12px "IBM Plex Sans",system-ui,sans-serif}
@@ -699,6 +739,8 @@ def render_html(result: Dict, status: Optional[Dict[str, str]] = None, run_url: 
         alerts += ["<b>%s</b> failed: <span class=\"mono\">%s</span>" % (_e(e["what"]), _e(e["error"][:200])) for e in result["errors"]]
     if alerts:
         parts.append('<div class="alert">%s</div>' % "<br>".join(alerts))
+    if result.get("superseded"):
+        parts.append('<p class="note">Note: %s.</p>' % _e(superseded_note(result)))
 
     stats = []
     if "all" in cal:
@@ -943,6 +985,8 @@ def render_doc(result: Dict, title: str = "", sources: Optional[List[str]] = Non
         L += ["Generated by `scripts/eval_report.py` from %s." % ", ".join("[`%s`](%s)" % (s.rsplit("/", 1)[-1], s) for s in sources), ""]
     if result.get("errors"):
         L += ["> **Errors during the run:** " + "; ".join("%s: `%s`" % (e["what"], e["error"][:120].replace("`", "'")) for e in result["errors"]), ""]
+    if result.get("superseded"):
+        L += ["> **Note:** %s." % superseded_note(result), ""]
 
     L += ["## What happened", ""]
     rows = []

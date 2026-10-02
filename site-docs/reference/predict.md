@@ -27,6 +27,17 @@ The first argument of `predict`. It can be:
 - a PIL image on its own;
 - text, or a list (for example conversation turns), serialised the same way.
 
+Every training record put its text under one key, `"context"`, so the checkpoints have read
+`{"context": "..."}` (JSON, newlines escaped) and nothing else. `laya.prompt.make_state(image=img, context=text)`
+builds that layout. Other keys work but were never seen in training.
+
+`predict(..., state_format=...)` or `VLMAgent(..., state_format=...)` renders the non-image keys another way:
+`"json"` (the default, what every released checkpoint was trained on), `"prose"` (`key: value` lines and
+`- item` bullets, as in the CLM repository) or `"text"` (the values alone). Anything other than the checkpoint's own
+format changes its input ids. A checkpoint trained with another format records it in `vlm_agent_config.json`
+and is served with it by default. `laya/prompt.py` holds this rendering, which data preparation, training, the
+evals and `predict` all share.
+
 ## Question types
 
 The second argument is a dictionary of questions keyed by an id of your choice. Each question has a `type`, its
@@ -42,7 +53,7 @@ The second argument is a dictionary of questions keyed by an id of your choice. 
 
 ```python
 agent.predict(state, questions, n_permutations=1, batch_size=8, prefix_cache=None,
-              temperature=None, calibration=None, strict_calibration=False, strict=False)
+              temperature=None, calibration=None, strict_calibration=False, strict=False, state_format=None)
 ```
 
 | Argument | Meaning |
@@ -54,6 +65,7 @@ agent.predict(state, questions, n_permutations=1, batch_size=8, prefix_cache=Non
 | `calibration` | A `laya.Calibration` from [`calibrate`](../how-to/calibrate.md), for this call only. |
 | `strict_calibration` | Raise instead of warning when `calibration` was fitted for a different checkpoint. |
 | `strict` | Raise `ValueError` instead of truncating a question that does not fit the token budgets (see below). |
+| `state_format` | How the state's non-image keys become text for this call: `"json"`, `"prose"` or `"text"` (see [The state](#the-state)). `None` uses the checkpoint's own format. |
 
 ## The result
 
