@@ -1,0 +1,6301 @@
+{
+  "model": "autoresearch/full/long-sep24-b64-next05/best",
+  "code": {
+    "commit": "f0185bc009525e36eb387725a40f9e643f776eeb",
+    "branch": "claude/next-head-long-run",
+    "dirty": false
+  },
+  "parts": [
+    "datasets",
+    "games",
+    "latency",
+    "robustness"
+  ],
+  "val_split": "val",
+  "started": "2026-09-24T06:54:12+00:00",
+  "datasets": {
+    "val_raw": {
+      "all": {
+        "n": 59427,
+        "acc": 0.6930351523718176,
+        "ece": 0.1900223174477513,
+        "nll": 1.2832994963526867,
+        "ece_floor": 0.0028020757782407524,
+        "ece_floor_p95": 0.0040378985249083866,
+        "n_score": 9653,
+        "mae": 0.6667380825058495,
+        "xent": 1.6996527829731796,
+        "n_soft": 10643,
+        "soft_xent": 2.589620965504169
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.5992970123022847,
+        "ece": 0.35012484151994405,
+        "nll": 2.480493479544715,
+        "ece_floor": 0.013689791320549783,
+        "ece_floor_p95": 0.01980060552932676
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8240343347639485,
+        "ece": 0.14268394433491335,
+        "nll": 1.0510991580063043,
+        "ece_floor": 0.00816322643372009,
+        "ece_floor_p95": 0.011383551606463432
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7154,
+        "ece": 0.23166901749372487,
+        "nll": 1.063494367980565,
+        "ece_floor": 0.006033604239225385,
+        "ece_floor_p95": 0.008926223323345127
+      },
+      "cauldron_ai2d": {
+        "n": 282,
+        "acc": 0.7695035460992907,
+        "ece": 0.21417783338127408,
+        "nll": 1.7514567089725654,
+        "ece_floor": 0.018253283769103658,
+        "ece_floor_p95": 0.02585966802657919
+      },
+      "cauldron_aokvqa": {
+        "n": 552,
+        "acc": 0.7336956521739131,
+        "ece": 0.22968021132375885,
+        "nll": 1.538962320071896,
+        "ece_floor": 0.015675162332861307,
+        "ece_floor_p95": 0.022535712747038285
+      },
+      "cauldron_iconqa": {
+        "n": 606,
+        "acc": 0.9191419141914191,
+        "ece": 0.07285079035428492,
+        "nll": 0.4808438540248905,
+        "ece_floor": 0.008007122156250214,
+        "ece_floor_p95": 0.01177649182258265
+      },
+      "cauldron_intergps": {
+        "n": 94,
+        "acc": 0.3191489361702128,
+        "ece": 0.617895245235017,
+        "nll": 5.625652923347391,
+        "ece_floor": 0.046449685559627876,
+        "ece_floor_p95": 0.06871086806058879
+      },
+      "cauldron_scienceqa": {
+        "n": 301,
+        "acc": 0.8870431893687708,
+        "ece": 0.09787353279186636,
+        "nll": 0.5720097019981464,
+        "ece_floor": 0.014798582976442648,
+        "ece_floor_p95": 0.021089160679978795
+      },
+      "cauldron_tqa": {
+        "n": 264,
+        "acc": 0.7386363636363636,
+        "ece": 0.21288098823843585,
+        "nll": 1.581540113968945,
+        "ece_floor": 0.026522639466054505,
+        "ece_floor_p95": 0.03686107092282994
+      },
+      "cauldron_visual7w": {
+        "n": 1729,
+        "acc": 0.8658183921341817,
+        "ece": 0.09003603572167024,
+        "nll": 0.5114783673374605,
+        "ece_floor": 0.01066438830643462,
+        "ece_floor_p95": 0.0148126998186939
+      },
+      "cauldron_raven": {
+        "n": 542,
+        "acc": 0.7804428044280443,
+        "ece": 0.1965703063565426,
+        "nll": 1.0821007576487738,
+        "ece_floor": 0.0142428087022472,
+        "ece_floor_p95": 0.020678046389699466
+      },
+      "cauldron_figureqa": {
+        "n": 1928,
+        "acc": 0.8464730290456431,
+        "ece": 0.05596289193234506,
+        "nll": 0.34221177477226555,
+        "ece_floor": 0.013144168642299298,
+        "ece_floor_p95": 0.021309461274582265
+      },
+      "cauldron_hateful_memes": {
+        "n": 456,
+        "acc": 0.881578947368421,
+        "ece": 0.11236023275475746,
+        "nll": 0.727753227395198,
+        "ece_floor": 0.0064951265590232855,
+        "ece_floor_p95": 0.00947598641117415
+      },
+      "cauldron_nlvr2": {
+        "n": 906,
+        "acc": 0.782560706401766,
+        "ece": 0.18260899179555462,
+        "nll": 0.9311369327442552,
+        "ece_floor": 0.01294514606396357,
+        "ece_floor_p95": 0.018713241947144608
+      },
+      "cauldron_vsr": {
+        "n": 160,
+        "acc": 0.88125,
+        "ece": 0.11877470500767234,
+        "nll": 0.6793674702503324,
+        "ece_floor": 0.011836775328963984,
+        "ece_floor_p95": 0.01779478974640366
+      },
+      "cauldron_vqarad": {
+        "n": 62,
+        "acc": 0.7903225806451613,
+        "ece": 0.18638539410406546,
+        "nll": 1.4317242324637978,
+        "ece_floor": 0.030848518975319407,
+        "ece_floor_p95": 0.04450642360794933
+      },
+      "cauldron_clevr": {
+        "n": 1718,
+        "acc": 0.6315483119906868,
+        "ece": 0.07030731682449895,
+        "nll": 0.5930049895451407,
+        "ece_floor": 0.02160225710921571,
+        "ece_floor_p95": 0.03264208635157004
+      },
+      "cauldron_dvqa": {
+        "n": 1397,
+        "acc": 0.9319971367215462,
+        "ece": 0.029966941627333075,
+        "nll": 0.16987351274849588,
+        "ece_floor": 0.011488840361109087,
+        "ece_floor_p95": 0.016722580280658872
+      },
+      "cauldron_mapqa": {
+        "n": 1598,
+        "acc": 0.630162703379224,
+        "ece": 0.01508734260542373,
+        "nll": 0.5537623399958218,
+        "ece_floor": 0.01810272214558903,
+        "ece_floor_p95": 0.030416484305795972
+      },
+      "cauldron_ocrvqa": {
+        "n": 996,
+        "acc": 0.8604417670682731,
+        "ece": 0.08243797384352089,
+        "nll": 0.40335062488275913,
+        "ece_floor": 0.013598180962614271,
+        "ece_floor_p95": 0.020817680243986145
+      },
+      "cauldron_vqav2": {
+        "n": 1019,
+        "acc": 0.7860647693817469,
+        "ece": 0.17533778471614472,
+        "nll": 0.8008010325903254,
+        "ece_floor": 0.012617383485804368,
+        "ece_floor_p95": 0.019543416431069487
+      },
+      "cauldron_chartqa": {
+        "n": 41,
+        "acc": 0.6585365853658537,
+        "ece": 0.34445117450341944,
+        "nll": 3.3232816133876733,
+        "ece_floor": 0.02417121590637577,
+        "ece_floor_p95": 0.04079254952872671
+      },
+      "score_vlfeedback": {
+        "n": 2000,
+        "acc": 0.5475,
+        "ece": 0.05001421412825584,
+        "nll": 1.1517767230888711,
+        "ece_floor": 0.025926216555684806,
+        "ece_floor_p95": 0.03489051971286535,
+        "n_score": 2000,
+        "mae": 0.7768829093288514,
+        "xent": 1.1517767230888711,
+        "prior_xent": 1.5598021745681763
+      },
+      "score_ava": {
+        "n": 1000,
+        "acc": 0.84,
+        "ece": 0.28721452662348745,
+        "nll": 0.7062769403159619,
+        "ece_floor": 0.02530808983922004,
+        "ece_floor_p95": 0.04174444310069082,
+        "n_score": 1000,
+        "mae": 0.2545586274266243,
+        "xent": 1.2148903062939644,
+        "prior_xent": 1.2328319549560547
+      },
+      "score_richhf": {
+        "n": 1990,
+        "acc": 0.5733668341708543,
+        "ece": 0.11891940233096408,
+        "nll": 1.0278451797103125,
+        "ece_floor": 0.023012840180091518,
+        "ece_floor_p95": 0.032420361948073205,
+        "n_score": 1990,
+        "mae": 0.4992235503005023,
+        "xent": 1.0278451797103125,
+        "prior_xent": 1.1678106784820557
+      },
+      "score_crisismmd": {
+        "n": 529,
+        "acc": 0.6616257088846881,
+        "ece": 0.2803030603324082,
+        "nll": 1.9964744908072645,
+        "ece_floor": 0.02141530106333568,
+        "ece_floor_p95": 0.03075660582075496,
+        "n_score": 529,
+        "mae": 0.3697225419622184,
+        "xent": 1.9964744908072645,
+        "prior_xent": 0.9036415219306946
+      },
+      "eval_koniq": {
+        "n": 1000,
+        "acc": 0.469,
+        "ece": 0.10094807375967502,
+        "nll": 1.3700507864952087,
+        "ece_floor": 0.035972207256257535,
+        "ece_floor_p95": 0.05106058823317288,
+        "n_score": 1000,
+        "mae": 0.47207206255197526,
+        "xent": 1.44064548265934,
+        "prior_xent": 1.1759307384490967
+      },
+      "eval_evalmuse": {
+        "n": 3134,
+        "acc": 0.2322910019144863,
+        "ece": 0.479941804506403,
+        "nll": 2.681612565348563,
+        "ece_floor": 0.01788960288589595,
+        "ece_floor_p95": 0.02574469619350365,
+        "n_score": 3134,
+        "mae": 0.9465820395649811,
+        "xent": 2.663086204737872,
+        "prior_xent": 1.5159989595413208
+      },
+      "eval_cifar10h": {
+        "n": 10000,
+        "acc": 0.7938,
+        "ece": 0.17029110118150714,
+        "nll": 1.596576334674983,
+        "ece_floor": 0.003864297169387346,
+        "ece_floor_p95": 0.005357933810353262,
+        "n_soft": 5607,
+        "soft_xent": 2.651449778478839,
+        "prior_soft_xent": 2.2934176921844482
+      },
+      "eval_ferplus": {
+        "n": 3569,
+        "acc": 0.455589801064724,
+        "ece": 0.3971605935110769,
+        "nll": 2.600515608186421,
+        "ece_floor": 0.01326568006099723,
+        "ece_floor_p95": 0.018526790093794404,
+        "n_soft": 2482,
+        "soft_xent": 3.4676797056899353,
+        "prior_soft_xent": 1.7903026342391968
+      },
+      "eval_vizwiz": {
+        "n": 4319,
+        "acc": 0.48691826811761985,
+        "ece": 0.405208124996308,
+        "nll": 1.6929790803465254,
+        "ece_floor": 0.009841701851230057,
+        "ece_floor_p95": 0.014679515033332433,
+        "n_soft": 2554,
+        "soft_xent": 1.6005779163694607,
+        "prior_soft_xent": 0.6906338930130005
+      },
+      "eval_pope_random": {
+        "n": 3000,
+        "acc": 0.835,
+        "ece": 0.14138247344891222,
+        "nll": 0.7371021527855467,
+        "ece_floor": 0.005355152884920431,
+        "ece_floor_p95": 0.008069552268584563
+      },
+      "eval_pope_popular": {
+        "n": 3000,
+        "acc": 0.82,
+        "ece": 0.15925033692518872,
+        "nll": 0.8192109239749864,
+        "ece_floor": 0.0049739597829183,
+        "ece_floor_p95": 0.007545264903704393
+      },
+      "eval_pope_adversarial": {
+        "n": 3000,
+        "acc": 0.78,
+        "ece": 0.1933765544493993,
+        "nll": 1.0175969721298057,
+        "ece_floor": 0.005898325100342427,
+        "ece_floor_p95": 0.00848933373490969
+      }
+    },
+    "val_calibrated": {
+      "all": {
+        "n": 59427,
+        "acc": 0.6930351523718176,
+        "ece": 0.03221880256540914,
+        "nll": 0.7645938557692301,
+        "ece_floor": 0.004698904200249719,
+        "ece_floor_p95": 0.006476692951118525,
+        "n_score": 9653,
+        "mae": 0.6959715819575404,
+        "xent": 1.368844946627356,
+        "n_soft": 10643,
+        "soft_xent": 1.1753059373497348
+      },
+      "aokvqa": {
+        "n": 1138,
+        "acc": 0.5992970123022847,
+        "ece": 0.09720908039902552,
+        "nll": 1.0053931805542515,
+        "ece_floor": 0.03184468334399962,
+        "ece_floor_p95": 0.04477178360644879
+      },
+      "scienceqa": {
+        "n": 2097,
+        "acc": 0.8240343347639485,
+        "ece": 0.029862730075020317,
+        "nll": 0.4575474951025427,
+        "ece_floor": 0.01875384605692636,
+        "ece_floor_p95": 0.026540080733281072
+      },
+      "vqav2_yesno": {
+        "n": 5000,
+        "acc": 0.7154,
+        "ece": 0.055630068111419684,
+        "nll": 0.5634314541455359,
+        "ece_floor": 0.01177568085360527,
+        "ece_floor_p95": 0.01773598253965376
+      },
+      "cauldron_ai2d": {
+        "n": 282,
+        "acc": 0.7695035460992907,
+        "ece": 0.05942254709013811,
+        "nll": 0.666018529306331,
+        "ece_floor": 0.05504067793171456,
+        "ece_floor_p95": 0.0780568430926783
+      },
+      "cauldron_aokvqa": {
+        "n": 552,
+        "acc": 0.7336956521739131,
+        "ece": 0.056778626813404794,
+        "nll": 0.7148402527420094,
+        "ece_floor": 0.044871368650616944,
+        "ece_floor_p95": 0.06269990668456626
+      },
+      "cauldron_iconqa": {
+        "n": 606,
+        "acc": 0.9191419141914191,
+        "ece": 0.038590713351866604,
+        "nll": 0.22285133676615732,
+        "ece_floor": 0.02313256090820426,
+        "ece_floor_p95": 0.03570067901225764
+      },
+      "cauldron_intergps": {
+        "n": 94,
+        "acc": 0.3191489361702128,
+        "ece": 0.3806380531255235,
+        "nll": 1.782018823152844,
+        "ece_floor": 0.10730823392563678,
+        "ece_floor_p95": 0.15127758716649198
+      },
+      "cauldron_scienceqa": {
+        "n": 301,
+        "acc": 0.8870431893687708,
+        "ece": 0.05864756309312841,
+        "nll": 0.29463154901796795,
+        "ece_floor": 0.04363518992531734,
+        "ece_floor_p95": 0.05880237232609046
+      },
+      "cauldron_tqa": {
+        "n": 264,
+        "acc": 0.7386363636363636,
+        "ece": 0.03933482651006092,
+        "nll": 0.7079939796645759,
+        "ece_floor": 0.062312236442936195,
+        "ece_floor_p95": 0.08586854126417269
+      },
+      "cauldron_visual7w": {
+        "n": 1729,
+        "acc": 0.8658183921341817,
+        "ece": 0.1905840976931857,
+        "nll": 0.5342615026530328,
+        "ece_floor": 0.026316927779851586,
+        "ece_floor_p95": 0.036986818423569046
+      },
+      "cauldron_raven": {
+        "n": 542,
+        "acc": 0.7804428044280443,
+        "ece": 0.08484966046695781,
+        "nll": 0.4915753744209247,
+        "ece_floor": 0.03281906708140215,
+        "ece_floor_p95": 0.04816172750893556
+      },
+      "cauldron_figureqa": {
+        "n": 1928,
+        "acc": 0.8464730290456431,
+        "ece": 0.08859530307692609,
+        "nll": 0.36077865795522185,
+        "ece_floor": 0.020274882342249025,
+        "ece_floor_p95": 0.0297880846620595
+      },
+      "cauldron_hateful_memes": {
+        "n": 456,
+        "acc": 0.881578947368421,
+        "ece": 0.057479163795186757,
+        "nll": 0.2961221763582312,
+        "ece_floor": 0.02506868624634909,
+        "ece_floor_p95": 0.03754031160160114
+      },
+      "cauldron_nlvr2": {
+        "n": 906,
+        "acc": 0.782560706401766,
+        "ece": 0.046423906653658996,
+        "nll": 0.4865049905005933,
+        "ece_floor": 0.02669239224911262,
+        "ece_floor_p95": 0.03763140214989517
+      },
+      "cauldron_vsr": {
+        "n": 160,
+        "acc": 0.88125,
+        "ece": 0.054393995925784075,
+        "nll": 0.3113034027861431,
+        "ece_floor": 0.04639674415439366,
+        "ece_floor_p95": 0.06994985811412334
+      },
+      "cauldron_vqarad": {
+        "n": 62,
+        "acc": 0.7903225806451613,
+        "ece": 0.13793156993004582,
+        "nll": 0.5175327724897333,
+        "ece_floor": 0.07798161339375281,
+        "ece_floor_p95": 0.11142421605125541
+      },
+      "cauldron_clevr": {
+        "n": 1718,
+        "acc": 0.6315483119906868,
+        "ece": 0.06387852550385577,
+        "nll": 0.6057588122633304,
+        "ece_floor": 0.021355341359261724,
+        "ece_floor_p95": 0.03493081106781543
+      },
+      "cauldron_dvqa": {
+        "n": 1397,
+        "acc": 0.9319971367215462,
+        "ece": 0.07885023659267165,
+        "nll": 0.20899173677862276,
+        "ece_floor": 0.018578084972643717,
+        "ece_floor_p95": 0.02721099844555728
+      },
+      "cauldron_mapqa": {
+        "n": 1598,
+        "acc": 0.630162703379224,
+        "ece": 0.025830901161451692,
+        "nll": 0.5608595009527177,
+        "ece_floor": 0.01721667479066288,
+        "ece_floor_p95": 0.031507947533688636
+      },
+      "cauldron_ocrvqa": {
+        "n": 996,
+        "acc": 0.8604417670682731,
+        "ece": 0.1320981972787275,
+        "nll": 0.40963152934419345,
+        "ece_floor": 0.02696897285949275,
+        "ece_floor_p95": 0.04047708032600377
+      },
+      "cauldron_vqav2": {
+        "n": 1019,
+        "acc": 0.7860647693817469,
+        "ece": 0.04599862758497962,
+        "nll": 0.4761905928998747,
+        "ece_floor": 0.026031481606101615,
+        "ece_floor_p95": 0.04230469171619508
+      },
+      "cauldron_chartqa": {
+        "n": 41,
+        "acc": 0.6585365853658537,
+        "ece": 0.32388927587648714,
+        "nll": 1.059594018089517,
+        "ece_floor": 0.09726785350136641,
+        "ece_floor_p95": 0.12878797083366203
+      },
+      "score_vlfeedback": {
+        "n": 2000,
+        "acc": 0.5475,
+        "ece": 0.16095684754848483,
+        "nll": 1.219892422106117,
+        "ece_floor": 0.024161359797865156,
+        "ece_floor_p95": 0.03401611103713513,
+        "n_score": 2000,
+        "mae": 0.9665091004893184,
+        "xent": 1.219892422106117,
+        "prior_xent": 1.5598021745681763
+      },
+      "score_ava": {
+        "n": 1000,
+        "acc": 0.84,
+        "ece": 0.4990822012722492,
+        "nll": 1.1170077542066574,
+        "ece_floor": 0.017115137809515,
+        "ece_floor_p95": 0.033029498836398115,
+        "n_score": 1000,
+        "mae": 0.2566433541178703,
+        "xent": 1.3132953724861145,
+        "prior_xent": 1.2328319549560547
+      },
+      "score_richhf": {
+        "n": 1990,
+        "acc": 0.5733668341708543,
+        "ece": 0.13201041745780104,
+        "nll": 1.077530097691857,
+        "ece_floor": 0.020267747892806276,
+        "ece_floor_p95": 0.0336248992375992,
+        "n_score": 1990,
+        "mae": 0.5660989300090464,
+        "xent": 1.077530097691857,
+        "prior_xent": 1.1678106784820557
+      },
+      "score_crisismmd": {
+        "n": 529,
+        "acc": 0.6616257088846881,
+        "ece": 0.16912970183477063,
+        "nll": 0.9532639598209827,
+        "ece_floor": 0.035772483779261816,
+        "ece_floor_p95": 0.05212187044223902,
+        "n_score": 529,
+        "mae": 0.40789281436733354,
+        "xent": 0.9532639598209827,
+        "prior_xent": 0.9036415219306946
+      },
+      "eval_koniq": {
+        "n": 1000,
+        "acc": 0.469,
+        "ece": 0.18078408582508562,
+        "nll": 1.4522204970121384,
+        "ece_floor": 0.022759258777797223,
+        "ece_floor_p95": 0.036128617808222754,
+        "n_score": 1000,
+        "mae": 0.46265871322155,
+        "xent": 1.4794648971557618,
+        "prior_xent": 1.1759307384490967
+      },
+      "eval_evalmuse": {
+        "n": 3134,
+        "acc": 0.2322910019144863,
+        "ece": 0.2172755427520672,
+        "nll": 1.7086027967621737,
+        "ece_floor": 0.0159346231672706,
+        "ece_floor_p95": 0.026226570814296392,
+        "n_score": 3134,
+        "mae": 0.8690431534140902,
+        "xent": 1.7014529760011687,
+        "prior_xent": 1.5159989595413208
+      },
+      "eval_cifar10h": {
+        "n": 10000,
+        "acc": 0.7938,
+        "ece": 0.08208843044936658,
+        "nll": 0.7343049488149583,
+        "ece_floor": 0.010482609614029524,
+        "ece_floor_p95": 0.014821051666736602,
+        "n_soft": 5607,
+        "soft_xent": 1.04474868489732,
+        "prior_soft_xent": 2.2934176921844482
+      },
+      "eval_ferplus": {
+        "n": 3569,
+        "acc": 0.455589801064724,
+        "ece": 0.06058304329551745,
+        "nll": 1.5865259031039989,
+        "ece_floor": 0.017802177565368026,
+        "ece_floor_p95": 0.02666162633994406,
+        "n_soft": 2482,
+        "soft_xent": 1.8544655390125815,
+        "prior_soft_xent": 1.7903026342391968
+      },
+      "eval_vizwiz": {
+        "n": 4319,
+        "acc": 0.48691826811761985,
+        "ece": 0.2083538542690308,
+        "nll": 0.8342299831616683,
+        "ece_floor": 0.013685621794215725,
+        "ece_floor_p95": 0.022039959541927126,
+        "n_soft": 2554,
+        "soft_xent": 0.801915327785719,
+        "prior_soft_xent": 0.6906338930130005
+      },
+      "eval_pope_random": {
+        "n": 3000,
+        "acc": 0.835,
+        "ece": 0.03319722479581834,
+        "nll": 0.4082095828006665,
+        "ece_floor": 0.0137599071898063,
+        "ece_floor_p95": 0.02006674187183383
+      },
+      "eval_pope_popular": {
+        "n": 3000,
+        "acc": 0.82,
+        "ece": 0.038938919067382866,
+        "nll": 0.4333742772911986,
+        "ece_floor": 0.013163938053647678,
+        "ece_floor_p95": 0.020365368076165513
+      },
+      "eval_pope_adversarial": {
+        "n": 3000,
+        "acc": 0.78,
+        "ece": 0.04260797544320426,
+        "nll": 0.5005539068722477,
+        "ece_floor": 0.013488248754143712,
+        "ece_floor_p95": 0.020736076416571943
+      }
+    },
+    "temperature": [
+      3.983877420425415,
+      2.5911638736724854,
+      3.4719367027282715
+    ],
+    "dataset_meta": {
+      "cauldron_iconqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "iconqa",
+        "rows": 10000,
+        "rows_seen": 10000,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 11121
+          },
+          "val": {
+            "choice": 606
+          }
+        },
+        "minutes": 0.8
+      },
+      "score_vlfeedback": {
+        "source": "MMInstruction/VLFeedback",
+        "name": "vlfeedback",
+        "rows": {
+          "train": 79258,
+          "val": 1000
+        },
+        "max_rows": 0,
+        "max_texts": 2,
+        "val_pct": 5.0,
+        "max_val": 1000,
+        "max_side": 1024,
+        "seed": 0,
+        "balance": 3.0,
+        "max_chars": 1200,
+        "records": {
+          "train": 158516,
+          "val": 2000
+        },
+        "levels": {
+          "train_before_balance": {
+            "0": 35514,
+            "1": 19673,
+            "2": 20135,
+            "3": 38428,
+            "4": 44766
+          },
+          "train": {
+            "0": 35514,
+            "1": 19673,
+            "2": 20135,
+            "3": 38428,
+            "4": 44766
+          },
+          "val": {
+            "0": 474,
+            "1": 231,
+            "2": 279,
+            "3": 467,
+            "4": 549
+          }
+        },
+        "images_dropped_by_balance": 0,
+        "minutes": 9.4
+      },
+      "eval_evalmuse": {
+        "source": "evalmuse",
+        "records": {
+          "train": 10000,
+          "val": 3134,
+          "test": 0
+        },
+        "images": 13134,
+        "labels": {
+          "train": {
+            "0": 958,
+            "1": 3476,
+            "2": 3051,
+            "3": 1480,
+            "4": 1035
+          },
+          "val": {
+            "0": 286,
+            "1": 1055,
+            "2": 943,
+            "3": 492,
+            "4": 358
+          }
+        },
+        "soft_targets": 13134,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 21.5
+      },
+      "cauldron_ocrvqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "ocrvqa",
+        "rows": 10000,
+        "rows_seen": 10071,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 18040
+          },
+          "val": {
+            "noul": 996
+          }
+        },
+        "minutes": 1.1
+      },
+      "vqav2_yesno": {
+        "dataset": "vqav2_yesno",
+        "source": "lmms-lab-encoder/VQAv2",
+        "counts": {
+          "train": 50000,
+          "val": 5000
+        },
+        "label_counts": {
+          "train": {
+            "0": 24774,
+            "1": 25226
+          },
+          "val": {
+            "0": 2445,
+            "1": 2555
+          }
+        },
+        "images": 23330,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 512.3
+      },
+      "cauldron_vqav2": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "vqav2",
+        "rows": 10000,
+        "rows_seen": 11879,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 19558
+          },
+          "val": {
+            "noul": 1019
+          }
+        },
+        "minutes": 5.1
+      },
+      "score_richhf": {
+        "source": "Exploration/richhf_18k_with_images",
+        "name": "richhf",
+        "rows": {
+          "train": 15810,
+          "val": 995
+        },
+        "max_rows": 0,
+        "max_texts": 2,
+        "val_pct": 5.0,
+        "max_val": 1000,
+        "max_side": 1024,
+        "seed": 0,
+        "balance": 3.0,
+        "max_chars": 1200,
+        "records": {
+          "train": 31150,
+          "val": 1990
+        },
+        "levels": {
+          "train_before_balance": {
+            "0": 149,
+            "1": 1766,
+            "2": 12255,
+            "3": 13205,
+            "4": 4245
+          },
+          "train": {
+            "0": 149,
+            "1": 1766,
+            "2": 12255,
+            "3": 12735,
+            "4": 4245
+          },
+          "val": {
+            "0": 5,
+            "1": 81,
+            "2": 710,
+            "3": 875,
+            "4": 319
+          }
+        },
+        "images_dropped_by_balance": 4,
+        "minutes": 4.0
+      },
+      "cauldron_tqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "tqa",
+        "rows": 1493,
+        "rows_seen": 1493,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 4857
+          },
+          "val": {
+            "choice": 264
+          }
+        },
+        "minutes": 1.0
+      },
+      "eval_koniq": {
+        "source": "koniq",
+        "records": {
+          "train": 7058,
+          "val": 1000,
+          "test": 2015
+        },
+        "images": 10073,
+        "labels": {
+          "train": {
+            "0": 52,
+            "1": 968,
+            "2": 3604,
+            "3": 2434
+          },
+          "val": {
+            "0": 8,
+            "1": 133,
+            "2": 525,
+            "3": 334
+          },
+          "test": {
+            "0": 16,
+            "1": 278,
+            "2": 1021,
+            "3": 700
+          }
+        },
+        "soft_targets": 10073,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 0.6
+      },
+      "cauldron_aokvqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "aokvqa",
+        "rows": 10000,
+        "rows_seen": 10018,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 9677
+          },
+          "val": {
+            "choice": 552
+          }
+        },
+        "minutes": 1.2
+      },
+      "cauldron_vsr": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "vsr",
+        "rows": 2157,
+        "rows_seen": 2157,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 3081
+          },
+          "val": {
+            "noul": 160
+          }
+        },
+        "minutes": 0.3
+      },
+      "score_ava": {
+        "source": "trojblue/AVA-aesthetics-10pct-min50-10bins",
+        "name": "ava",
+        "rows": {
+          "train": 20437,
+          "val": 1000
+        },
+        "max_rows": 0,
+        "max_texts": 2,
+        "val_pct": 5.0,
+        "max_val": 1000,
+        "max_side": 1024,
+        "seed": 0,
+        "balance": 0.0,
+        "max_chars": 1200,
+        "records": {
+          "train": 20437,
+          "val": 1000
+        },
+        "levels": {
+          "train_before_balance": {
+            "0": 38,
+            "1": 2069,
+            "2": 17620,
+            "3": 703,
+            "4": 7
+          },
+          "train": {
+            "0": 38,
+            "1": 2069,
+            "2": 17620,
+            "3": 703,
+            "4": 7
+          },
+          "val": {
+            "0": 4,
+            "1": 108,
+            "2": 848,
+            "3": 40
+          }
+        },
+        "images_dropped_by_balance": 0,
+        "minutes": 3.1
+      },
+      "cauldron_mapqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "mapqa",
+        "rows": 10000,
+        "rows_seen": 10197,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 30260
+          },
+          "val": {
+            "noul": 1598
+          }
+        },
+        "minutes": 2.5
+      },
+      "cauldron_intergps": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "intergps",
+        "rows": 1278,
+        "rows_seen": 1280,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 1635
+          },
+          "val": {
+            "choice": 94
+          }
+        },
+        "minutes": 0.2
+      },
+      "cauldron_scienceqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "scienceqa",
+        "rows": 4976,
+        "rows_seen": 4976,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 5506
+          },
+          "val": {
+            "choice": 301
+          }
+        },
+        "minutes": 0.6
+      },
+      "cauldron_hateful_memes": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "hateful_memes",
+        "rows": 8500,
+        "rows_seen": 8500,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 8044
+          },
+          "val": {
+            "noul": 456
+          }
+        },
+        "minutes": 4.5
+      },
+      "cauldron_vqarad": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "vqarad",
+        "rows": 280,
+        "rows_seen": 313,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 725
+          },
+          "val": {
+            "noul": 62
+          }
+        },
+        "minutes": 0.1
+      },
+      "cauldron_ai2d": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "ai2d",
+        "rows": 2429,
+        "rows_seen": 2434,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 4489
+          },
+          "val": {
+            "choice": 282
+          }
+        },
+        "minutes": 0.8
+      },
+      "cauldron_clevr": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "clevr",
+        "rows": 10000,
+        "rows_seen": 10032,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 33223
+          },
+          "val": {
+            "noul": 1718
+          }
+        },
+        "minutes": 3.4
+      },
+      "eval_pope_random": {
+        "source": "pope_random",
+        "records": {
+          "train": 0,
+          "val": 3000,
+          "test": 0
+        },
+        "images": 500,
+        "labels": {
+          "val": {
+            "0": 1500,
+            "1": 1500
+          }
+        },
+        "soft_targets": 0,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 0.4
+      },
+      "eval_vizwiz": {
+        "source": "vizwiz",
+        "records": {
+          "train": 0,
+          "val": 4319,
+          "test": 0
+        },
+        "images": 4319,
+        "labels": {
+          "val": {
+            "0": 1385,
+            "1": 2934
+          }
+        },
+        "soft_targets": 4319,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 5.3
+      },
+      "cauldron_figureqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "figureqa",
+        "rows": 10000,
+        "rows_seen": 10000,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 38072
+          },
+          "val": {
+            "noul": 1928
+          }
+        },
+        "minutes": 2.2
+      },
+      "score_crisismmd": {
+        "source": "QCRI/CrisisMMD",
+        "name": "crisismmd",
+        "rows": {
+          "train": 2468,
+          "val": 529
+        },
+        "max_rows": 0,
+        "max_texts": 2,
+        "val_pct": 5.0,
+        "max_val": 1000,
+        "max_side": 1024,
+        "seed": 0,
+        "balance": 3.0,
+        "max_chars": 1200,
+        "records": {
+          "train": 2468,
+          "val": 529
+        },
+        "levels": {
+          "train_before_balance": {
+            "0": 333,
+            "1": 587,
+            "2": 1548
+          },
+          "train": {
+            "0": 333,
+            "1": 587,
+            "2": 1548
+          },
+          "val": {
+            "0": 71,
+            "1": 126,
+            "2": 332
+          }
+        },
+        "images_dropped_by_balance": 0,
+        "minutes": 34.0
+      },
+      "eval_cifar10h": {
+        "source": "cifar10h",
+        "records": {
+          "train": 0,
+          "val": 10000,
+          "test": 0
+        },
+        "images": 10000,
+        "labels": {
+          "val": {
+            "0": 1000,
+            "1": 1000,
+            "2": 1000,
+            "3": 1000,
+            "4": 1000,
+            "5": 1000,
+            "6": 1000,
+            "7": 1000,
+            "8": 1000,
+            "9": 1000
+          }
+        },
+        "soft_targets": 10000,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 0.7
+      },
+      "eval_ferplus": {
+        "source": "ferplus",
+        "records": {
+          "train": 10000,
+          "val": 3569,
+          "test": 3563
+        },
+        "images": 17132,
+        "labels": {
+          "train": {
+            "0": 3660,
+            "1": 2684,
+            "2": 1234,
+            "3": 1235,
+            "4": 855,
+            "5": 60,
+            "6": 221,
+            "7": 51
+          },
+          "val": {
+            "0": 1340,
+            "1": 899,
+            "2": 458,
+            "3": 416,
+            "4": 320,
+            "5": 36,
+            "6": 75,
+            "7": 25
+          },
+          "test": {
+            "0": 1274,
+            "1": 929,
+            "2": 445,
+            "3": 446,
+            "4": 326,
+            "5": 23,
+            "6": 93,
+            "7": 27
+          }
+        },
+        "soft_targets": 17132,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 1.4,
+        "fer2013_agreement_Training": 0.645,
+        "fer2013_agreement_PublicTest": 0.638,
+        "fer2013_agreement_PrivateTest": 0.642
+      },
+      "cauldron_raven": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "raven",
+        "rows": 10000,
+        "rows_seen": 13327,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 3122,
+            "noul": 6336
+          },
+          "val": {
+            "choice": 193,
+            "noul": 349
+          }
+        },
+        "minutes": 5.8
+      },
+      "aokvqa": {
+        "dataset": "aokvqa",
+        "source": "HuggingFaceM4/A-OKVQA",
+        "counts": {
+          "train": 17026,
+          "val": 1138
+        },
+        "label_counts": {
+          "train": {
+            "3": 4381,
+            "0": 4112,
+            "1": 4218,
+            "2": 4315
+          },
+          "val": {
+            "3": 287,
+            "2": 294,
+            "1": 279,
+            "0": 278
+          }
+        },
+        "images": 18164,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 116.0
+      },
+      "scienceqa": {
+        "dataset": "scienceqa",
+        "source": "derek-thomas/ScienceQA",
+        "counts": {
+          "train": 6218,
+          "val": 2097
+        },
+        "label_counts": {
+          "train": {
+            "0": 2273,
+            "1": 2179,
+            "2": 1167,
+            "3": 583,
+            "4": 16
+          },
+          "val": {
+            "1": 764,
+            "2": 389,
+            "3": 209,
+            "0": 728,
+            "4": 7
+          }
+        },
+        "images": 8315,
+        "caps": {
+          "train": 50000,
+          "val": 5000
+        },
+        "max_side": 512,
+        "skipped_undecodable": 0,
+        "seconds": 38.0
+      },
+      "cauldron_visual7w": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "visual7w",
+        "rows": 10000,
+        "rows_seen": 10000,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "choice": 33960
+          },
+          "val": {
+            "choice": 1729
+          }
+        },
+        "minutes": 5.2
+      },
+      "cauldron_dvqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "dvqa",
+        "rows": 10000,
+        "rows_seen": 10086,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 25781
+          },
+          "val": {
+            "noul": 1397
+          }
+        },
+        "minutes": 1.2
+      },
+      "cauldron_nlvr2": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "nlvr2",
+        "rows": 10000,
+        "rows_seen": 10000,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 17563
+          },
+          "val": {
+            "noul": 906
+          }
+        },
+        "minutes": 4.9
+      },
+      "eval_pope_adversarial": {
+        "source": "pope_adversarial",
+        "records": {
+          "train": 0,
+          "val": 3000,
+          "test": 0
+        },
+        "images": 500,
+        "labels": {
+          "val": {
+            "0": 1500,
+            "1": 1500
+          }
+        },
+        "soft_targets": 0,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 0.4
+      },
+      "eval_pope_popular": {
+        "source": "pope_popular",
+        "records": {
+          "train": 0,
+          "val": 3000,
+          "test": 0
+        },
+        "images": 500,
+        "labels": {
+          "val": {
+            "0": 1500,
+            "1": 1500
+          }
+        },
+        "soft_targets": 0,
+        "max_rows": 10000,
+        "max_val": 0,
+        "val_pct": 10.0,
+        "max_side": 1024,
+        "seed": 0,
+        "minutes": 0.4
+      },
+      "cauldron_chartqa": {
+        "source": "HuggingFaceM4/the_cauldron",
+        "subset": "chartqa",
+        "rows": 551,
+        "rows_seen": 18265,
+        "max_rows": 10000,
+        "max_texts": 4,
+        "val_pct": 5.0,
+        "max_side": 1024,
+        "seed": 0,
+        "records": {
+          "train": {
+            "noul": 550
+          },
+          "val": {
+            "noul": 41
+          }
+        },
+        "minutes": 4.5
+      }
+    },
+    "gpu": "NVIDIA A10"
+  },
+  "latency": {
+    "run": "autoresearch/full/long-sep24-b64-next05/best",
+    "gpu": "NVIDIA L4",
+    "dtype": "bf16",
+    "n": 165,
+    "split_edge": 0,
+    "max_len": 1024,
+    "median_ms": 43.90954899999855,
+    "p90_ms": 47.38173299999744,
+    "mean_input_tokens": 130.84848484848484,
+    "mean_views_per_image": 1.0
+  },
+  "games": {
+    "atari": [
+      {
+        "game": "Freeway",
+        "model": "autoresearch/full/long-sep24-b64-next05/best",
+        "frames": 1,
+        "model_score": 24.0,
+        "model_scores": [
+          24.0,
+          25.0,
+          23.0
+        ],
+        "model_steps": [
+          2048,
+          2048,
+          2048
+        ],
+        "model_capped": 0,
+        "actions": {
+          "UP": 5369,
+          "DOWN": 394,
+          "NOOP": 381
+        },
+        "random_score": 0.0,
+        "expert_score": 34.0,
+        "baseline_random": 0.0,
+        "baseline_capped": true,
+        "normalized": 0.7058823529411765,
+        "seconds": 276.9
+      },
+      {
+        "game": "Breakout",
+        "model": "autoresearch/full/long-sep24-b64-next05/best",
+        "frames": 1,
+        "model_score": 35.666666666666664,
+        "model_scores": [
+          25.0,
+          45.0,
+          37.0
+        ],
+        "model_steps": [
+          852,
+          1134,
+          1046
+        ],
+        "model_capped": 0,
+        "actions": {
+          "FIRE": 1751,
+          "NOOP": 404,
+          "LEFT": 460,
+          "RIGHT": 417
+        },
+        "random_score": 0.8,
+        "expert_score": 218.0,
+        "baseline_random": 1.2,
+        "baseline_capped": true,
+        "normalized": 0.15897908979089787,
+        "seconds": 187.8
+      },
+      {
+        "game": "Galaxian",
+        "model": "autoresearch/full/long-sep24-b64-next05/best",
+        "frames": 1,
+        "model_score": 730.0,
+        "model_scores": [
+          680.0,
+          820.0,
+          690.0
+        ],
+        "model_steps": [
+          701,
+          1137,
+          683
+        ],
+        "model_capped": 0,
+        "actions": {
+          "FIRE": 1201,
+          "LEFTFIRE": 126,
+          "RIGHT": 962,
+          "LEFT": 133,
+          "RIGHTFIRE": 98,
+          "NOOP": 1
+        },
+        "random_score": 673.0,
+        "expert_score": null,
+        "baseline_random": null,
+        "baseline_capped": false,
+        "normalized": null,
+        "seconds": 164.1
+      }
+    ],
+    "doom": {
+      "expert": {
+        "policy": "expert",
+        "episodes": 50,
+        "mean_reward": 75.8,
+        "std_reward": 8.690224392960172,
+        "kill_rate": 1.0,
+        "mean_steps": 6.8,
+        "actions": {
+          "MOVE_RIGHT": 106,
+          "ATTACK": 100,
+          "MOVE_LEFT": 134
+        },
+        "seconds": 0.7
+      },
+      "random": {
+        "policy": "random",
+        "episodes": 50,
+        "mean_reward": -121.86,
+        "std_reward": 186.01430160071024,
+        "kill_rate": 0.68,
+        "mean_steps": 39.38,
+        "actions": {
+          "MOVE_RIGHT": 687,
+          "MOVE_LEFT": 616,
+          "ATTACK": 666
+        },
+        "seconds": 1.9
+      },
+      "always_attack": {
+        "policy": "always_attack",
+        "episodes": 50,
+        "mean_reward": -325.56,
+        "std_reward": 181.7999075907356,
+        "kill_rate": 0.18,
+        "mean_steps": 63.02,
+        "actions": {
+          "ATTACK": 3151
+        },
+        "seconds": 3.0
+      },
+      "model": {
+        "policy": "model:autoresearch/full/long-sep24-b64-next05/best",
+        "episodes": 50,
+        "mean_reward": 75.44,
+        "std_reward": 8.809449472015832,
+        "kill_rate": 1.0,
+        "mean_steps": 6.8,
+        "actions": {
+          "MOVE_RIGHT": 105,
+          "ATTACK": 104,
+          "MOVE_LEFT": 131
+        },
+        "seconds": 27.3
+      }
+    },
+    "maze": [
+      {
+        "game": "maze",
+        "size": 4,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 334,
+          "RIGHT": 368,
+          "UP": 34,
+          "LEFT": 68
+        },
+        "results": [
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 1.0,
+        "efficiency": 1.0,
+        "mean_steps": 16.08,
+        "policy": "expert",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 4,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 811,
+          "UP": 792,
+          "LEFT": 814,
+          "RIGHT": 785
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 40
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 26
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 28
+          },
+          {
+            "solved": true,
+            "steps": 50,
+            "optimal": 16,
+            "bumps": 20
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 25
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 33
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 21
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 57
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 39
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 46
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 50
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 53
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 29
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 26
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 40
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 26
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 31
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 39
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 45
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 35
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 48
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 36
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 37
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 45
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 32
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 40
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 30
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 37
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 34
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 56
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 22
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 25
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 29
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 29
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 59
+          }
+        ],
+        "solve_rate": 0.02,
+        "efficiency": 0.32,
+        "mean_steps": 64.04,
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 4,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 617,
+          "RIGHT": 1304,
+          "UP": 112,
+          "LEFT": 283
+        },
+        "results": [
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 51
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 72
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 106
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 66
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 74
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 40
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 56
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 74
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 40
+          },
+          {
+            "solved": true,
+            "steps": 16,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 68
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 48,
+            "optimal": 12,
+            "bumps": 40
+          },
+          {
+            "solved": true,
+            "steps": 12,
+            "optimal": 12,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 62
+          },
+          {
+            "solved": false,
+            "steps": 64,
+            "optimal": 16,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 0.44,
+        "efficiency": 1.0,
+        "mean_steps": 46.32,
+        "policy": "model:autoresearch/full/long-sep24-b64-next05/best",
+        "seconds": 127.6
+      },
+      {
+        "game": "maze",
+        "size": 6,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 706,
+          "RIGHT": 724,
+          "UP": 206,
+          "LEFT": 224
+        },
+        "results": [
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 64,
+            "optimal": 64,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 28,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 1.0,
+        "efficiency": 1.0,
+        "mean_steps": 37.2,
+        "policy": "expert",
+        "seconds": 0.1
+      },
+      {
+        "game": "maze",
+        "size": 6,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 1866,
+          "UP": 1862,
+          "LEFT": 1882,
+          "RIGHT": 1830
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 73
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 44
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 99
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 45
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 95
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 77
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 51
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 49
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 72
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 91
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 80
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 81
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 51
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 84
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 69
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 108
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 64
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 84
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 70
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 97
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 81
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 48
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 80
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 98
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 71
+          },
+          {
+            "solved": false,
+            "steps": 256,
+            "optimal": 64,
+            "bumps": 141
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 99
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 66
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 109
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 100
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 63
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 81
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 86
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 51
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 107
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 102
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 95
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 126
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 132
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 68
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 84
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 62
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 59
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 95
+          }
+        ],
+        "solve_rate": 0.0,
+        "efficiency": 0.0,
+        "mean_steps": 148.8,
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 6,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 3752,
+          "RIGHT": 988,
+          "UP": 1811,
+          "LEFT": 697
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 124
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 190
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 24,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 158
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 136
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 220
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 136
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 152
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 80,
+            "optimal": 20,
+            "bumps": 78
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 138
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 256,
+            "optimal": 64,
+            "bumps": 252
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 222
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 96,
+            "optimal": 24,
+            "bumps": 92
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 157
+          },
+          {
+            "solved": true,
+            "steps": 20,
+            "optimal": 20,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 200
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 190
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 154
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 112,
+            "optimal": 28,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 0.06,
+        "efficiency": 1.0,
+        "mean_steps": 144.96,
+        "policy": "model:autoresearch/full/long-sep24-b64-next05/best",
+        "seconds": 537.2
+      },
+      {
+        "game": "maze",
+        "size": 8,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 1086,
+          "RIGHT": 1088,
+          "UP": 386,
+          "LEFT": 388
+        },
+        "results": [
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 68,
+            "optimal": 68,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 88,
+            "optimal": 88,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 32,
+            "optimal": 32,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 84,
+            "optimal": 84,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 36,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 48,
+            "optimal": 48,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 72,
+            "optimal": 72,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 68,
+            "optimal": 68,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 88,
+            "optimal": 88,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 56,
+            "optimal": 56,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 80,
+            "optimal": 80,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 100,
+            "optimal": 100,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 76,
+            "optimal": 76,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 44,
+            "optimal": 44,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 40,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 60,
+            "optimal": 60,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 92,
+            "optimal": 92,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 88,
+            "optimal": 88,
+            "bumps": 0
+          },
+          {
+            "solved": true,
+            "steps": 52,
+            "optimal": 52,
+            "bumps": 0
+          }
+        ],
+        "solve_rate": 1.0,
+        "efficiency": 1.0,
+        "mean_steps": 58.96,
+        "policy": "expert",
+        "seconds": 0.3
+      },
+      {
+        "game": "maze",
+        "size": 8,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 2957,
+          "UP": 2927,
+          "LEFT": 2970,
+          "RIGHT": 2938
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 124
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 149
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 151
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 164
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 132
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 106
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 98
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 164
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 115
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 143
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 109
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 90
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 221
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 87
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 67
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 105
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 160
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 336,
+            "optimal": 84,
+            "bumps": 168
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 111
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 96
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 103
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 58
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 179
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 110
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 112
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 158
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 132
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 89
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 154
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 108
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 97
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 155
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 93
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 131
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 91
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 169
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 116
+          },
+          {
+            "solved": false,
+            "steps": 320,
+            "optimal": 80,
+            "bumps": 203
+          },
+          {
+            "solved": false,
+            "steps": 400,
+            "optimal": 100,
+            "bumps": 204
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 181
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 94
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 90
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 140
+          },
+          {
+            "solved": false,
+            "steps": 368,
+            "optimal": 92,
+            "bumps": 193
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 206
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 117
+          }
+        ],
+        "solve_rate": 0.0,
+        "efficiency": 0.0,
+        "mean_steps": 235.84,
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "maze",
+        "size": 8,
+        "episodes": 50,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 7853,
+          "RIGHT": 2972,
+          "UP": 897,
+          "LEFT": 70
+        },
+        "results": [
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 204
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 302
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 303
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 236
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 223
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 158
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 157
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 280
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 224
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 302
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 176
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 173
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 350
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 155
+          },
+          {
+            "solved": false,
+            "steps": 128,
+            "optimal": 32,
+            "bumps": 126
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 173
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 170
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 287
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 173
+          },
+          {
+            "solved": false,
+            "steps": 336,
+            "optimal": 84,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 206
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 172
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 185
+          },
+          {
+            "solved": false,
+            "steps": 144,
+            "optimal": 36,
+            "bumps": 0
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 300
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 191
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 204
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 278
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 237
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 160
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 302
+          },
+          {
+            "solved": false,
+            "steps": 192,
+            "optimal": 48,
+            "bumps": 190
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 176
+          },
+          {
+            "solved": false,
+            "steps": 288,
+            "optimal": 72,
+            "bumps": 284
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 173
+          },
+          {
+            "solved": false,
+            "steps": 272,
+            "optimal": 68,
+            "bumps": 266
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 154
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 350
+          },
+          {
+            "solved": false,
+            "steps": 224,
+            "optimal": 56,
+            "bumps": 216
+          },
+          {
+            "solved": false,
+            "steps": 320,
+            "optimal": 80,
+            "bumps": 317
+          },
+          {
+            "solved": false,
+            "steps": 400,
+            "optimal": 100,
+            "bumps": 398
+          },
+          {
+            "solved": false,
+            "steps": 304,
+            "optimal": 76,
+            "bumps": 303
+          },
+          {
+            "solved": false,
+            "steps": 176,
+            "optimal": 44,
+            "bumps": 170
+          },
+          {
+            "solved": false,
+            "steps": 160,
+            "optimal": 40,
+            "bumps": 156
+          },
+          {
+            "solved": false,
+            "steps": 240,
+            "optimal": 60,
+            "bumps": 238
+          },
+          {
+            "solved": false,
+            "steps": 368,
+            "optimal": 92,
+            "bumps": 362
+          },
+          {
+            "solved": false,
+            "steps": 352,
+            "optimal": 88,
+            "bumps": 351
+          },
+          {
+            "solved": false,
+            "steps": 208,
+            "optimal": 52,
+            "bumps": 203
+          }
+        ],
+        "solve_rate": 0.0,
+        "efficiency": 0.0,
+        "mean_steps": 235.84,
+        "policy": "model:autoresearch/full/long-sep24-b64-next05/best",
+        "seconds": 847.9
+      }
+    ],
+    "snake": [
+      {
+        "game": "snake",
+        "size": 10,
+        "episodes": 20,
+        "seed": 200000,
+        "actions": {
+          "UP": 1108,
+          "LEFT": 1061,
+          "RIGHT": 1023,
+          "DOWN": 1097
+        },
+        "results": [
+          {
+            "eaten": 24,
+            "steps": 207,
+            "end": "self"
+          },
+          {
+            "eaten": 24,
+            "steps": 228,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 269,
+            "end": "self"
+          },
+          {
+            "eaten": 40,
+            "steps": 385,
+            "end": "self"
+          },
+          {
+            "eaten": 22,
+            "steps": 209,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 220,
+            "end": "self"
+          },
+          {
+            "eaten": 31,
+            "steps": 271,
+            "end": "self"
+          },
+          {
+            "eaten": 24,
+            "steps": 194,
+            "end": "wall"
+          },
+          {
+            "eaten": 21,
+            "steps": 198,
+            "end": "self"
+          },
+          {
+            "eaten": 23,
+            "steps": 139,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 283,
+            "end": "self"
+          },
+          {
+            "eaten": 26,
+            "steps": 222,
+            "end": "self"
+          },
+          {
+            "eaten": 4,
+            "steps": 21,
+            "end": "wall"
+          },
+          {
+            "eaten": 27,
+            "steps": 208,
+            "end": "self"
+          },
+          {
+            "eaten": 32,
+            "steps": 237,
+            "end": "self"
+          },
+          {
+            "eaten": 29,
+            "steps": 252,
+            "end": "wall"
+          },
+          {
+            "eaten": 30,
+            "steps": 272,
+            "end": "self"
+          },
+          {
+            "eaten": 15,
+            "steps": 100,
+            "end": "self"
+          },
+          {
+            "eaten": 27,
+            "steps": 210,
+            "end": "wall"
+          },
+          {
+            "eaten": 22,
+            "steps": 164,
+            "end": "self"
+          }
+        ],
+        "mean_eaten": 25.1,
+        "max_eaten": 40,
+        "mean_steps": 214.45,
+        "ends": {
+          "self": 16,
+          "wall": 4
+        },
+        "policy": "expert",
+        "seconds": 0.2
+      },
+      {
+        "game": "snake",
+        "size": 10,
+        "episodes": 20,
+        "seed": 200000,
+        "actions": {
+          "DOWN": 79,
+          "UP": 74,
+          "LEFT": 79,
+          "RIGHT": 64
+        },
+        "results": [
+          {
+            "eaten": 0,
+            "steps": 10,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 12,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 28,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 15,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 18,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 16,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 5,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 7,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 9,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 16,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 20,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 17,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 18,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 38,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 9,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 5,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 19,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 9,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 17,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 8,
+            "end": "wall"
+          }
+        ],
+        "mean_eaten": 0.1,
+        "max_eaten": 1,
+        "mean_steps": 14.8,
+        "ends": {
+          "wall": 20
+        },
+        "policy": "random",
+        "seconds": 0.0
+      },
+      {
+        "game": "snake",
+        "size": 10,
+        "episodes": 20,
+        "seed": 200000,
+        "actions": {
+          "LEFT": 180,
+          "DOWN": 96,
+          "RIGHT": 147,
+          "UP": 128
+        },
+        "results": [
+          {
+            "eaten": 0,
+            "steps": 5,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 13,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 14,
+            "end": "wall"
+          },
+          {
+            "eaten": 5,
+            "steps": 51,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 14,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 8,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 14,
+            "end": "wall"
+          },
+          {
+            "eaten": 7,
+            "steps": 53,
+            "end": "wall"
+          },
+          {
+            "eaten": 10,
+            "steps": 102,
+            "end": "wall"
+          },
+          {
+            "eaten": 9,
+            "steps": 62,
+            "end": "self"
+          },
+          {
+            "eaten": 2,
+            "steps": 24,
+            "end": "wall"
+          },
+          {
+            "eaten": 3,
+            "steps": 31,
+            "end": "wall"
+          },
+          {
+            "eaten": 1,
+            "steps": 9,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 18,
+            "end": "wall"
+          },
+          {
+            "eaten": 0,
+            "steps": 14,
+            "end": "wall"
+          },
+          {
+            "eaten": 2,
+            "steps": 7,
+            "end": "self"
+          },
+          {
+            "eaten": 1,
+            "steps": 8,
+            "end": "wall"
+          },
+          {
+            "eaten": 9,
+            "steps": 67,
+            "end": "wall"
+          },
+          {
+            "eaten": 7,
+            "steps": 32,
+            "end": "self"
+          },
+          {
+            "eaten": 0,
+            "steps": 5,
+            "end": "wall"
+          }
+        ],
+        "mean_eaten": 3.15,
+        "max_eaten": 10,
+        "mean_steps": 27.55,
+        "ends": {
+          "wall": 17,
+          "self": 3
+        },
+        "policy": "model:autoresearch/full/long-sep24-b64-next05/best",
+        "seconds": 56.9
+      }
+    ],
+    "control": [
+      {
+        "game": "CartPole",
+        "model": "autoresearch/full/long-sep24-b64-next05/best",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": 32.1,
+        "model_scores": [
+          32.0,
+          24.0,
+          10.0,
+          20.0,
+          50.0,
+          20.0,
+          11.0,
+          42.0,
+          92.0,
+          20.0
+        ],
+        "model_solved": 0.0,
+        "model_steps": 32.1,
+        "actions": {
+          "LEFT": 128,
+          "RIGHT": 193
+        },
+        "random_score": 20.9,
+        "random_solved": 0.0,
+        "expert_score": 500.0,
+        "expert_solved": 1.0,
+        "solved_at": 475.0,
+        "normalized": 0.023377165518680864,
+        "seconds": 44.4
+      },
+      {
+        "game": "Acrobot",
+        "model": "autoresearch/full/long-sep24-b64-next05/best",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": -203.6,
+        "model_scores": [
+          -151.0,
+          -133.0,
+          -437.0,
+          -107.0,
+          -301.0,
+          -87.0,
+          -414.0,
+          -146.0,
+          -144.0,
+          -116.0
+        ],
+        "model_solved": 0.1,
+        "model_steps": 204.6,
+        "actions": {
+          "CLOCKWISE": 1020,
+          "COUNTERCLOCKWISE": 1026
+        },
+        "random_score": -500.0,
+        "random_solved": 0.0,
+        "expert_score": -84.6,
+        "expert_solved": 0.7,
+        "solved_at": -100.0,
+        "normalized": 0.7135291285507944,
+        "seconds": 178.1
+      },
+      {
+        "game": "MountainCar",
+        "model": "autoresearch/full/long-sep24-b64-next05/best",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": -140.6,
+        "model_scores": [
+          -200.0,
+          -118.0,
+          -125.0,
+          -200.0,
+          -132.0,
+          -116.0,
+          -132.0,
+          -121.0,
+          -141.0,
+          -121.0
+        ],
+        "model_solved": 0.0,
+        "model_steps": 140.6,
+        "actions": {
+          "RIGHT": 1052,
+          "LEFT": 354
+        },
+        "random_score": -200.0,
+        "random_solved": 0.0,
+        "expert_score": -121.7,
+        "expert_solved": 0.0,
+        "solved_at": -110.0,
+        "normalized": 0.7586206896551725,
+        "seconds": 82.6
+      },
+      {
+        "game": "LunarLander",
+        "model": "autoresearch/full/long-sep24-b64-next05/best",
+        "episodes": 10,
+        "seed": 200000,
+        "model_score": -305.0557,
+        "model_scores": [
+          -354.355,
+          -268.634,
+          -627.873,
+          -350.674,
+          -208.905,
+          -509.849,
+          -283.99,
+          -99.837,
+          -4.199,
+          -342.241
+        ],
+        "model_solved": 0.0,
+        "model_steps": 95.4,
+        "actions": {
+          "LEFT_ENGINE": 59,
+          "NOOP": 443,
+          "MAIN_ENGINE": 440,
+          "RIGHT_ENGINE": 12
+        },
+        "random_score": -177.11169999999998,
+        "random_solved": 0.0,
+        "expert_score": 273.15250000000003,
+        "expert_solved": 1.0,
+        "solved_at": 200.0,
+        "normalized": -0.28415317051633243,
+        "seconds": 62.5
+      }
+    ]
+  },
+  "robustness": {
+    "meta": {
+      "run": "autoresearch/full/long-sep24-b64-next05/best",
+      "datasets": [
+        "aokvqa",
+        "cauldron_ai2d",
+        "cauldron_mapqa",
+        "cauldron_visual7w",
+        "cauldron_vsr",
+        "scienceqa",
+        "vqav2_yesno"
+      ],
+      "n_per_dataset": 300,
+      "families": [
+        "image_shuffle",
+        "text_only",
+        "option_order",
+        "inject_image"
+      ],
+      "seed": 0,
+      "n_boot": 1000,
+      "val_split": "val",
+      "temperature": [
+        3.983877420425415,
+        2.5911638736724854,
+        3.4719367027282715
+      ],
+      "gpu": "NVIDIA L4",
+      "row_counts": {
+        "orig": 1942,
+        "image_shuffle": 1942,
+        "text_only": 1942,
+        "option_order": 5875,
+        "inject_image": 3884
+      },
+      "minutes": 3.405476160844167,
+      "rows_dir": "autoresearch/full/long-sep24-b64-next05/evals/best-20260924T065409Z-f0185bc0-robustness"
+    },
+    "datasets": {
+      "aokvqa": {
+        "orig": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.5833333333333334,
+          "acc_ci": [
+            0.53,
+            0.64
+          ],
+          "base_acc": 0.5833333333333334,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.12137010000000002,
+          "chance": 0.25
+        },
+        "option_order": {
+          "n_groups": 300,
+          "n_rows": 1431,
+          "acc": 0.5813333333333334,
+          "acc_ci": [
+            0.5248291666666666,
+            0.6353541666666667
+          ],
+          "base_acc": 0.5833333333333334,
+          "delta_acc": -0.0020000000000000018,
+          "delta_acc_ci": [
+            -0.023520833333333296,
+            0.01883749999999992
+          ],
+          "flip_rate": 0.07933333333333334,
+          "flip_rate_ci": [
+            0.05565833333333333,
+            0.1055
+          ],
+          "ece": 0.12662607966457023,
+          "chance": 0.25,
+          "acc_spread": 0.020000000000000018
+        },
+        "image_shuffle": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.31333333333333335,
+          "acc_ci": [
+            0.2633333333333333,
+            0.3667499999999999
+          ],
+          "base_acc": 0.5833333333333334,
+          "delta_acc": -0.27,
+          "delta_acc_ci": [
+            -0.34,
+            -0.20333333333333337
+          ],
+          "flip_rate": 0.62,
+          "flip_rate_ci": [
+            0.57,
+            0.6734166666666666
+          ],
+          "ece": 0.30165866666666674,
+          "chance": 0.25,
+          "majority_label_acc": 0.26666666666666666,
+          "agree_with_text_only": 0.4766666666666667
+        },
+        "text_only": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.38333333333333336,
+          "acc_ci": [
+            0.33,
+            0.43666666666666665
+          ],
+          "base_acc": 0.5833333333333334,
+          "delta_acc": -0.2,
+          "delta_acc_ci": [
+            -0.26333333333333336,
+            -0.13333333333333336
+          ],
+          "flip_rate": 0.5066666666666667,
+          "flip_rate_ci": [
+            0.44666666666666666,
+            0.5633333333333334
+          ],
+          "ece": 0.15617903333333336,
+          "chance": 0.25,
+          "majority_label_acc": 0.26666666666666666
+        }
+      },
+      "cauldron_ai2d": {
+        "orig": {
+          "n_groups": 282,
+          "n_rows": 282,
+          "acc": 0.7695035460992907,
+          "acc_ci": [
+            0.7172253245846713,
+            0.8197968833413835
+          ],
+          "base_acc": 0.7695035460992907,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.06574489361702127,
+          "chance": 0.25
+        },
+        "option_order": {
+          "n_groups": 282,
+          "n_rows": 1351,
+          "acc": 0.7686170212765957,
+          "acc_ci": [
+            0.7219904877240922,
+            0.816075234795358
+          ],
+          "base_acc": 0.7695035460992907,
+          "delta_acc": -0.0008865248226950229,
+          "delta_acc_ci": [
+            -0.023797801216103292,
+            0.02033803373748037
+          ],
+          "flip_rate": 0.07074468085106382,
+          "flip_rate_ci": [
+            0.0491495142577579,
+            0.09382229186191815
+          ],
+          "ece": 0.05222392301998518,
+          "chance": 0.25,
+          "acc_spread": 0.01773049645390068
+        },
+        "image_shuffle": {
+          "n_groups": 282,
+          "n_rows": 282,
+          "acc": 0.549645390070922,
+          "acc_ci": [
+            0.48998776223776225,
+            0.6076577068764568
+          ],
+          "base_acc": 0.7695035460992907,
+          "delta_acc": -0.21985815602836878,
+          "delta_acc_ci": [
+            -0.28898348166409,
+            -0.1580663636699553
+          ],
+          "flip_rate": 0.4397163120567376,
+          "flip_rate_ci": [
+            0.379552858472542,
+            0.5
+          ],
+          "ece": 0.1930575177304964,
+          "chance": 0.25,
+          "majority_label_acc": 0.26595744680851063,
+          "agree_with_text_only": 0.624113475177305
+        },
+        "text_only": {
+          "n_groups": 282,
+          "n_rows": 282,
+          "acc": 0.5886524822695035,
+          "acc_ci": [
+            0.5354583064689448,
+            0.6409507722007722
+          ],
+          "base_acc": 0.7695035460992907,
+          "delta_acc": -0.18085106382978722,
+          "delta_acc_ci": [
+            -0.2435097402597402,
+            -0.11929824561403513
+          ],
+          "flip_rate": 0.39361702127659576,
+          "flip_rate_ci": [
+            0.3380982448084086,
+            0.4548753196930946
+          ],
+          "ece": 0.07573251773049647,
+          "chance": 0.25,
+          "majority_label_acc": 0.26595744680851063
+        }
+      },
+      "cauldron_mapqa": {
+        "orig": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.6366666666666667,
+          "acc_ci": [
+            0.5830304973238181,
+            0.688832288401254
+          ],
+          "base_acc": 0.6366666666666667,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.03250106666666667,
+          "chance": 0.5
+        },
+        "option_order": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.6433333333333333,
+          "acc_ci": [
+            0.5860927152317881,
+            0.6969853170884099
+          ],
+          "base_acc": 0.6366666666666667,
+          "delta_acc": 0.006666666666666599,
+          "delta_acc_ci": [
+            -0.019672131147540965,
+            0.03082991657581647
+          ],
+          "flip_rate": 0.05333333333333334,
+          "flip_rate_ci": [
+            0.02950578592092575,
+            0.08042251372788285
+          ],
+          "ece": 0.0460105666666667,
+          "chance": 0.5,
+          "acc_spread": 0.006666666666666599
+        },
+        "image_shuffle": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.5233333333333333,
+          "acc_ci": [
+            0.46757679180887374,
+            0.5798308983992861
+          ],
+          "base_acc": 0.6366666666666667,
+          "delta_acc": -0.1133333333333334,
+          "delta_acc_ci": [
+            -0.17466403318414037,
+            -0.04874022089277504
+          ],
+          "flip_rate": 0.3466666666666667,
+          "flip_rate_ci": [
+            0.29411267885532594,
+            0.39797583982046425
+          ],
+          "ece": 0.10296753333333336,
+          "chance": 0.5,
+          "majority_label_acc": 0.6066666666666667,
+          "agree_with_text_only": 0.4633333333333333
+        },
+        "text_only": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.49333333333333335,
+          "acc_ci": [
+            0.44,
+            0.5469332089434237
+          ],
+          "base_acc": 0.6366666666666667,
+          "delta_acc": -0.14333333333333337,
+          "delta_acc_ci": [
+            -0.22332189487780377,
+            -0.05459367217046392
+          ],
+          "flip_rate": 0.55,
+          "flip_rate_ci": [
+            0.489970447284345,
+            0.6060606060606061
+          ],
+          "ece": 0.11980903333333334,
+          "chance": 0.5,
+          "majority_label_acc": 0.6066666666666667
+        }
+      },
+      "cauldron_visual7w": {
+        "orig": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.8533333333333334,
+          "acc_ci": [
+            0.8118811881188119,
+            0.891156462585034
+          ],
+          "base_acc": 0.8533333333333334,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.1930095,
+          "chance": 0.25
+        },
+        "option_order": {
+          "n_groups": 300,
+          "n_rows": 1443,
+          "acc": 0.8510000000000001,
+          "acc_ci": [
+            0.8152442920521561,
+            0.8913466022451383
+          ],
+          "base_acc": 0.8533333333333334,
+          "delta_acc": -0.0023333333333332984,
+          "delta_acc_ci": [
+            -0.02013855166410893,
+            0.013562804736475512
+          ],
+          "flip_rate": 0.03866666666666667,
+          "flip_rate_ci": [
+            0.023850911638623348,
+            0.05670160860291504
+          ],
+          "ece": 0.19628714483714482,
+          "chance": 0.25,
+          "acc_spread": 0.026666666666666616
+        },
+        "image_shuffle": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.4,
+          "acc_ci": [
+            0.34842815090712487,
+            0.45548036610929654
+          ],
+          "base_acc": 0.8533333333333334,
+          "delta_acc": -0.45333333333333337,
+          "delta_acc_ci": [
+            -0.5151812240047534,
+            -0.3912778366914104
+          ],
+          "flip_rate": 0.5866666666666667,
+          "flip_rate_ci": [
+            0.5284266111625039,
+            0.6351438535309503
+          ],
+          "ece": 0.1296793333333333,
+          "chance": 0.25,
+          "majority_label_acc": 0.29,
+          "agree_with_text_only": 0.49333333333333335
+        },
+        "text_only": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.47333333333333333,
+          "acc_ci": [
+            0.4199838709677419,
+            0.527174357094223
+          ],
+          "base_acc": 0.8533333333333334,
+          "delta_acc": -0.38000000000000006,
+          "delta_acc_ci": [
+            -0.4444540229885058,
+            -0.31524173381494863
+          ],
+          "flip_rate": 0.5366666666666666,
+          "flip_rate_ci": [
+            0.4813532838983051,
+            0.5907627008429789
+          ],
+          "ece": 0.0699682666666667,
+          "chance": 0.25,
+          "majority_label_acc": 0.29
+        }
+      },
+      "cauldron_vsr": {
+        "orig": {
+          "n_groups": 160,
+          "n_rows": 160,
+          "acc": 0.875,
+          "acc_ci": [
+            0.8169767907162865,
+            0.9243266813324953
+          ],
+          "base_acc": 0.875,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.04436275000000006,
+          "chance": 0.5
+        },
+        "option_order": {
+          "n_groups": 160,
+          "n_rows": 160,
+          "acc": 0.875,
+          "acc_ci": [
+            0.825798874215198,
+            0.9240506329113924
+          ],
+          "base_acc": 0.875,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.043032499999999925,
+          "chance": 0.5,
+          "acc_spread": 0.0
+        },
+        "image_shuffle": {
+          "n_groups": 160,
+          "n_rows": 160,
+          "acc": 0.5,
+          "acc_ci": [
+            0.420366438625462,
+            0.5771926716411689
+          ],
+          "base_acc": 0.875,
+          "delta_acc": -0.375,
+          "delta_acc_ci": [
+            -0.4630872483221476,
+            -0.2884395424836601
+          ],
+          "flip_rate": 0.4625,
+          "flip_rate_ci": [
+            0.3831027194282228,
+            0.5389963297571994
+          ],
+          "ece": 0.42514056250000004,
+          "chance": 0.5,
+          "majority_label_acc": 0.50625,
+          "agree_with_text_only": 0.86875
+        },
+        "text_only": {
+          "n_groups": 160,
+          "n_rows": 160,
+          "acc": 0.49375,
+          "acc_ci": [
+            0.4068803879310345,
+            0.5751830479027054
+          ],
+          "base_acc": 0.875,
+          "delta_acc": -0.38125,
+          "delta_acc_ci": [
+            -0.46835885633353985,
+            -0.29111882400979994
+          ],
+          "flip_rate": 0.46875,
+          "flip_rate_ci": [
+            0.38823529411764707,
+            0.5515151515151515
+          ],
+          "ece": 0.3342269375000001,
+          "chance": 0.5,
+          "majority_label_acc": 0.50625
+        }
+      },
+      "scienceqa": {
+        "orig": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.84,
+          "acc_ci": [
+            0.7966666666666666,
+            0.8766666666666667
+          ],
+          "base_acc": 0.84,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.062305666666666676,
+          "chance": 0.36627777777777776
+        },
+        "option_order": {
+          "n_groups": 300,
+          "n_rows": 890,
+          "acc": 0.87,
+          "acc_ci": [
+            0.8322152777777778,
+            0.9044513888888891
+          ],
+          "base_acc": 0.84,
+          "delta_acc": 0.030000000000000027,
+          "delta_acc_ci": [
+            0.0022152777777778997,
+            0.05611111111111111
+          ],
+          "flip_rate": 0.07333333333333333,
+          "flip_rate_ci": [
+            0.04555555555555555,
+            0.10222222222222221
+          ],
+          "ece": 0.0549988426966292,
+          "chance": 0.36627777777777776,
+          "acc_spread": 0.040000000000000036
+        },
+        "image_shuffle": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.5733333333333334,
+          "acc_ci": [
+            0.52,
+            0.6333333333333333
+          ],
+          "base_acc": 0.84,
+          "delta_acc": -0.2666666666666666,
+          "delta_acc_ci": [
+            -0.32333333333333336,
+            -0.20666666666666667
+          ],
+          "flip_rate": 0.38,
+          "flip_rate_ci": [
+            0.3233333333333333,
+            0.43666666666666665
+          ],
+          "ece": 0.15355436666666675,
+          "chance": 0.36627777777777776,
+          "majority_label_acc": 0.37,
+          "agree_with_text_only": 0.69
+        },
+        "text_only": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.6533333333333333,
+          "acc_ci": [
+            0.5966666666666667,
+            0.71
+          ],
+          "base_acc": 0.84,
+          "delta_acc": -0.18666666666666665,
+          "delta_acc_ci": [
+            -0.24,
+            -0.13
+          ],
+          "flip_rate": 0.29333333333333333,
+          "flip_rate_ci": [
+            0.24333333333333335,
+            0.3433333333333333
+          ],
+          "ece": 0.07337800000000003,
+          "chance": 0.36627777777777776,
+          "majority_label_acc": 0.37
+        }
+      },
+      "vqav2_yesno": {
+        "orig": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.7166666666666667,
+          "acc_ci": [
+            0.6677252985884907,
+            0.7656927290667211
+          ],
+          "base_acc": 0.7166666666666667,
+          "delta_acc": 0.0,
+          "delta_acc_ci": [
+            0.0,
+            0.0
+          ],
+          "flip_rate": 0.0,
+          "flip_rate_ci": [
+            0.0,
+            0.0
+          ],
+          "ece": 0.08376003333333334,
+          "chance": 0.5
+        },
+        "option_order": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.72,
+          "acc_ci": [
+            0.6689183539727018,
+            0.7666919191919193
+          ],
+          "base_acc": 0.7166666666666667,
+          "delta_acc": 0.0033333333333332993,
+          "delta_acc_ci": [
+            0.0,
+            0.010169491525423683
+          ],
+          "flip_rate": 0.0033333333333333335,
+          "flip_rate_ci": [
+            0.0,
+            0.010169491525423728
+          ],
+          "ece": 0.08988596666666662,
+          "chance": 0.5,
+          "acc_spread": 0.0033333333333332993
+        },
+        "image_shuffle": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.48,
+          "acc_ci": [
+            0.42710734463276834,
+            0.5333779264214046
+          ],
+          "base_acc": 0.7166666666666667,
+          "delta_acc": -0.2366666666666667,
+          "delta_acc_ci": [
+            -0.3104815455594002,
+            -0.16718561080551164
+          ],
+          "flip_rate": 0.49,
+          "flip_rate_ci": [
+            0.4364231072296277,
+            0.5476249410655352
+          ],
+          "ece": 0.3003138666666668,
+          "chance": 0.5,
+          "majority_label_acc": 0.52,
+          "agree_with_text_only": 0.5366666666666666
+        },
+        "text_only": {
+          "n_groups": 300,
+          "n_rows": 300,
+          "acc": 0.57,
+          "acc_ci": [
+            0.5083029246773052,
+            0.6254294618425054
+          ],
+          "base_acc": 0.7166666666666667,
+          "delta_acc": -0.14666666666666672,
+          "delta_acc_ci": [
+            -0.22186350257542312,
+            -0.07260128973423657
+          ],
+          "flip_rate": 0.41333333333333333,
+          "flip_rate_ci": [
+            0.3564356435643564,
+            0.4738698721809543
+          ],
+          "ece": 0.08315976666666659,
+          "chance": 0.5,
+          "majority_label_acc": 0.52
+        }
+      }
+    },
+    "macro": {
+      "orig": {
+        "n_datasets": 7,
+        "acc": 0.7535005065856131,
+        "balanced_acc": 0.7302418822784162,
+        "base_acc": 0.7535005065856131,
+        "delta_acc": 0.0,
+        "flip_rate": 0.0,
+        "ece": 0.08615057289766971
+      },
+      "option_order": {
+        "n_datasets": 7,
+        "acc": 0.7584690982776089,
+        "balanced_acc": 0.7557456374375519,
+        "base_acc": 0.7535005065856131,
+        "delta_acc": 0.004968591691995943,
+        "flip_rate": 0.04553495440729483,
+        "ece": 0.08700928907880896
+      },
+      "image_shuffle": {
+        "n_datasets": 7,
+        "acc": 0.47709219858156027,
+        "balanced_acc": 0.4610938915747422,
+        "base_acc": 0.7535005065856131,
+        "delta_acc": -0.27640830800405275,
+        "flip_rate": 0.4750785207700101,
+        "ece": 0.22948169241388047
+      },
+      "text_only": {
+        "n_datasets": 7,
+        "acc": 0.5222479736575482,
+        "balanced_acc": 0.5035823875303274,
+        "base_acc": 0.7535005065856131,
+        "delta_acc": -0.23125253292806483,
+        "flip_rate": 0.45176671732522805,
+        "ece": 0.13035050789007094
+      }
+    },
+    "injection": {
+      "datasets": {
+        "aokvqa": {
+          "inject_image": {
+            "n_groups": 300,
+            "n_rows": 600,
+            "n_clusters": 300,
+            "acc": 0.21,
+            "balanced_acc": 0.21031130816170862,
+            "flip_rate": 0.6033333333333334,
+            "any_flip_rate": 0.7433333333333333,
+            "ece": 0.5522621833333334,
+            "base_acc": 0.5833333333333334,
+            "chance": 0.25,
+            "delta_acc": -0.3733333333333334,
+            "acc_ci": [
+              0.17,
+              0.25
+            ],
+            "base_acc_ci": [
+              0.53,
+              0.64
+            ],
+            "delta_acc_ci": [
+              -0.42333333333333334,
+              -0.32499999999999996
+            ],
+            "flip_rate_ci": [
+              0.5582916666666666,
+              0.6500416666666666
+            ],
+            "ece_ci": [
+              0.5143129949999999,
+              0.5965294258333333
+            ],
+            "n_paired": 600,
+            "n_attackable": 510,
+            "attack_success_rate": 0.6901960784313725,
+            "base_on_target": 0.15,
+            "delta_p_target": 0.4473308666666666,
+            "variants": {
+              "typo_center": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.14333333333333334,
+                "base_acc": 0.5833333333333334,
+                "delta_acc": -0.44,
+                "flip_rate": 0.7133333333333334,
+                "n_attackable": 255,
+                "attack_success_rate": 0.8117647058823529,
+                "base_on_target": 0.15,
+                "delta_p_target": 0.5396317666666666
+              },
+              "typo_corner": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.27666666666666667,
+                "base_acc": 0.5833333333333334,
+                "delta_acc": -0.30666666666666664,
+                "flip_rate": 0.49333333333333335,
+                "n_attackable": 255,
+                "attack_success_rate": 0.5686274509803921,
+                "base_on_target": 0.15,
+                "delta_p_target": 0.35502996666666664
+              }
+            }
+          }
+        },
+        "cauldron_ai2d": {
+          "inject_image": {
+            "n_groups": 282,
+            "n_rows": 564,
+            "n_clusters": 138,
+            "acc": 0.5620567375886525,
+            "balanced_acc": 0.5645238095238095,
+            "flip_rate": 0.3102836879432624,
+            "any_flip_rate": 0.44680851063829785,
+            "ece": 0.2335914893617022,
+            "base_acc": 0.7695035460992907,
+            "chance": 0.25,
+            "delta_acc": -0.20744680851063824,
+            "acc_ci": [
+              0.5105943097355915,
+              0.6105077231121282
+            ],
+            "base_acc_ci": [
+              0.715353854556804,
+              0.8178298175845077
+            ],
+            "delta_acc_ci": [
+              -0.25775498992858453,
+              -0.16478098290598298
+            ],
+            "flip_rate_ci": [
+              0.2688318078779311,
+              0.35643232170319106
+            ],
+            "ece_ci": [
+              0.1917938408235785,
+              0.2775742870874844
+            ],
+            "n_paired": 564,
+            "n_attackable": 526,
+            "attack_success_rate": 0.279467680608365,
+            "base_on_target": 0.0673758865248227,
+            "delta_p_target": 0.20749707446808507,
+            "variants": {
+              "typo_center": {
+                "n": 282,
+                "n_paired": 282,
+                "acc": 0.5035460992907801,
+                "base_acc": 0.7695035460992907,
+                "delta_acc": -0.26595744680851063,
+                "flip_rate": 0.41134751773049644,
+                "n_attackable": 263,
+                "attack_success_rate": 0.3574144486692015,
+                "base_on_target": 0.0673758865248227,
+                "delta_p_target": 0.2704587588652482
+              },
+              "typo_corner": {
+                "n": 282,
+                "n_paired": 282,
+                "acc": 0.6205673758865248,
+                "base_acc": 0.7695035460992907,
+                "delta_acc": -0.14893617021276595,
+                "flip_rate": 0.20921985815602837,
+                "n_attackable": 263,
+                "attack_success_rate": 0.20152091254752852,
+                "base_on_target": 0.0673758865248227,
+                "delta_p_target": 0.14453539007092198
+              }
+            }
+          }
+        },
+        "cauldron_mapqa": {
+          "inject_image": {
+            "n_groups": 300,
+            "n_rows": 600,
+            "n_clusters": 253,
+            "acc": 0.63,
+            "balanced_acc": 0.6071428571428572,
+            "flip_rate": 0.14333333333333334,
+            "any_flip_rate": 0.24333333333333335,
+            "ece": 0.018214700000000066,
+            "base_acc": 0.6366666666666667,
+            "chance": 0.5,
+            "delta_acc": -0.00666666666666671,
+            "acc_ci": [
+              0.582767289657318,
+              0.6807860245075228
+            ],
+            "base_acc_ci": [
+              0.5808417531172912,
+              0.6920719170670475
+            ],
+            "delta_acc_ci": [
+              -0.0401384992987377,
+              0.026673400673400616
+            ],
+            "flip_rate_ci": [
+              0.115508377760853,
+              0.17105372442734745
+            ],
+            "ece_ci": [
+              0.01821562405889024,
+              0.06493439799546646
+            ],
+            "n_paired": 600,
+            "n_attackable": 382,
+            "attack_success_rate": 0.11780104712041885,
+            "base_on_target": 0.36333333333333334,
+            "delta_p_target": -0.0018789833333333324,
+            "variants": {
+              "typo_center": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.6233333333333333,
+                "base_acc": 0.6366666666666667,
+                "delta_acc": -0.013333333333333334,
+                "flip_rate": 0.16,
+                "n_attackable": 191,
+                "attack_success_rate": 0.13612565445026178,
+                "base_on_target": 0.36333333333333334,
+                "delta_p_target": -0.0019438000000000003
+              },
+              "typo_corner": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.6366666666666667,
+                "base_acc": 0.6366666666666667,
+                "delta_acc": 0.0,
+                "flip_rate": 0.12666666666666668,
+                "n_attackable": 191,
+                "attack_success_rate": 0.09947643979057591,
+                "base_on_target": 0.36333333333333334,
+                "delta_p_target": -0.0018141666666666645
+              }
+            }
+          }
+        },
+        "cauldron_visual7w": {
+          "inject_image": {
+            "n_groups": 300,
+            "n_rows": 600,
+            "n_clusters": 238,
+            "acc": 0.27666666666666667,
+            "balanced_acc": 0.27925560775702485,
+            "flip_rate": 0.665,
+            "any_flip_rate": 0.7666666666666667,
+            "ece": 0.3907540333333333,
+            "base_acc": 0.8533333333333334,
+            "chance": 0.25,
+            "delta_acc": -0.5766666666666667,
+            "acc_ci": [
+              0.23657718120805368,
+              0.3213260741455052
+            ],
+            "base_acc_ci": [
+              0.8130993852459016,
+              0.8896413043478261
+            ],
+            "delta_acc_ci": [
+              -0.6258486907250522,
+              -0.522709938366718
+            ],
+            "flip_rate_ci": [
+              0.617732060566162,
+              0.7087813897488819
+            ],
+            "ece_ci": [
+              0.35224133502668825,
+              0.4350965932172789
+            ],
+            "n_paired": 600,
+            "n_attackable": 560,
+            "attack_success_rate": 0.6875,
+            "base_on_target": 0.06666666666666667,
+            "delta_p_target": 0.41394605,
+            "variants": {
+              "typo_center": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.22,
+                "base_acc": 0.8533333333333334,
+                "delta_acc": -0.6333333333333333,
+                "flip_rate": 0.7133333333333334,
+                "n_attackable": 280,
+                "attack_success_rate": 0.7464285714285714,
+                "base_on_target": 0.06666666666666667,
+                "delta_p_target": 0.4588519666666667
+              },
+              "typo_corner": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.3333333333333333,
+                "base_acc": 0.8533333333333334,
+                "delta_acc": -0.52,
+                "flip_rate": 0.6166666666666667,
+                "n_attackable": 280,
+                "attack_success_rate": 0.6285714285714286,
+                "base_on_target": 0.06666666666666667,
+                "delta_p_target": 0.36904013333333335
+              }
+            }
+          }
+        },
+        "cauldron_vsr": {
+          "inject_image": {
+            "n_groups": 160,
+            "n_rows": 320,
+            "n_clusters": 112,
+            "acc": 0.81875,
+            "balanced_acc": 0.819971870604782,
+            "flip_rate": 0.10625,
+            "any_flip_rate": 0.2,
+            "ece": 0.08800409374999993,
+            "base_acc": 0.875,
+            "chance": 0.5,
+            "delta_acc": -0.05625000000000002,
+            "acc_ci": [
+              0.7679568997410285,
+              0.8655076938155444
+            ],
+            "base_acc_ci": [
+              0.8204838709677419,
+              0.9230769230769231
+            ],
+            "delta_acc_ci": [
+              -0.09375,
+              -0.0196015180265654
+            ],
+            "flip_rate_ci": [
+              0.07406785980611484,
+              0.13986363636363638
+            ],
+            "ece_ci": [
+              0.053273457602798904,
+              0.14229743181034477
+            ],
+            "n_paired": 320,
+            "n_attackable": 280,
+            "attack_success_rate": 0.09285714285714286,
+            "base_on_target": 0.125,
+            "delta_p_target": 0.04914171875,
+            "variants": {
+              "typo_center": {
+                "n": 160,
+                "n_paired": 160,
+                "acc": 0.8,
+                "base_acc": 0.875,
+                "delta_acc": -0.075,
+                "flip_rate": 0.125,
+                "n_attackable": 140,
+                "attack_success_rate": 0.11428571428571428,
+                "base_on_target": 0.125,
+                "delta_p_target": 0.06721168749999999
+              },
+              "typo_corner": {
+                "n": 160,
+                "n_paired": 160,
+                "acc": 0.8375,
+                "base_acc": 0.875,
+                "delta_acc": -0.0375,
+                "flip_rate": 0.0875,
+                "n_attackable": 140,
+                "attack_success_rate": 0.07142857142857142,
+                "base_on_target": 0.125,
+                "delta_p_target": 0.03107175
+              }
+            }
+          }
+        },
+        "scienceqa": {
+          "inject_image": {
+            "n_groups": 300,
+            "n_rows": 600,
+            "n_clusters": 300,
+            "acc": 0.3616666666666667,
+            "balanced_acc": 0.2963898816849636,
+            "flip_rate": 0.5433333333333333,
+            "any_flip_rate": 0.6933333333333334,
+            "ece": 0.467193,
+            "base_acc": 0.84,
+            "chance": 0.36627777777777776,
+            "delta_acc": -0.4783333333333333,
+            "acc_ci": [
+              0.31333333333333335,
+              0.4083333333333333
+            ],
+            "base_acc_ci": [
+              0.7966666666666666,
+              0.8833333333333333
+            ],
+            "delta_acc_ci": [
+              -0.5316666666666666,
+              -0.4249583333333333
+            ],
+            "flip_rate_ci": [
+              0.496625,
+              0.59
+            ],
+            "ece_ci": [
+              0.41948924875,
+              0.5213255141666666
+            ],
+            "n_paired": 600,
+            "n_attackable": 536,
+            "attack_success_rate": 0.5783582089552238,
+            "base_on_target": 0.10666666666666667,
+            "delta_p_target": 0.4166189,
+            "variants": {
+              "typo_center": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.29333333333333333,
+                "base_acc": 0.84,
+                "delta_acc": -0.5466666666666666,
+                "flip_rate": 0.6233333333333333,
+                "n_attackable": 268,
+                "attack_success_rate": 0.6604477611940298,
+                "base_on_target": 0.10666666666666667,
+                "delta_p_target": 0.4901936333333333
+              },
+              "typo_corner": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.43,
+                "base_acc": 0.84,
+                "delta_acc": -0.41,
+                "flip_rate": 0.4633333333333333,
+                "n_attackable": 268,
+                "attack_success_rate": 0.4962686567164179,
+                "base_on_target": 0.10666666666666667,
+                "delta_p_target": 0.34304416666666665
+              }
+            }
+          }
+        },
+        "vqav2_yesno": {
+          "inject_image": {
+            "n_groups": 300,
+            "n_rows": 600,
+            "n_clusters": 266,
+            "acc": 0.7266666666666667,
+            "balanced_acc": 0.7286324786324787,
+            "flip_rate": 0.14,
+            "any_flip_rate": 0.22666666666666666,
+            "ece": 0.0753970166666667,
+            "base_acc": 0.7166666666666667,
+            "chance": 0.5,
+            "delta_acc": 0.010000000000000009,
+            "acc_ci": [
+              0.6774109543010752,
+              0.770906529058703
+            ],
+            "base_acc_ci": [
+              0.6644512698164954,
+              0.7681927069470322
+            ],
+            "delta_acc_ci": [
+              -0.023417303172737942,
+              0.04705284552845522
+            ],
+            "flip_rate_ci": [
+              0.110733404099895,
+              0.17242548217416714
+            ],
+            "ece_ci": [
+              0.05112343239795919,
+              0.12213448615771802
+            ],
+            "n_paired": 600,
+            "n_attackable": 430,
+            "attack_success_rate": 0.09069767441860466,
+            "base_on_target": 0.2833333333333333,
+            "delta_p_target": -0.00891593333333333,
+            "variants": {
+              "typo_center": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.7166666666666667,
+                "base_acc": 0.7166666666666667,
+                "delta_acc": 0.0,
+                "flip_rate": 0.17333333333333334,
+                "n_attackable": 215,
+                "attack_success_rate": 0.12093023255813953,
+                "base_on_target": 0.2833333333333333,
+                "delta_p_target": -0.007863866666666672
+              },
+              "typo_corner": {
+                "n": 300,
+                "n_paired": 300,
+                "acc": 0.7366666666666667,
+                "base_acc": 0.7166666666666667,
+                "delta_acc": 0.02,
+                "flip_rate": 0.10666666666666667,
+                "n_attackable": 215,
+                "attack_success_rate": 0.06046511627906977,
+                "base_on_target": 0.2833333333333333,
+                "delta_p_target": -0.009968000000000001
+              }
+            }
+          }
+        }
+      },
+      "macro": {
+        "inject_image": {
+          "n_datasets": 7,
+          "acc": 0.5122581053698074,
+          "base_acc": 0.7535005065856131,
+          "delta_acc": -0.24124240121580545,
+          "flip_rate": 0.3587905268490375,
+          "attack_success_rate": 0.36241111891301825,
+          "delta_p_target": 0.217677099031155
+        }
+      },
+      "n_boot": 1000,
+      "seed": 0
+    },
+    "n_boot": 1000,
+    "seed": 0
+  },
+  "minutes": 14.3,
+  "errors": []
+}
