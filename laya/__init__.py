@@ -12,6 +12,7 @@ from .common import (
     td_lambda_targets,
 )
 from .email import clean_email_body, email_questions, email_state
+from .regions import Region, RegionPipeline
 from .presets import guard_questions, moderation_questions, router_questions, triage_questions
 from .vlm import VLMAgent, VLMDecisionModel, load_vlm
 
@@ -24,6 +25,8 @@ __all__ = [
     "VLMDecisionModel",
     "load_vlm",
     "Calibration",
+    "Region",
+    "RegionPipeline",
     "clean_email_body",
     "email_questions",
     "email_state",

@@ -32,6 +32,7 @@ nav:
       - Run jobs on Modal: how-to/run-on-modal.md
       - Evaluate a checkpoint: how-to/evaluate.md
       - Play games with a checkpoint: how-to/play-games.md
+      - Decide over a detector's boxes: how-to/detector-regions.md
 
   - Concepts:
       - Overview: concepts/overview.md
@@ -56,6 +57,7 @@ nav:
           - Robustness: reference/results/robustness.md
           - Game training: reference/results/game-training.md
           - Typed answers vs generated JSON: reference/results/decision-vs-generation.md
+          - Detector regions and zoom search (exploratory): reference/results/detector-regions-and-zoom.md
           - What didn't work: reference/results/what-didnt-work.md
 markdown_extensions:
   - tables
