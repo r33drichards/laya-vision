@@ -1,0 +1,552 @@
+"""JSPaint as an RL environment: the model sees screenshots of the real app and drives it with the mouse only.
+
+`JSPaint <https://github.com/r33drichards/jspaint>`_ (an MS Paint clone) runs unmodified in headless Chromium through
+Playwright; ``JSPaintServer`` serves a local checkout as static files. Each episode:
+
+* **canvas** is ``canvas_size`` pixels, square and by default 512 x 512: the size laya-vision's released checkpoints
+  feed the vision tower (``image_size`` in ``vlm_agent_config.json``). The model then sees the canvas 1:1; a wide
+  canvas would be squashed to a square first, turning a drawn circle into a tall ellipse. JSPaint reads its canvas
+  size from ``localStorage`` at start-up, so the size is set there before the page loads (JSPaint is unmodified);
+* **reset** clears the canvas to white (``api_for_cypress_tests.reset_for_next_test()``), selects the Brush tool
+  (so strokes are 4 px wide and visible) and puts the cursor at a seeded point on the canvas;
+* **observation** is a screenshot of the canvas with the cursor drawn on it (headless screenshots have no OS cursor):
+  a red ring when the pen is up, a filled red dot when it is down. ``note()`` carries the pen state and step count
+  as text;
+* **actions** are mouse-only. ``env.actions`` is the discrete set the image model chooses from: a ``step_px`` move
+  toward each of ``directions`` compass points (32 by default: ``N``, ``NbE``, ``NNE``, ... every 11.25 degrees, 6 px,
+  fine enough to walk a round circle; 16 and 8 give coarser sets), plus ``PEN_DOWN``, ``PEN_UP`` and
+  ``DONE``. Each maps onto the tool API ``move_mouse(dx, dy)`` / ``mouse_down()`` /
+  ``mouse_up()``, which sends real pointer events to the page. ``TOOLS`` describes that API as JSON-schema tools, so
+  a tool-calling agent can drive the same environment with ``call_tool``;
+* **memory**: ``state()`` is what the model sees each step: two images, the canvas ``frame_gap`` steps ago and
+  now (so the direction of travel is visible), plus the pen state, step count and the last ``history`` actions as
+  text. One screenshot alone does not say which way the stroke was going or what was just tried;
+* **reward** is the task verifier on the true canvas pixels (``canvas_pixels()``, read from the page, so the cursor
+  overlay never counts as ink): ``laya.circle_verifier.score_circle`` for ``task="circle"``. It is paid at the end of
+  the episode, or as the per-step change in score with ``reward="shaped"``. An episode ends on ``DONE`` or after
+  ``max_steps``.
+
+``circle_expert`` (a scripted policy that walks a circle with the same moves), ``random_policy`` and
+``model_policy`` (``VLMAgent.predict`` on the screenshot) are the reference points; ``play_episodes`` runs any of
+them. ``examples/jspaint_circle.py`` is the command-line runner.
+
+Needs ``pip install playwright pillow`` and a Chromium: set ``executable_path`` (or ``LAYA_CHROMIUM``) to use an
+existing binary instead of ``playwright install``.
+"""
+import base64
+import functools
+import http.server
+import io
+import math
+import os
+import random
+import threading
+from collections import Counter, deque
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+COMPASS = ("N", "NbE", "NNE", "NEbN", "NE", "NEbE", "ENE", "EbN", "E", "EbS", "ESE", "SEbE", "SE", "SEbS", "SSE",
+           "SbE", "S", "SbW", "SSW", "SWbS", "SW", "SWbW", "WSW", "WbS", "W", "WbN", "WNW", "NWbW", "NW", "NWbN", "NNW",
+           "NbW")
+PEN_ACTIONS = ("PEN_DOWN", "PEN_UP", "DONE")
+
+
+def compass_bearing(name: str) -> float:
+    """Degrees clockwise from straight up (``N``) of a ``COMPASS`` point."""
+    return COMPASS.index(name) * 11.25
+
+
+def compass_moves(directions: int = 32) -> Dict[str, Tuple[float, float]]:
+    """``{name: (ux, uy)}`` unit vectors (screen y points down) for 8, 16 or 32 compass points, clockwise from ``N``
+    (the 32-point names add the "by" points, e.g. ``NbE`` is one point east of north)."""
+    if directions not in (8, 16, 32):
+        raise ValueError("directions must be 8, 16 or 32")
+    every = 32 // directions
+    return {COMPASS[i]: (round(math.sin(math.radians(11.25 * i)), 6), round(-math.cos(math.radians(11.25 * i)), 6))
+            for i in range(0, 32, every)}
+
+
+MOVES = compass_moves(32)
+ACTIONS = tuple(MOVES) + PEN_ACTIONS
+TASKS = {"circle": "Draw a circle on the canvas.", "square": "Draw a square on the canvas."}
+
+
+def task_text(task: str) -> str:
+    """One sentence naming the task; any Quick, Draw! category works (``laya.quickdraw``)."""
+    return TASKS.get(task) or "Draw %s %s on the canvas." % ("an" if task[:1].lower() in "aeiou" else "a", task)
+
+TOOLS = [
+    {"name": "move_mouse", "description": "Move the mouse by (dx, dy) canvas pixels. If the button is held down, "
+                                          "this draws a brush stroke along the way.",
+     "input_schema": {"type": "object", "properties": {"dx": {"type": "integer"}, "dy": {"type": "integer"}},
+                      "required": ["dx", "dy"]}},
+    {"name": "mouse_down", "description": "Press the left mouse button (start drawing).",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "mouse_up", "description": "Release the left mouse button (stop drawing).",
+     "input_schema": {"type": "object", "properties": {}}},
+    {"name": "screenshot", "description": "Return a screenshot of the canvas with the cursor marked.",
+     "input_schema": {"type": "object", "properties": {}}},
+]
+
+CURSOR = (230, 30, 30)
+# Token budgets for ``load_vlm`` so the full drawing question (35 options with their descriptions, ~1050 tokens) and
+# a two-image state fit without any cutting; the checkpoint defaults (256 / 1024) would truncate every option.
+PAINT_HEAD_MAX_LEN = 1536
+PAINT_MAX_LEN = 2560
+
+
+def default_chromium() -> Optional[str]:
+    """``LAYA_CHROMIUM``, else the Claude Code sandbox's preinstalled Chromium, else ``None`` (Playwright's own)."""
+    path = os.environ.get("LAYA_CHROMIUM") or "/opt/pw-browsers/chromium"
+    return path if os.path.exists(path) else None
+
+
+class JSPaintServer:
+    """Serve a JSPaint checkout on ``127.0.0.1`` (a free port) from a background thread; ``.url`` is the app."""
+
+    def __init__(self, root: str):
+        if not os.path.exists(os.path.join(root, "index.html")):
+            raise FileNotFoundError("no JSPaint checkout at %r (index.html missing)" % root)
+
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=root))
+        self.url = "http://127.0.0.1:%d/" % self.httpd.server_port
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+class JSPaintEnv:
+    """One headless JSPaint page; ``reset`` starts an episode and ``step(action)`` plays one of ``env.actions``."""
+
+    def __init__(self, url: str, task: str = "circle", step_px: int = 6, directions: int = 32, max_steps: int = 260,
+                 reward: str = "terminal", headless: bool = True, executable_path: Optional[str] = None,
+                 viewport: Tuple[int, int] = (900, 720), keep_frames: bool = False, canvas_size: int = 512,
+                 frame_gap: int = 8, history: int = 12, scorer=None):
+        if not task:
+            raise ValueError("task must name what to draw")
+        if reward not in ("terminal", "shaped"):
+            raise ValueError("reward must be 'terminal' or 'shaped'")
+        from playwright.sync_api import sync_playwright
+
+        self.url, self.task, self.step_px, self.max_steps, self.reward_mode = url, task, step_px, max_steps, reward
+        self.keep_frames, self.directions = keep_frames, directions
+        self.frame_gap, self.history = frame_gap, history
+        self.scorer = scorer  # scorer(pixels, task) -> {"score", "passed", ...}; None: the circle verifier
+        self._recent_obs: deque = deque(maxlen=frame_gap + 1)
+        self.moves = compass_moves(directions)
+        self.actions = tuple(self.moves) + PEN_ACTIONS
+        self._pw = sync_playwright().start()
+        self.browser = self._pw.chromium.launch(headless=headless,
+                                                executable_path=executable_path or default_chromium())
+        self.page = self.browser.new_page(viewport={"width": viewport[0], "height": viewport[1]})
+        self.canvas_size = canvas_size
+        self.page.add_init_script("localStorage.setItem('width', '%d'); localStorage.setItem('height', '%d');"
+                                  % (canvas_size, canvas_size))
+        # Only the app itself: no fonts, analytics or update checks from the network.
+        self.page.route("**/*", lambda route: route.continue_() if route.request.url.startswith(url)
+                        else route.abort())
+        self.page.goto(url)
+        self.page.wait_for_function("window.api_for_cypress_tests")
+        self.episode, self.steps, self.pen, self.finished = -1, 0, False, False
+        self.cursor = (0.0, 0.0)
+        self.trajectory: List[Dict] = []
+        self.frames: List = []
+        self._last_score = 0.0
+        self.result: Optional[Dict] = None
+
+    # -- episode ----------------------------------------------------------------------------------------------
+    def reset(self, seed: int = 0):
+        """Blank canvas, Brush tool, cursor at a seeded point in the middle half of the canvas. Returns the
+        observation."""
+        self.page.mouse.up()
+        self.page.evaluate("api_for_cypress_tests.reset_for_next_test()")
+        self.page.click(".tool[title='Brush']")
+        r = self.page.evaluate("(() => { const r = document.querySelector('.main-canvas').getBoundingClientRect();"
+                               " return [r.x, r.y, r.width, r.height]; })()")
+        self.origin, self.width, self.height = (r[0], r[1]), int(r[2]), int(r[3])
+        if (self.width, self.height) != (self.canvas_size, self.canvas_size):
+            raise RuntimeError("JSPaint canvas is %dx%d, expected %dx%d" % (self.width, self.height, self.canvas_size,
+                                                                            self.canvas_size))
+        if r[1] + r[3] > self.page.viewport_size["height"] or r[0] + r[2] > self.page.viewport_size["width"]:
+            raise RuntimeError("the %dx%d canvas does not fit the browser viewport; pass a larger viewport"
+                               % (self.width, self.height))
+        rng = random.Random(seed)
+        self.cursor = (rng.uniform(0.25, 0.75) * self.width, rng.uniform(0.25, 0.75) * self.height)
+        self.page.mouse.move(*self._client(self.cursor))
+        self.episode += 1
+        self.seed, self.steps, self.pen, self.finished = seed, 0, False, False
+        self.trajectory, self.frames, self._last_score, self.result = [], [], 0.0, None
+        obs = self.render()
+        self._recent_obs.clear()
+        self._recent_obs.append(obs)
+        if self.keep_frames:
+            self.frames.append(obs)
+        return obs
+
+    @property
+    def done(self) -> bool:
+        return self.finished or self.steps >= self.max_steps
+
+    def step(self, action: str):
+        """Play one of ``env.actions``. Returns ``(observation, reward, done, info)``; ``info["verifier"]`` holds the
+        full verifier result once the episode is over."""
+        if action not in self.actions:
+            raise ValueError("unknown action %r" % action)
+        if self.done:
+            raise RuntimeError("episode is over; call reset()")
+        if action in self.moves:
+            dx, dy = self.moves[action]
+            self.move_mouse(dx * self.step_px, dy * self.step_px)
+        elif action == "PEN_DOWN":
+            self.mouse_down()
+        elif action == "PEN_UP":
+            self.mouse_up()
+        else:
+            self.finished = True
+        self.steps += 1
+        self.trajectory.append({"step": self.steps, "action": action, "x": round(self.cursor[0], 1),
+                                "y": round(self.cursor[1], 1), "pen": self.pen})
+        info: Dict = {}
+        reward = 0.0
+        if self.done:
+            self.mouse_up()
+            self.result = self.verify()
+            info["verifier"] = self.result
+            reward = self.result["score"] - (self._last_score if self.reward_mode == "shaped" else 0.0)
+        elif self.reward_mode == "shaped":
+            score = self.verify()["score"]
+            reward, self._last_score = score - self._last_score, score
+        obs = self.render()
+        self._recent_obs.append(obs)
+        if self.keep_frames:
+            self.frames.append(obs)
+        return obs, reward, self.done, info
+
+    def verify(self) -> Dict:
+        """The episode's grade: ``scorer`` if one was given (e.g. ``laya.quickdraw.DoodleScorer`` for any
+        category), else the circle verifier."""
+        from laya.circle_verifier import score_circle
+
+        if self.scorer is not None:
+            return self.scorer(self.canvas_pixels(), self.task)
+        return score_circle(self.canvas_pixels())
+
+    # -- mouse-only tool API ------------------------------------------------------------------------------------
+    def _client(self, xy) -> Tuple[float, float]:
+        return self.origin[0] + xy[0], self.origin[1] + xy[1]
+
+    def move_mouse(self, dx: float, dy: float) -> None:
+        """Move by ``(dx, dy)`` canvas pixels, clamped to the canvas; draws while the button is down."""
+        x = min(max(self.cursor[0] + dx, 1.0), self.width - 2.0)
+        y = min(max(self.cursor[1] + dy, 1.0), self.height - 2.0)
+        self.cursor = (x, y)
+        steps = max(2, int(math.hypot(dx, dy) // 4)) if self.pen else 1
+        self.page.mouse.move(*self._client(self.cursor), steps=steps)
+
+    def mouse_down(self) -> None:
+        if not self.pen:
+            self.page.mouse.down()
+            self.pen = True
+
+    def mouse_up(self) -> None:
+        if self.pen:
+            self.page.mouse.up()
+            self.pen = False
+
+    def call_tool(self, name: str, args: Optional[Dict] = None):
+        """Run one of ``TOOLS`` by name (for tool-calling agents); ``screenshot`` returns the observation."""
+        args = args or {}
+        if name == "move_mouse":
+            self.move_mouse(float(args["dx"]), float(args["dy"]))
+        elif name == "mouse_down":
+            self.mouse_down()
+        elif name == "mouse_up":
+            self.mouse_up()
+        elif name == "screenshot":
+            return self.render()
+        else:
+            raise ValueError("unknown tool %r" % name)
+        return None
+
+    # -- observations --------------------------------------------------------------------------------------------
+    def screenshot(self, full_page: bool = False):
+        """A PIL screenshot of the canvas (or the whole app with ``full_page``), without the cursor."""
+        from PIL import Image
+
+        clip = None if full_page else {"x": self.origin[0], "y": self.origin[1], "width": self.width,
+                                       "height": self.height}
+        return Image.open(io.BytesIO(self.page.screenshot(clip=clip))).convert("RGB")
+
+    def render(self, full_page: bool = False):
+        """The observation: a screenshot with the cursor drawn on it (ring = pen up, dot = pen down)."""
+        from PIL import ImageDraw
+
+        img = self.screenshot(full_page)
+        x, y = self._client(self.cursor) if full_page else self.cursor
+        d = ImageDraw.Draw(img)
+        if self.pen:
+            d.ellipse([x - 5, y - 5, x + 5, y + 5], fill=CURSOR)
+        else:
+            d.ellipse([x - 7, y - 7, x + 7, y + 7], outline=CURSOR, width=2)
+            d.line([x - 11, y, x + 11, y], fill=CURSOR)
+            d.line([x, y - 11, x, y + 11], fill=CURSOR)
+        return img
+
+    def state_text(self) -> str:
+        """The text half of ``state()``: which image is which, the pen state, the step count and recent actions.
+        Training records store exactly this string (``laya.paintdata``), so play and training see the same input."""
+        recent = [t["action"] for t in self.trajectory[-self.history:]]
+        return ("The first image is the canvas %d steps ago, the second is now. The pen is %s. Step %d of %d. "
+                "Recent actions, oldest first: %s." % (
+                    len(self._recent_obs) - 1, "down (drawing)" if self.pen else "up (not drawing)",
+                    self.steps + 1, self.max_steps, " ".join(recent) if recent else "none yet"))
+
+    def state(self) -> Dict:
+        """What the model sees this step: ``images`` = [canvas ``frame_gap`` steps ago (the first frame early in an
+        episode), canvas now], both with the cursor drawn on, and ``context`` = ``state_text()``. The keys match a
+        training record's (``images`` + ``state_text``, which the loader passes as ``context``)."""
+        return {"images": [self._recent_obs[0], self._recent_obs[-1]], "context": self.state_text()}
+
+    def note(self) -> str:
+        return "Task: %s The pen is %s. Step %d of %d." % (task_text(self.task), "down (drawing)" if self.pen else
+                                                          "up (not drawing)", self.steps + 1, self.max_steps)
+
+    def canvas_pixels(self) -> np.ndarray:
+        """The true canvas as an ``(h, w, 3)`` uint8 array, read from the page (transparent pixels read as white)."""
+        from PIL import Image
+
+        data = self.page.evaluate("main_canvas.toDataURL('image/png')")
+        img = Image.open(io.BytesIO(base64.b64decode(data.split(",", 1)[1]))).convert("RGBA")
+        white = Image.new("RGBA", img.size, (255, 255, 255, 255))
+        return np.asarray(Image.alpha_composite(white, img).convert("RGB"))
+
+    def visible_pixels(self, hide_cursor_px: int = 5) -> np.ndarray:
+        """The canvas as it looks on screen, as an ``(h, w, 3)`` uint8 array, without our cursor overlay. Unlike
+        ``canvas_pixels`` this includes a stroke still being drawn: JSPaint keeps the stroke on an overlay and only
+        commits it to the canvas when the button is released. JSPaint also previews the brush tip under the mouse
+        pointer, which is not ink, so pixels within ``hide_cursor_px`` of the cursor are painted white."""
+        arr = np.array(self.screenshot())
+        if hide_cursor_px:
+            yy, xx = np.ogrid[: arr.shape[0], : arr.shape[1]]
+            arr[(xx - self.cursor[0]) ** 2 + (yy - self.cursor[1]) ** 2 <= hide_cursor_px ** 2] = 255
+        return arr
+
+    def close(self) -> None:
+        self.browser.close()
+        self._pw.stop()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+
+# -- policies ------------------------------------------------------------------------------------------------------
+def _toward(moves, pos, target) -> str:
+    """The move whose unit direction best matches ``target - pos``."""
+    vx, vy = target[0] - pos[0], target[1] - pos[1]
+    return max(moves, key=lambda a: moves[a][0] * vx + moves[a][1] * vy)
+
+
+def _around(moves, pos, centre, r, step) -> str:
+    """Of the moves that advance clockwise round ``centre`` by at least a third of a step, the one that lands
+    closest to radius ``r`` (ties to the larger advance)."""
+    ang = math.atan2(pos[1] - centre[1], pos[0] - centre[0])
+
+    def outcome(a):
+        x, y = pos[0] + moves[a][0] * step, pos[1] + moves[a][1] * step
+        adv = (math.atan2(y - centre[1], x - centre[0]) - ang + math.pi) % (2 * math.pi) - math.pi
+        return abs(math.hypot(x - centre[0], y - centre[1]) - r), -adv
+
+    forward = [a for a in moves if -outcome(a)[1] >= step / r / 3] or list(moves)
+    return min(forward, key=outcome)
+
+
+def circle_expert(radius_frac: float = 0.3):
+    """A scripted policy: walk (pen up) straight to the nearest point of a circle centred on the canvas, press once
+    within half a step of its radius, trace one
+    full turn plus a little overlap (each step takes the forward move that stays closest to the radius), release,
+    ``DONE``. Deterministic given the environment state."""
+    state: Dict = {}
+
+    def policy(env: JSPaintEnv) -> str:
+        if state.get("episode") != (id(env), env.episode):
+            cx, cy = env.width / 2.0, env.height / 2.0
+            r = radius_frac * min(env.width, env.height)
+            state.clear()
+            state.update(episode=(id(env), env.episode), c=(cx, cy), r=r, phase="approach", turned=0.0, prev=None)
+        cx, cy = state["c"]
+        r, pos, step = state["r"], env.cursor, env.step_px
+        if state["phase"] == "approach":
+            d = math.dist(pos, (cx, cy))
+            if abs(d - r) > step * 0.5:
+                ux, uy = ((pos[0] - cx) / d, (pos[1] - cy) / d) if d > 1e-6 else (1.0, 0.0)
+                return _toward(env.moves, pos, (cx + r * ux, cy + r * uy))
+            state["phase"] = "trace"
+            state["prev"] = math.atan2(pos[1] - cy, pos[0] - cx)
+            return "PEN_DOWN"
+        if state["phase"] == "trace":
+            ang = math.atan2(pos[1] - cy, pos[0] - cx)
+            delta = (ang - state["prev"] + math.pi) % (2 * math.pi) - math.pi
+            state["turned"] += delta
+            state["prev"] = ang
+            if state["turned"] < 2 * math.pi + 0.3:
+                return _around(env.moves, pos, (cx, cy), r, step)
+            state["phase"] = "lift"
+            return "PEN_UP"
+        return "DONE"
+
+    return policy
+
+
+def random_policy(seed: int = 0):
+    rng = random.Random(seed)
+    return lambda env: rng.choice(env.actions)
+
+
+def summarize_judgements(answers: Dict) -> Dict:
+    """The judgement answers from ``predict`` as a compact record: expected progress (0-4) and its distribution,
+    P(on track), and the top ``drawn`` label with its distribution."""
+    out = {}
+    if "progress" in answers:
+        out["progress"] = answers["progress"]["score"]
+        out["progress_probs"] = answers["progress"]["probabilities"]
+    if "on_track" in answers:
+        out["on_track"] = answers["on_track"]["probabilities"]["on track"]
+    if "drawn" in answers:
+        out["drawn"] = answers["drawn"]["choice"]
+        out["drawn_probs"] = answers["drawn"]["probabilities"]
+    return out
+
+
+def judge_canvas(agent, image, task: str = "circle", questions=("drawn", "progress", "on_track")) -> Dict:
+    """Ask the judgement questions about one image (e.g. the clean final canvas, ``Image.fromarray(env.
+    canvas_pixels())``, with no cursor on it). Used at the end of an episode to label what was actually drawn."""
+    from laya.games import paint_judgements
+
+    qs = {k: v for k, v in paint_judgements(task).items() if k in questions}
+    return summarize_judgements(agent.predict({"image": image}, qs, strict=True)["answers"])
+
+
+def grouped_choice(probs: Dict[str, float]) -> str:
+    """Decide in two steps: move or a pen action (``PEN_DOWN`` / ``PEN_UP`` / ``DONE``), with the moves' probability
+    summed; then, to move, the most likely direction. Taking the single most likely of all 35 options instead
+    fails when the next direction is uncertain: the moves' probability spreads over many compass points, so a
+    pen action wins although moving is more likely (a doodle model toggled the pen for whole episodes that way)."""
+    pen = {a: probs[a] for a in PEN_ACTIONS if a in probs}
+    moves = {a: p for a, p in probs.items() if a not in PEN_ACTIONS}
+    if moves and sum(moves.values()) >= max(pen.values(), default=0.0):
+        return max(moves, key=moves.get)
+    return max(pen, key=pen.get)
+
+
+def sampled_choice(probs: Dict[str, float], rng: random.Random) -> str:
+    """Sample instead of taking the most likely: move vs each pen action (the moves' probability summed), then the
+    direction in proportion to its probability. When several plans are plausible (human doodles of one category
+    start and continue in many ways), sampling commits to one where the argmax averages them into indecision."""
+    moves = {a: p for a, p in probs.items() if a not in PEN_ACTIONS}
+    groups = {"move": sum(moves.values()), **{a: probs[a] for a in PEN_ACTIONS if a in probs}}
+    pick = rng.choices(list(groups), weights=list(groups.values()))[0]
+    if pick != "move":
+        return pick
+    return rng.choices(list(moves), weights=list(moves.values()))[0]
+
+
+class ModelPolicy:
+    """The model's most likely action from ``env.state()`` (two frames plus pen state and recent actions), via
+    ``predict``, with the judgement questions (``laya.games.paint_judgements``) asked about the same state in the
+    same call.
+
+    ``decide`` picks the action from the probabilities: ``argmax`` (the most likely of all options, what the
+    circle checkpoints were trained and evaluated with), ``grouped`` (``grouped_choice``: move vs pen action
+    first, then the direction) or ``sample`` (``sampled_choice``, seeded by ``seed``). ``last`` keeps the latest
+    action answer (probabilities over ``env.actions``, and ``act_probability``, the checkpoint's act-vs-escalate
+    gate); ``last_judgement`` the latest judgements. With
+    ``judge_stop``, the policy answers ``DONE`` when the pen is up and the model judges the task complete
+    (P(progress = 4) >= ``stop_at``), so its own judgement decides when to stop.
+
+    Load the agent with ``head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN``: ``predict`` runs with
+    ``strict=True`` and raises rather than silently cut a question."""
+
+    def __init__(self, agent, task: str = "circle", judge: bool = True, judge_stop: bool = False,
+                 stop_at: float = 0.5, decide: str = "argmax", seed: int = 0):
+        if decide not in ("argmax", "grouped", "sample"):
+            raise ValueError("decide must be argmax, grouped or sample")
+        self.agent, self.task, self.judge, self.judge_stop, self.stop_at = agent, task, judge, judge_stop, stop_at
+        self.decide, self.rng = decide, random.Random(seed)
+        self.last, self.last_judgement, self.provenance, self._questions = None, None, None, {}
+
+    def questions(self, env: JSPaintEnv) -> Dict:
+        from laya.games import paint_judgements, paint_question
+
+        key = (self.task, env.directions, env.step_px)
+        if key not in self._questions:
+            q = paint_question(self.task, env.directions, env.step_px)
+            if self.judge:
+                q.update(paint_judgements(self.task))
+            self._questions[key] = q
+        return self._questions[key]
+
+    def __call__(self, env: JSPaintEnv) -> str:
+        out = self.agent.predict(env.state(), self.questions(env), strict=True)
+        answers = out["answers"]
+        self.last, self.provenance = answers["action"], out.get("provenance")
+        self.last_judgement = summarize_judgements(answers) if self.judge else None
+        if (self.judge and self.judge_stop and not env.pen
+                and self.last_judgement["progress_probs"]["4"] >= self.stop_at):
+            return "DONE"
+        probs = self.last["probabilities"]
+        if self.decide == "grouped":
+            return grouped_choice(probs)
+        if self.decide == "sample":
+            return sampled_choice(probs, self.rng)
+        return self.last["choice"]
+
+
+def model_policy(agent, task: str = "circle", **kwargs) -> ModelPolicy:
+    return ModelPolicy(agent, task, **kwargs)
+
+
+def play_episodes(env: JSPaintEnv, policy, episodes: int, seed: int = 0, on_step=None) -> Dict:
+    """Play ``episodes`` seeded episodes (seed ``seed + i``) with ``policy(env) -> action``. ``on_step(env, action)``
+    is called after each step (for logging). Returns per-episode verifier results and the summary."""
+    counts, eps = Counter(), []
+    for i in range(episodes):
+        env.reset(seed + i)
+        while not env.done:
+            a = policy(env)
+            counts[a] += 1
+            env.step(a)
+            if on_step:
+                on_step(env, a)
+        eps.append({"seed": seed + i, "steps": env.steps, "ended": "done" if env.finished else "capped",
+                    **env.result})
+    scores = [e["score"] for e in eps]
+    return {"task": env.task, "episodes": episodes, "seed": seed, "directions": env.directions,
+            "step_px": env.step_px, "max_steps": env.max_steps,
+            "mean_score": float(np.mean(scores)), "median_score": float(np.median(scores)),
+            "pass_rate": float(np.mean([e["passed"] for e in eps])),
+            "mean_steps": float(np.mean([e["steps"] for e in eps])), "actions": dict(counts), "results": eps}
+
+
+__all__ = ["PAINT_HEAD_MAX_LEN", "PAINT_MAX_LEN", "ACTIONS", "MOVES", "COMPASS", "PEN_ACTIONS", "compass_bearing",
+           "compass_moves", "TASKS", "TOOLS",
+           "JSPaintServer",
+           "JSPaintEnv", "circle_expert", "random_policy",
+           "ModelPolicy", "model_policy", "grouped_choice", "sampled_choice", "judge_canvas", "summarize_judgements",
+           "play_episodes",
+           "default_chromium"]

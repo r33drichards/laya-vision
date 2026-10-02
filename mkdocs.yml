@@ -32,6 +32,7 @@ nav:
       - Run jobs on Modal: how-to/run-on-modal.md
       - Evaluate a checkpoint: how-to/evaluate.md
       - Play games with a checkpoint: how-to/play-games.md
+      - Draw in JSPaint with the mouse: how-to/jspaint-env.md
 
   - Concepts:
       - Overview: concepts/overview.md

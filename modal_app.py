@@ -407,6 +407,7 @@ def finetune_long(
     mix_alpha: float = 0.0,
     split_edge: int = 0,
     max_len: int = 0,
+    head_max_len: int = 0,
     max_train: int = 0,
     max_val: int = 0,
     restart: bool = False,
@@ -450,8 +451,10 @@ def finetune_long(
     * ``split_edge`` > 0 turns on the processor's image splitting (``laya.preprocess``): each image is resized to
       that longest edge and cut into 512 tiles plus a global view, up to 17 views at 2048 against 1 without.
       Needs ``preprocess="processor"``. ``max_len`` (0: ``laya.vlm.default_max_len``, 1024 without splitting)
-      is the sequence cap; both are saved in the checkpoint. Neither applies with ``init_from``, which keeps the
-      checkpoint's.
+      is the sequence cap; both are saved in the checkpoint. ``split_edge`` does not apply with ``init_from``,
+      which keeps the checkpoint's. ``max_len`` and ``head_max_len`` (0: the checkpoint's, 256 for a fresh
+      head) do: they override the starting checkpoint's and are saved with the new one, so a task whose question
+      needs more than 256 tokens (the JSPaint drawing question, ~1,050) trains and plays uncut.
     * ``max_train`` / ``max_val`` > 0 keep the first records per dataset (file order) for a quicker run on a
       subset; ``max_train`` does not count the ``n_calib`` holdout.
     * Durability: every ``state_every_min`` minutes (clamped to ``vlm_train.MIN_STATE_MINUTES``, and backed off
@@ -495,11 +498,13 @@ def finetune_long(
           % (max_passes or None, {n: round(epochs * len(train_ex) * probs[n] / sizes[n], 2) for n in names}))
 
     if init_from:
-        agent = VLMAgent(_ckpt_path(init_from), device="cuda")
+        budgets = {k: v for k, v in (("max_len", max_len), ("head_max_len", head_max_len)) if v}
+        agent = VLMAgent(_ckpt_path(init_from), device="cuda", **budgets)
         print("initialised from %s (temperatures %s)" % (init_from, [round(t, 3) for t in agent.temperature]))
     else:
         agent = VLMAgent(backbone=backbone, device="cuda", preprocess=preprocess, option_attention=option_attention,
-                         image_split_edge=split_edge, **({"max_len": max_len} if max_len else {}))
+                         image_split_edge=split_edge, **({"max_len": max_len} if max_len else {}),
+                         **({"head_max_len": head_max_len} if head_max_len else {}))
     print("backbone %s, readout %s, preprocess %s, split_edge %d, max_len %d" % (
         agent.cfg["backbone"], agent.model.readout, agent.prep.backend, agent.prep.split_edge, agent.cfg["max_len"]))
     init_temps = list(agent.temperature)
@@ -515,6 +520,7 @@ def finetune_long(
     log = {"run": run_name, "args": dict(backbone=agent.cfg["backbone"], readout=agent.model.readout, datasets=datasets,
                                          val_datasets=val_datasets or datasets, preprocess=agent.prep.backend,
                                          split_edge=agent.prep.split_edge, max_len=agent.cfg["max_len"],
+                                         head_max_len=agent.cfg.get("head_max_len", 256),
                                          max_train=max_train, max_val=max_val,
                                          option_attention=agent.model.option_attention,
                                          w_ce_schedule=w_ce_schedule, mix=mix_weights, mix_alpha=mix_alpha,
@@ -2540,3 +2546,470 @@ def full_eval(model: str, parts: str = ",".join(FULL_EVAL_PARTS), datasets: str 
             print("saved", path, "on laya-checkpoints")
     if failed:
         raise SystemExit("full_eval: %s produced no results (see the errors above)" % ", ".join(failed))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# JSPaint drawing task (laya/paintenv.py, laya/paintdata.py): labelled data from headless Chromium, and play eval.
+# JSPaint is cloned at a pinned commit; Chromium comes from `playwright install --with-deps`.
+JSPAINT_REPO = "https://github.com/r33drichards/jspaint"
+JSPAINT_COMMIT = "53be67ab8c47cc0d2168899e7481bc04839c4c81"
+paint_image = _with_local_code(
+    base_image.apt_install("git").pip_install("playwright==1.63.0").run_commands(
+        "playwright install --with-deps chromium",
+        "git clone %s /jspaint && cd /jspaint && git checkout %s" % (JSPAINT_REPO, JSPAINT_COMMIT),
+    )
+)
+
+
+def _paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int, model: str, beta: float) -> list:
+    """Episodes for ``specs``: ``[seed, eps, random_prefix, messy]`` for the circle labeller, or with two more items
+    ``[..., category, doodle_index]`` for a Quick, Draw! doodle (``laya.quickdraw.DoodleLabeller``)."""
+    from laya.paintdata import play_labelled_episode
+    from laya.quickdraw import DoodleLabeller, drawn_options, fetch_drawings
+    from laya.paintenv import PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, ModelPolicy
+
+    os.makedirs(os.path.join(tmp_dir, "images"), exist_ok=True)
+
+    def save_frame(name, img):
+        rel = "images/%s.png" % name
+        img.save(os.path.join(tmp_dir, rel), optimize=True)
+        return rel
+
+    driver = None
+    if model:
+        from laya.vlm import VLMAgent
+
+        agent = VLMAgent(_ckpt_path(model), device="cuda", head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN)
+        driver = ModelPolicy(agent, judge=False)
+    doodles = {}
+    for sp in specs:
+        if len(sp) > 4:
+            doodles[sp[4]] = max(doodles.get(sp[4], 0), sp[5] + 1)
+    doodles = {c: fetch_drawings(c, n) for c, n in doodles.items()}
+    shapes = drawn_options()
+    out, summaries = os.path.join(tmp_dir, "%s-%03d.jsonl" % (split, shard)), []
+    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, executable_path=None) as env, \
+            open(out + ".part", "w") as f:
+        for sp in specs:
+            seed, eps, prefix, messy = sp[:4]
+            task, labeller, env.max_steps = "circle", None, 260
+            if len(sp) > 4:
+                task, doodle = sp[4], doodles[sp[4]][sp[5]]
+                labeller, env.max_steps = DoodleLabeller(task, doodle, shapes), 400
+            env.task = task
+            if driver is not None:
+                driver.task = task
+            recs, summ = play_labelled_episode(env, seed, "%s-%d" % (split, seed), save_frame, eps=eps,
+                                               random_prefix=prefix, judge_every=judge_every, messy=messy,
+                                               driver=driver, beta=beta, task=task, labeller=labeller)
+            if len(sp) > 4:
+                summ.update(task=task, doodle=doodle["key_id"])
+            f.writelines(json.dumps(r) + "\n" for r in recs)
+            summaries.append(summ)
+    os.rename(out + ".part", out)
+    data_vol.commit()
+    return summaries
+
+
+@app.function(image=paint_image, cpu=2, memory=4096, timeout=2 * 60 * 60, volumes={"/data": data_vol},
+              retries=modal.Retries(max_retries=2, initial_delay=5.0))
+def paint_shard(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int = 3) -> list:
+    """Play the episodes in ``specs`` (``[seed, eps, random_prefix, messy]``) with the labeller driving and write
+    ``<split>-<shard>.jsonl`` plus the frames under ``tmp_dir``. Returns one summary per episode."""
+    return _paint_shard(tmp_dir, split, shard, specs, judge_every, "", 1.0)
+
+
+@app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=3 * 60 * 60,
+              volumes={"/data": data_vol, "/cache/hf": hf_vol, "/ckpt": ckpt_vol.read_only()},
+              retries=modal.Retries(max_retries=2, initial_delay=5.0))
+def paint_shard_dagger(tmp_dir: str, split: str, shard: int, specs: list, judge_every: int = 3, model: str = "",
+                       beta: float = 0.5) -> list:
+    """``paint_shard`` with a trained checkpoint driving each step with probability ``1 - beta`` (DAgger)."""
+    return _paint_shard(tmp_dir, split, shard, specs, judge_every, model, beta)
+
+
+def _get_retrying(call, tries: int = 8):
+    """``call.get()``, retrying transient client/connection errors (a lost connection while waiting on a long
+    fan-out cancelled a 48-shard prep once); errors raised by the function itself are not retried."""
+    for k in range(tries):
+        try:
+            return call.get()
+        except (modal.exception.ConnectionError, TimeoutError, OSError) as e:
+            if k == tries - 1:
+                raise
+            print("waiting on %s again after %r" % (call.object_id, e), flush=True)
+            time.sleep(10 * (k + 1))
+
+
+@app.function(image=paint_image, cpu=2, memory=8192, timeout=3 * 60 * 60, volumes={"/data": data_vol})
+def prepare_paint(name: str = "paint_circle_v2", n_train: int = 240, n_val: int = 24, shards: int = 32, seed: int = 0,
+                  judge_every: int = 3, model: str = "", beta: float = 0.5, categories: str = "",
+                  per_category: int = 10, val_per_category: int = 2, resume: bool = False):
+    """Write /data/vqa/<name>/{train,val}.jsonl + images/: labelled JSPaint circle episodes. Refuses to replace an
+    existing prepared dataset (they are create-only; ``paint_circle`` was the first, fixed-target labeller).
+
+    Each episode runs a behaviour policy in headless Chromium: the state-based labeller (``laya.paintdata``) with
+    probability ``1 - eps``, else a random action, after ``random_prefix`` purely random steps. ``eps`` is drawn from
+    (0, 0.1, 0.2, 0.3) and ``random_prefix`` from (0, 0, 10, 30, 60), so the data covers clean circles, noisy ones,
+    and recoveries from another start; a third of the episodes with a random start are ``messy`` (the random steps
+    may draw, leaving stray ink). Every step is labelled with the labeller's action for that state (soft
+    over the neighbouring compass points); every ``judge_every`` steps also with progress, on track and what is
+    drawn. Train and val use disjoint seeds. Episodes are split over ``shards`` containers.
+
+    With ``model`` (a run under /ckpt), the checkpoint drives each step with probability ``1 - beta`` (DAgger, on L4
+    containers): the data then covers the states the model itself reaches, labelled with what the labeller would
+    do there. Use a new ``seed`` per round so the episodes differ from the earlier sets'.
+
+    With ``categories`` (comma list of Quick, Draw! categories, or ``train`` for ``laya.quickdraw.TRAIN_CATEGORIES``)
+    the episodes are doodles instead: ``per_category`` train and ``val_per_category`` val episodes per category, each
+    following a different human doodle (train uses the category's doodles 0..per_category-1, val the next ones;
+    the independent classifier trains on doodles from 500 on). ``n_train`` / ``n_val`` are then ignored.
+
+    Shards run as independent calls; waiting on them retries a lost connection (``_get_retrying``). With
+    ``resume`` an earlier attempt's ``.tmp`` directory is kept and shards whose file is already there are skipped
+    (the same arguments give the same shards).
+    """
+    import random
+    import shutil
+    from collections import Counter
+
+    final_dir = "/data/vqa/" + name
+    if os.path.exists(final_dir):
+        raise SystemExit("%s exists; prepared datasets are create-only, pass a new --name" % final_dir)
+    tmp_dir = final_dir + ".tmp"
+    if not resume:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    os.makedirs(os.path.join(tmp_dir, "images"), exist_ok=True)
+    data_vol.commit()
+    rng = random.Random(seed)
+    from laya.quickdraw import TRAIN_CATEGORIES
+
+    cats = [c.strip() for c in categories.split(",") if c.strip()]
+    cats = list(TRAIN_CATEGORIES) if cats == ["train"] else cats
+    jobs = []
+    for split, n, seed0 in (("train", n_train, seed), ("val", n_val, seed + 1_000_000)):
+        specs = []
+        if cats:
+            per, first = (per_category, 0) if split == "train" else (val_per_category, per_category)
+            for ci, c in enumerate(cats):
+                for d in range(per):
+                    prefix = rng.choice((0, 0, 0, 10, 30))
+                    specs.append([seed0 + ci * 1000 + d, rng.choice((0.0, 0.05, 0.1, 0.2)), prefix,
+                                  bool(prefix) and rng.random() < 1 / 3, c, first + d])
+            rng.shuffle(specs)
+        for i in range(0 if cats else n):
+            prefix = rng.choice((0, 0, 10, 30, 60))
+            specs.append([seed0 + i, rng.choice((0.0, 0.1, 0.2, 0.3)), prefix, bool(prefix) and rng.random() < 1 / 3])
+        k = max(1, min(shards, n))
+        for s in range(k):
+            if specs[s::k]:
+                jobs.append((tmp_dir, split, s, specs[s::k], judge_every) + ((model, beta) if model else ()))
+    summaries = {"train": [], "val": []}
+    shard_fn = paint_shard_dagger if model else paint_shard
+    done_files = set(os.listdir(tmp_dir))
+    todo = [j for j in jobs if "%s-%03d.jsonl" % (j[1], j[2]) not in done_files]
+    print("%d shards, %d already written" % (len(jobs), len(jobs) - len(todo)), flush=True)
+    calls = [(job, shard_fn.spawn(*job)) for job in todo]
+    for job, call in calls:
+        res = _get_retrying(call)
+        split = job[1]
+        summaries[split].extend(res)
+    data_vol.reload()
+    meta = {"source": "JSPaint %s@%s in headless Chromium, %s" % (
+                JSPAINT_REPO, JSPAINT_COMMIT, "Quick, Draw! doodles followed by laya/quickdraw.py DoodleLabeller "
+                "(quickdraw_dataset simplified ndjson, CC BY 4.0)" if cats else
+                "state-based circle labeller (laya/paintdata.py)"),
+            "judge_every": judge_every, "driver": model or "labeller", "beta": beta if model else None,
+            "categories": cats or None}
+    for split in ("train", "val"):
+        parts = sorted(fn for fn in os.listdir(tmp_dir) if fn.startswith(split + "-") and fn.endswith(".jsonl"))
+        kinds = Counter()
+        with open(os.path.join(tmp_dir, split + ".jsonl"), "w") as out:
+            for fn in parts:
+                with open(os.path.join(tmp_dir, fn)) as f:
+                    for line in f:
+                        kinds[json.loads(line)["id"].rsplit("-", 1)[1]] += 1
+                        out.write(line)
+                os.remove(os.path.join(tmp_dir, fn))
+        eps = summaries[split]
+        meta[split] = {"episodes": len(eps), "records": dict(kinds),
+                       "labeller_mean_verifier": round(sum(e["verifier"] for e in eps) / max(1, len(eps)), 4),
+                       "mean_steps": round(sum(e["steps"] for e in eps) / max(1, len(eps)), 1)}
+        print(split, meta[split])
+    with open(os.path.join(tmp_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    with open(os.path.join(tmp_dir, "episodes.json"), "w") as f:
+        json.dump(summaries, f)
+    sources = {JSPAINT_REPO: JSPAINT_COMMIT}
+    if cats:
+        from laya.quickdraw import BASE_URL
+
+        sources[BASE_URL % "<category>"] = "first recognised doodles per category, CC BY 4.0"
+    _write_manifest(tmp_dir, sources,
+                    dict(n_train=n_train, n_val=n_val, shards=shards, seed=seed, judge_every=judge_every,
+                         model=model, beta=beta, categories=cats, per_category=per_category,
+                         val_per_category=val_per_category))
+    os.rename(tmp_dir, final_dir)
+    open(os.path.join(final_dir, "_READY"), "w").close()
+    data_vol.commit()
+    return meta
+
+
+@app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=3 * 60 * 60,
+              volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol})
+def paint_eval(model: str = "cauldron-score-2ep-bidir-full/best", episodes: int = 5, seed: int = 900_000,
+               policies: str = "model,labeller,expert,random", judge_stop: bool = False, name: str = "",
+               task: str = "circle"):
+    """Play the JSPaint circle task with a checkpoint (a run under /ckpt, or a Hub id) and the reference policies:
+    ``labeller`` (the state-based labeller the training data comes from), ``expert`` (the older scripted circle
+    centred on the canvas) and ``random``.
+
+    The model runs with the raised token budgets (``paintenv.PAINT_HEAD_MAX_LEN`` / ``PAINT_MAX_LEN``) or the
+    checkpoint's if larger, the full drawing question, two-frame state and the judgement questions each step.
+    Seeds start at 900,000, disjoint from ``prepare_paint``'s. Each episode's final frame and a GIF go to
+    ``<run>/paint_eval/<name>/<policy>-seed<N>.{png,gif}``. The summary (verifier score, pass rate, steps,
+    action mix and per-step judgements) is written to ``<run>/paint_eval/<name or timestamp>.json`` for a run on the
+    volume and returned.
+    """
+    from laya.paintdata import LabellerPolicy
+    from laya.paintenv import (PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, circle_expert,
+                               model_policy, play_episodes, random_policy)
+    from laya.vlm import VLMAgent
+
+    path = _ckpt_path(model)
+    src = path if os.path.exists(os.path.join(path, "vlm_agent_config.json")) else model
+    probe = VLMAgent(src, device="cuda")
+    budgets = dict(head_max_len=max(PAINT_HEAD_MAX_LEN, probe.cfg.get("head_max_len", 256)),
+                   max_len=max(PAINT_MAX_LEN, probe.cfg.get("max_len", 1024)))
+    del probe
+    agent = VLMAgent(src, device="cuda", **budgets)
+    names = [p for p in policies.split(",") if p]
+    out = {"model": model, "task": task, "budgets": budgets, "episodes": episodes, "seed": seed,
+           "judge_stop": judge_stop,
+           "jspaint": JSPAINT_COMMIT, "policies": {}}
+    on_volume = os.path.exists(os.path.join(path, "vlm_agent_config.json"))
+    img_dir = os.path.join(path, "paint_eval", name or time.strftime("%Y%m%d-%H%M%S"))
+    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, task=task, canvas_size=agent.prep.image_size,
+                                                         keep_frames=True) as env:
+        for pname in names:
+            pol = {"model": lambda: model_policy(agent, task, judge_stop=judge_stop), "expert": circle_expert,
+                   "labeller": LabellerPolicy, "random": lambda: random_policy(seed)}[pname]()
+            steps_log = []
+
+            def on_step(env, action, pol=pol, pname=pname, steps_log=steps_log):
+                if env.done and on_volume:  # the final frame and the whole episode, for looking at
+                    os.makedirs(img_dir, exist_ok=True)
+                    stem = os.path.join(img_dir, "%s-seed%d" % (pname, env.seed))
+                    env.frames[-1].save(stem + ".png")
+                    env.frames[0].save(stem + ".gif", save_all=True, append_images=env.frames[1:], duration=80,
+                                       loop=0)
+                if pname == "model":
+                    steps_log.append({"seed": env.seed, "step": env.steps, "action": action,
+                                      "top_p": max(pol.last["probabilities"].values()),
+                                      "act_probability": pol.last["action"]["act_probability"],
+                                      **({"judgement": {k: v for k, v in pol.last_judgement.items()
+                                                        if not k.endswith("_probs")}} if pol.last_judgement else {})})
+
+            t = time.time()
+            res = play_episodes(env, pol, episodes, seed=seed, on_step=on_step)
+            res["seconds"] = round(time.time() - t, 1)
+            if pname == "model":
+                res["provenance"] = pol.provenance
+                res["steps_log"] = steps_log
+            out["policies"][pname] = res
+            print("%-7s mean score %.3f  pass rate %.2f  mean steps %.1f  actions %s  (%.0fs)" % (
+                pname, res["mean_score"], res["pass_rate"], res["mean_steps"],
+                dict(sorted(res["actions"].items(), key=lambda kv: -kv[1])[:6]), res["seconds"]), flush=True)
+    if on_volume:
+        d = os.path.join(path, "paint_eval")
+        os.makedirs(d, exist_ok=True)
+        fn = os.path.join(d, (name or time.strftime("%Y%m%d-%H%M%S")) + ".json")
+        with open(fn, "w") as f:
+            json.dump(out, f, indent=2, default=str)
+        ckpt_vol.commit()
+        print("wrote", fn)
+    return {k: v for k, v in out.items() if k != "policies"} | {
+        "summary": {p: {k: r[k] for k in ("mean_score", "pass_rate", "mean_steps", "actions")}
+                    for p, r in out["policies"].items()}}
+
+
+QUICKDRAW_CLASSIFIER = "/ckpt/quickdraw/classifier.pt"
+
+
+@app.function(image=image, gpu="L4", cpu=8, memory=32768, timeout=2 * 60 * 60, volumes={"/ckpt": ckpt_vol})
+def train_quickdraw_classifier(n_per: int = 3000, epochs: int = 12, seed: int = 0):
+    """Train the independent doodle scorer (``laya.quickdraw.train_classifier``) on the training and held-out
+    categories and write it to ``/ckpt/quickdraw/classifier.pt`` (with ``classifier-metrics.json``). Its doodles
+    are each category's recognised doodles from 500 on, disjoint from the ones the drawing episodes follow. It is
+    what ``doodle_eval`` grades drawings with, so the drawing model is never graded by its own judgement."""
+    import torch
+
+    from laya.quickdraw import HELDOUT_CATEGORIES, TRAIN_CATEGORIES, train_classifier
+
+    cats = list(TRAIN_CATEGORIES + HELDOUT_CATEGORIES)
+    ckpt, metrics = train_classifier(cats, n_per=n_per, epochs=epochs, device="cuda", seed=seed)
+    os.makedirs(os.path.dirname(QUICKDRAW_CLASSIFIER), exist_ok=True)
+    if os.path.exists(QUICKDRAW_CLASSIFIER):
+        raise SystemExit("%s exists; checkpoints are create-only" % QUICKDRAW_CLASSIFIER)
+    torch.save(ckpt, QUICKDRAW_CLASSIFIER)
+    with open(os.path.join(os.path.dirname(QUICKDRAW_CLASSIFIER), "classifier-metrics.json"), "w") as f:
+        json.dump(metrics, f, indent=2)
+    ckpt_vol.commit()
+    print("val accuracy %.3f over %d categories" % (metrics["val_accuracy"], len(cats)))
+    return metrics
+
+
+@app.function(image=paint_image, gpu="L4", cpu=4, memory=16384, timeout=2 * 60 * 60,
+              volumes={"/cache/hf": hf_vol, "/ckpt": ckpt_vol})
+def doodle_eval_task(model: str, task: str, episodes: int, seed: int, policies: str, first_doodle: int,
+                     decide: str = "argmax") -> dict:
+    """``doodle_eval`` for one category: play ``episodes`` with each policy, graded by the classifier."""
+    from laya.paintenv import PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN, JSPaintEnv, JSPaintServer, model_policy, \
+        play_episodes, random_policy
+    from laya.quickdraw import DoodleLabeller, DoodleScorer, drawn_options, fetch_drawings
+
+    scorer = DoodleScorer(QUICKDRAW_CLASSIFIER, device="cuda")
+    out = {"task": task, "policies": {}}
+    agent = None
+    if "model" in policies:
+        from laya.vlm import VLMAgent
+
+        agent = VLMAgent(_ckpt_path(model), device="cuda", head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN)
+    doodles = fetch_drawings(task, first_doodle + episodes)[first_doodle:]
+    with JSPaintServer("/jspaint") as server, JSPaintEnv(server.url, task=task, max_steps=400, scorer=scorer,
+                                                         keep_frames=True) as env:
+        for pname in policies.split(","):
+            if pname == "model":
+                pol = model_policy(agent, task, judge=False, decide=decide, seed=seed)
+            elif pname == "random":
+                pol = random_policy(seed)
+            else:  # the labeller following held-back human doodles: what a faithful copier would score
+                labellers = [DoodleLabeller(task, d, drawn_options()) for d in doodles]
+
+                def pol(env, labellers=labellers):
+                    lab = labellers[env.episode % len(labellers)]
+                    if getattr(lab, "env", None) is not env or lab._episode != env.episode:
+                        lab.reset(env)
+                        lab._episode = env.episode
+                    return lab.action(env, env.visible_pixels())
+            res = play_episodes(env, pol, episodes, seed=seed)
+            out["policies"][pname] = {k: res[k] for k in ("mean_score", "pass_rate", "mean_steps")} | {
+                "episodes": [{k: e.get(k) for k in ("seed", "score", "passed", "top", "steps", "ended")}
+                             for e in res["results"]]}
+            if pname == "model" and _ckpt_exists(model):
+                d = os.path.join(_ckpt_path(model), "doodle_eval_frames")
+                os.makedirs(d, exist_ok=True)
+                env.frames[-1].save(os.path.join(d, "%s-last.png" % task.replace(" ", "_")))
+                ckpt_vol.commit()
+    return out
+
+
+def _ckpt_exists(model: str) -> bool:
+    return os.path.exists(os.path.join(_ckpt_path(model), "vlm_agent_config.json"))
+
+
+@app.function(image=image, timeout=4 * 60 * 60, volumes={"/ckpt": ckpt_vol})
+def doodle_eval(model: str = "paint-circle-v3/best", tasks: str = "train,heldout", episodes: int = 2,
+                seed: int = 910_000, policies: str = "model,labeller,random", first_doodle: int = 200,
+                name: str = "", decide: str = "argmax"):
+    """Ask a checkpoint to draw each Quick, Draw! category in JSPaint and grade it with the independent classifier
+    (``train_quickdraw_classifier``): score = P(requested category), passed = the classifier's top category.
+
+    ``tasks`` takes category names and ``train`` / ``heldout`` (``laya.quickdraw``). Each category runs in its own
+    L4 container. ``labeller`` follows held-back human doodles (from ``first_doodle`` on, unseen by training and by
+    the classifier), which is roughly the ceiling; ``random`` is the floor. Results are summarised for the training
+    and the held-out categories and written to ``<run>/doodle_eval/<name or timestamp>.json``."""
+    from laya.quickdraw import HELDOUT_CATEGORIES, TRAIN_CATEGORIES
+
+    names = []
+    for t in tasks.split(","):
+        t = t.strip()
+        names += list(TRAIN_CATEGORIES) if t == "train" else list(HELDOUT_CATEGORIES) if t == "heldout" else [t]
+    jobs = [(model, t, episodes, seed, policies, first_doodle, decide) for t in names]
+    per_task = {r["task"]: r for r in doodle_eval_task.starmap(jobs)}
+    summary = {}
+    for group, cats in (("train", TRAIN_CATEGORIES), ("heldout", HELDOUT_CATEGORIES)):
+        rows = [per_task[c] for c in cats if c in per_task]
+        if not rows:
+            continue
+        summary[group] = {p: {"mean_score": round(sum(r["policies"][p]["mean_score"] for r in rows) / len(rows), 4),
+                              "pass_rate": round(sum(r["policies"][p]["pass_rate"] for r in rows) / len(rows), 4)}
+                          for p in policies.split(",")}
+    out = {"model": model, "decide": decide, "episodes_per_task": episodes, "seed": seed, "first_doodle": first_doodle,
+           "summary": summary, "tasks": per_task}
+    print(json.dumps(summary, indent=2))
+    for t in names:
+        print("%-12s %s" % (t, "  ".join("%s %.2f/%.0f%%" % (p, per_task[t]["policies"][p]["mean_score"],
+                                                                100 * per_task[t]["policies"][p]["pass_rate"])
+                                          for p in policies.split(","))))
+    if _ckpt_exists(model):
+        ckpt_vol.reload()
+        d = os.path.join(_ckpt_path(model), "doodle_eval")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, (name or time.strftime("%Y%m%d-%H%M%S")) + ".json"), "w") as f:
+            json.dump(out, f, indent=2)
+        ckpt_vol.commit()
+    return summary
+
+
+@app.function(image=image, gpu="L4", cpu=8, memory=32768, timeout=2 * 60 * 60,
+              volumes={"/cache/hf": hf_vol, "/data": data_vol.read_only(), "/ckpt": ckpt_vol})
+def prompt_sensitivity(model: str, dataset: str, tasks: str = "circle,square,triangle,line", n: int = 200,
+                       name: str = "", seed: int = 0):
+    """Does the drawing policy read the task? For ``n`` action records from ``dataset``'s val split (states whose
+    task is one of ``tasks``), ask the action question once per task prompt, same state, and report:
+
+    * ``tv``: mean total-variation distance between the action distributions under two different prompts (0: the
+      prompt changes nothing; 1: disjoint);
+    * ``p_label_true`` / ``p_label_other``: mean probability of the labelled action under the state's own prompt
+      and under the other prompts. A model that uses the task gives the label more probability with the right one.
+    Written to ``<run>/prompt_sensitivity/<name>.json`` for a run on the volume."""
+    import itertools
+    import random
+
+    from PIL import Image
+
+    from laya.games import paint_goal, paint_question
+    from laya.paintenv import PAINT_HEAD_MAX_LEN, PAINT_MAX_LEN
+    from laya.vlm import VLMAgent
+
+    names = [t.strip() for t in tasks.split(",") if t.strip()]
+    root = "/data/vqa/" + dataset
+    recs = []
+    with open(os.path.join(root, "val.jsonl")) as f:
+        for line in f:
+            r = json.loads(line)
+            if not r["id"].endswith("-action"):
+                continue
+            own = [t for t in names if paint_goal(t) in r["question"]["instructions"]]
+            if own:
+                recs.append((r, own[0]))
+    random.Random(seed).shuffle(recs)
+    recs = recs[:n]
+    agent = VLMAgent(_ckpt_path(model), device="cuda", head_max_len=PAINT_HEAD_MAX_LEN, max_len=PAINT_MAX_LEN)
+    qs = {t: paint_question(t)["action"] for t in names}
+    tv, p_true, p_other, rows = [], [], [], []
+    for r, own in recs:
+        state = {"images": [Image.open(os.path.join(root, p)).convert("RGB") for p in r["images"]],
+                 "context": r["state_text"]}
+        out = agent.predict(state, qs, strict=True)["answers"]
+        dist = {t: out[t]["probabilities"] for t in names}
+        label = list(qs[own]["criteria"])[r["label"]]
+        for a, b in itertools.combinations(names, 2):
+            tv.append(0.5 * sum(abs(dist[a][k] - dist[b][k]) for k in dist[a]))
+        p_true.append(dist[own][label])
+        p_other.extend(dist[t][label] for t in names if t != own)
+        rows.append({"id": r["id"], "task": own, "label": label,
+                     "top": {t: max(dist[t], key=dist[t].get) for t in names}})
+    out = {"model": model, "dataset": dataset, "tasks": names, "n": len(recs),
+           "tv": round(sum(tv) / len(tv), 4), "p_label_true": round(sum(p_true) / len(p_true), 4),
+           "p_label_other": round(sum(p_other) / len(p_other), 4),
+           "top_differs": round(sum(len(set(x["top"].values())) > 1 for x in rows) / len(rows), 4)}
+    print(json.dumps(out, indent=2))
+    if _ckpt_exists(model):
+        d = os.path.join(_ckpt_path(model), "prompt_sensitivity")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, (name or dataset) + ".json"), "w") as f:
+            json.dump(dict(out, rows=rows), f, indent=2)
+        ckpt_vol.commit()
+    return out
